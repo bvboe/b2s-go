@@ -9,14 +9,10 @@ jobs:
     name: Integration Tests (kind)
     uses: ./.github/workflows/_integration-test-reusable.yaml
     with:
-      cluster-type: kind
-      image-tag: test
-      namespace: default
+      cluster_type: kind
 
   test-on-minikube:
     name: Integration Tests (minikube)
     uses: ./.github/workflows/_integration-test-reusable.yaml
     with:
-      cluster-type: minikube
-      image-tag: test
-      namespace: default
+      cluster_type: minikube

@@ -3,23 +3,14 @@ name: Integration Test (Reusable)
 on:
   workflow_call:
     inputs:
-      cluster-type:
-        description: 'Type of Kubernetes cluster (kind or minikube)'
+      cluster_type:
+        description: 'Type of Kubernetes cluster to test on'
         required: true
         type: string
-      image-tag:
-        description: 'Docker image tag to test'
-        required: false
-        type: string
-        default: 'test'
-      namespace:
-        description: 'Kubernetes namespace to deploy to'
-        required: false
-        type: string
-        default: 'default'
 
 jobs:
-  integration-test:
+  test:
+    name: Integration Tests (${{ inputs.cluster_type }})
     runs-on: ubuntu-latest
 
     steps:
@@ -39,32 +30,30 @@ jobs:
       with:
         context: ./k8s-scan-server
         push: false
-        tags: k8s-scan-server:${{ inputs.image-tag }}
+        tags: k8s-scan-server:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
         load: true
 
     - name: Set up kind cluster
-      if: inputs.cluster-type == 'kind'
+      if: inputs.cluster_type == 'kind'
       uses: helm/kind-action@v1
       with:
         cluster_name: integration-test
 
+    - name: Load image to kind
+      if: inputs.cluster_type == 'kind'
+      run: kind load docker-image k8s-scan-server:test --name integration-test
+
     - name: Set up minikube cluster
-      if: inputs.cluster-type == 'minikube'
+      if: inputs.cluster_type == 'minikube'
       uses: medyagh/setup-minikube@latest
       with:
         driver: docker
 
-    - name: Load image to kind
-      if: inputs.cluster-type == 'kind'
-      run: |
-        kind load docker-image k8s-scan-server:${{ inputs.image-tag }} --name integration-test
-
     - name: Load image to minikube
-      if: inputs.cluster-type == 'minikube'
-      run: |
-        minikube image load k8s-scan-server:${{ inputs.image-tag }}
+      if: inputs.cluster_type == 'minikube'
+      run: minikube image load k8s-scan-server:test
 
     - name: Set up Helm
       uses: azure/setup-helm@v4
@@ -74,41 +63,38 @@ jobs:
     - name: Deploy with Helm
       run: |
         helm install bjorn2scan ./k8s-scan-server/helm/bjorn2scan \
-          --namespace ${{ inputs.namespace }} \
+          --namespace default \
           --create-namespace \
           --set image.repository=k8s-scan-server \
-          --set image.tag=${{ inputs.image-tag }} \
+          --set image.tag=test \
           --wait \
           --timeout 2m
 
     - name: Verify deployment
       run: |
-        kubectl get pods -n ${{ inputs.namespace }}
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=bjorn2scan -n ${{ inputs.namespace }} --timeout=120s
+        kubectl get pods -n default
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=bjorn2scan -n default --timeout=120s
 
     - name: Port forward service
       run: |
-        kubectl port-forward -n ${{ inputs.namespace }} svc/bjorn2scan 8080:8080 &
+        kubectl port-forward -n default svc/bjorn2scan 8080:8080 &
         sleep 5
-        # Verify port-forward is working
         curl -f http://localhost:8080/health || exit 1
 
     - name: Run integration tests
       working-directory: k8s-scan-server/test/integration
       env:
         SERVICE_URL: http://localhost:8080
-      run: |
-        go test -v -timeout 5m ./...
+      run: go test -v -timeout 5m ./...
 
     - name: Get pod logs on failure
       if: failure()
       run: |
         echo "=== Pod Status ==="
-        kubectl get pods -n ${{ inputs.namespace }}
+        kubectl get pods -n default
         echo "=== Pod Logs ==="
-        kubectl logs -l app.kubernetes.io/name=bjorn2scan -n ${{ inputs.namespace }} --tail=100
+        kubectl logs -l app.kubernetes.io/name=bjorn2scan -n default --tail=100
 
     - name: Cleanup
       if: always()
-      run: |
-        helm uninstall bjorn2scan -n ${{ inputs.namespace }} || true
+      run: helm uninstall bjorn2scan -n default || true
