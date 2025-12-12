@@ -6,13 +6,13 @@ on:
 
 jobs:
   test-on-kind:
-    name: Integration Tests (kind)
+#    name: kind
     uses: ./.github/workflows/integration-test-reusable.yaml
     with:
       cluster_type: kind
 
   test-on-minikube:
-    name: Integration Tests (minikube)
+#    name: minikube
     uses: ./.github/workflows/integration-test-reusable.yaml
     with:
       cluster_type: minikube

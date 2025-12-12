@@ -10,7 +10,7 @@ on:
 
 jobs:
   test:
-    name: Integration Tests (${{ inputs.cluster_type }})
+    name: (${{ inputs.cluster_type }})
     runs-on: ubuntu-latest
 
     steps:
