@@ -151,6 +151,6 @@ jobs:
         grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} -o sarif > grype-results.sarif
 
     - name: Upload Grype results to GitHub Security
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: grype-results.sarif
