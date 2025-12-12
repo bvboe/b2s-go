@@ -172,6 +172,19 @@ make test
 
 Integration tests verify the application works correctly when deployed to Kubernetes.
 
+**Run all tests locally (Recommended):**
+```bash
+# From repository root
+./test_local
+```
+This comprehensive script runs:
+- Unit tests
+- golangci-lint
+- Docker build
+- Helm lint and template
+- Full integration tests on both kind and minikube
+- Automatic cleanup
+
 **Run against already deployed service:**
 ```bash
 # Set SERVICE_URL if not using default (localhost:8080)
