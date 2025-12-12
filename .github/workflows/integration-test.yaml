@@ -1,0 +1,25 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-on-kind:
+    name: Integration Tests (kind)
+    uses: ./.github/workflows/integration-test-reusable.yaml
+    with:
+      cluster-type: kind
+      image-tag: test
+      namespace: default
+
+  test-on-minikube:
+    name: Integration Tests (minikube)
+    uses: ./.github/workflows/integration-test-reusable.yaml
+    with:
+      cluster-type: minikube
+      image-tag: test
+      namespace: default
