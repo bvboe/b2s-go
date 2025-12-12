@@ -50,7 +50,7 @@ jobs:
         flags: unittests
       continue-on-error: true
 
-  lint:
+  go-lint:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,11 +77,12 @@ jobs:
         args: '-fmt sarif -out gosec-results.sarif ./...'
       continue-on-error: true
 
-    - name: Upload gosec results to GitHub Security
-      uses: github/codeql-action/upload-sarif@v4
-      with:
-        sarif_file: gosec-results.sarif
-      continue-on-error: true
+# This steps currently fails - todo
+#    - name: Upload gosec results to GitHub Security
+#      uses: github/codeql-action/upload-sarif@v4
+#      with:
+#        sarif_file: gosec-results.sarif
+#      continue-on-error: true
 
   docker-build:
     runs-on: ubuntu-latest
