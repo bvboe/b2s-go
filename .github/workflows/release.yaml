@@ -126,7 +126,7 @@ jobs:
         output-file: k8s-scan-server/sbom.spdx.json
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           k8s-scan-server/bjorn2scan-*.tgz
