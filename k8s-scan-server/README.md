@@ -230,21 +230,12 @@ Runs on every push to `main` and on pull requests:
 - **Tests on minikube**: Full integration test suite on minikube cluster
 - **Reusable workflow**: Test pipeline defined once, runs on both cluster types
 
-### CodeQL Workflow
-
-Runs on push, pull requests, and weekly schedule:
-
-- **Semantic Analysis**: Deep code analysis using GitHub's CodeQL engine
-- **Security Queries**: Extended security and quality query packs
-- **Automated Scanning**: Detects security vulnerabilities, bugs, and code quality issues
-
 ### Security Scanners
 
 The project uses multiple security scanners to ensure code and container quality:
 
 - **gosec**: Go-specific security scanner that checks for common security issues
 - **Grype**: Container image vulnerability scanner (from Anchore)
-- **CodeQL**: GitHub's semantic code analysis engine
 - **golangci-lint**: Code quality and best practices linting
 
 ### Dependency Management
