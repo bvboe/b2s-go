@@ -16,24 +16,12 @@ permissions:
   security-events: write
 
 jobs:
-  integration-test-kind:
-    name: Integration Tests (kind)
-    uses: ./.github/workflows/integration-test-reusable.yaml
-    with:
-      cluster-type: kind
-      image-tag: release-test
-      namespace: default
-
-  integration-test-minikube:
-    name: Integration Tests (minikube)
-    uses: ./.github/workflows/integration-test-reusable.yaml
-    with:
-      cluster-type: minikube
-      image-tag: release-test
-      namespace: default
+  integration-tests:
+    name: Integration Tests
+    uses: ./.github/workflows/integration-test.yaml
 
   build-and-release:
-    needs: [integration-test-kind, integration-test-minikube]
+    needs: [integration-tests]
     runs-on: ubuntu-latest
     defaults:
       run:

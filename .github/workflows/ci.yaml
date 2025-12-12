@@ -11,6 +11,10 @@ permissions:
   security-events: write
 
 jobs:
+  integration-tests:
+    name: Integration Tests
+    uses: ./.github/workflows/integration-test.yaml
+
   test-and-build:
     runs-on: ubuntu-latest
     defaults:
