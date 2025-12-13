@@ -153,8 +153,8 @@ jobs:
           ```
 
           **Available tags:**
-          - `${{ steps.meta.outputs.version }}` - Specific version
-          - `${{ steps.meta.outputs.version | split('.') | slice(0, 2) | join('.') }}` - Minor version
+          - `${{ steps.meta.outputs.version }}` - Specific version (e.g., 0.1.0)
+          - Semantic version tags (e.g., 0.1, 0)
           - `latest` - Latest release
 
           ## ⎈ Helm Chart (OCI)
@@ -163,17 +163,17 @@ jobs:
 
           ```bash
           helm install bjorn2scan oci://ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan \
-            --version ${GITHUB_REF_NAME#v} \
+            --version ${{ steps.meta.outputs.version }} \
             --namespace bjorn2scan \
             --create-namespace
           ```
 
           **Or install from downloaded chart:**
 
-          Download `bjorn2scan-${GITHUB_REF_NAME#v}.tgz` from the assets below, then:
+          Download `bjorn2scan-${{ steps.meta.outputs.version }}.tgz` from the assets below, then:
 
           ```bash
-          helm install bjorn2scan ./bjorn2scan-${GITHUB_REF_NAME#v}.tgz \
+          helm install bjorn2scan ./bjorn2scan-${{ steps.meta.outputs.version }}.tgz \
             --namespace bjorn2scan \
             --create-namespace
           ```
@@ -187,7 +187,7 @@ jobs:
           cosign verify \
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${GITHUB_REF_NAME#v}
+            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${{ steps.meta.outputs.version }}
           ```
 
           **Verify Helm chart:**
@@ -195,7 +195,7 @@ jobs:
           cosign verify \
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan:${GITHUB_REF_NAME#v}
+            ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan:${{ steps.meta.outputs.version }}
           ```
 
           ## 📦 Release Assets
