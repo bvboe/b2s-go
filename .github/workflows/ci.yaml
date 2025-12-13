@@ -9,132 +9,42 @@ on:
 permissions:
   contents: read
   security-events: write
+  packages: read
 
 jobs:
   integration-tests:
     name: Integration Tests
     uses: ./.github/workflows/integration-test.yaml
 
-  test-and-build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        component: [k8s-scan-server, pod-scanner]
-    defaults:
-      run:
-        working-directory: ./${{ matrix.component }}
+  # k8s-scan-server component
+  k8s-scan-server:
+    name: k8s-scan-server
+    uses: ./.github/workflows/go-component-reusable.yaml
+    with:
+      component-name: k8s-scan-server
+      component-path: k8s-scan-server
+      image-name: k8s-scan-server
+      run-tests: true
+      run-lint: true
+      run-build: true
+      run-docker: true
+      docker-push: false
+      image-tag: test
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25'
-        cache-dependency-path: ${{ matrix.component }}/go.sum
-
-    - name: Install dependencies
-      run: go mod download
-
-    - name: Run tests
-      run: go test -v -race -coverprofile=coverage.out ./...
-
-    - name: Build binary
-      run: go build -v -o ${{ matrix.component }} .
-
-    - name: Run go vet
-      run: go vet ./...
-
-    - name: Upload coverage
-      uses: codecov/codecov-action@v5
-      with:
-        files: ./${{ matrix.component }}/coverage.out
-        flags: unittests-${{ matrix.component }}
-      continue-on-error: true
-
-  go-lint:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        component: [k8s-scan-server, pod-scanner]
-    defaults:
-      run:
-        working-directory: ./${{ matrix.component }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25'
-
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v9
-      with:
-        version: latest
-        working-directory: ${{ matrix.component }}
-
-    - name: Run gosec security scanner
-      uses: securego/gosec@master
-      with:
-        args: '-fmt sarif -out gosec-results.sarif ./...'
-      continue-on-error: true
-
-# This steps currently fails - todo
-#    - name: Upload gosec results to GitHub Security
-#      uses: github/codeql-action/upload-sarif@v4
-#      with:
-#        sarif_file: gosec-results.sarif
-#      continue-on-error: true
-
-  docker-build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        component: [k8s-scan-server, pod-scanner]
-    defaults:
-      run:
-        working-directory: ./${{ matrix.component }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Build Docker image
-      uses: docker/build-push-action@v6
-      with:
-        context: ./${{ matrix.component }}
-        push: false
-        tags: ${{ matrix.component }}:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        load: true
-
-    - name: Install Grype
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-
-    - name: Scan image with Grype
-      run: |
-        grype ${{ matrix.component }}:test --fail-on critical --only-fixed
-      continue-on-error: true
-
-    - name: Generate Grype SARIF report
-      run: |
-        grype ${{ matrix.component }}:test -o sarif > grype-results.sarif
-      continue-on-error: true
-
-    - name: Upload Grype results to GitHub Security
-      uses: github/codeql-action/upload-sarif@v4
-      with:
-        sarif_file: ${{ matrix.component }}/grype-results.sarif
-      continue-on-error: true
+  # pod-scanner component
+  pod-scanner:
+    name: pod-scanner
+    uses: ./.github/workflows/go-component-reusable.yaml
+    with:
+      component-name: pod-scanner
+      component-path: pod-scanner
+      image-name: pod-scanner
+      run-tests: true
+      run-lint: true
+      run-build: true
+      run-docker: true
+      docker-push: false
+      image-tag: test
 
   helm-lint:
     runs-on: ubuntu-latest
