@@ -143,6 +143,67 @@ jobs:
         files: |
           k8s-scan-server/bjorn2scan-*.tgz
           k8s-scan-server/sbom.spdx.json
+        body: |
+          ## 🐳 Container Images
+
+          Multi-architecture images (amd64, arm64) available at GitHub Container Registry:
+
+          ```bash
+          docker pull ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${{ github.ref_name }}
+          ```
+
+          **Available tags:**
+          - `${{ steps.meta.outputs.version }}` - Specific version
+          - `${{ steps.meta.outputs.version | split('.') | slice(0, 2) | join('.') }}` - Minor version
+          - `latest` - Latest release
+
+          ## ⎈ Helm Chart (OCI)
+
+          **Install from OCI registry (Recommended):**
+
+          ```bash
+          helm install bjorn2scan oci://ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan \
+            --version ${GITHUB_REF_NAME#v} \
+            --namespace bjorn2scan \
+            --create-namespace
+          ```
+
+          **Or install from downloaded chart:**
+
+          Download `bjorn2scan-${GITHUB_REF_NAME#v}.tgz` from the assets below, then:
+
+          ```bash
+          helm install bjorn2scan ./bjorn2scan-${GITHUB_REF_NAME#v}.tgz \
+            --namespace bjorn2scan \
+            --create-namespace
+          ```
+
+          ## 🔐 Signature Verification
+
+          All artifacts are signed with [cosign](https://github.com/sigstore/cosign):
+
+          **Verify container image:**
+          ```bash
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${GITHUB_REF_NAME#v}
+          ```
+
+          **Verify Helm chart:**
+          ```bash
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan:${GITHUB_REF_NAME#v}
+          ```
+
+          ## 📦 Release Assets
+
+          - **bjorn2scan-*.tgz** - Helm chart package for offline installation
+          - **sbom.spdx.json** - Software Bill of Materials
+
+          ---
         generate_release_notes: true
         draft: false
         prerelease: false
