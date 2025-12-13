@@ -116,6 +116,20 @@ jobs:
         echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
         helm push bjorn2scan-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ github.repository }}
 
+    - name: Sign Helm chart OCI artifact
+      run: |
+        # Extract version from tag (remove 'v' prefix)
+        VERSION=${GITHUB_REF_NAME#v}
+
+        # Get the chart digest and sign it
+        CHART_REF="${{ env.REGISTRY }}/${{ github.repository }}/bjorn2scan:${VERSION}"
+
+        # Pull the chart to get its digest
+        helm pull "oci://${CHART_REF}" --version "${VERSION}" 2>&1 | tee pull_output.txt || true
+
+        # Sign the chart using the OCI reference
+        cosign sign --yes "${CHART_REF}"
+
     - name: Generate SBOM
       uses: anchore/sbom-action@v0
       with:
@@ -153,4 +167,5 @@ jobs:
     - name: Upload Grype results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4
       with:
-        sarif_file: grype-results.sarif
+        sarif_file: k8s-scan-server/grype-results.sarif
+      continue-on-error: true

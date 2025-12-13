@@ -170,15 +170,28 @@ Future components (planned):
 
 ## Security
 
-### Container Image Signing
+### Artifact Signing
 
-Released container images are signed using sigstore/cosign. Verify image signatures:
+**Container Images:**
+
+Released container images are signed using sigstore/cosign:
 
 ```bash
 cosign verify \
   --certificate-identity-regexp="https://github.com/bvboe/b2s-go/*" \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-  ghcr.io/bvboe/b2s-go/k8s-scan-server:v0.1.0
+  ghcr.io/bvboe/b2s-go/k8s-scan-server:0.1.0
+```
+
+**Helm Charts:**
+
+Released Helm charts (OCI artifacts) are also signed with cosign:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp="https://github.com/bvboe/b2s-go/*" \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  ghcr.io/bvboe/b2s-go/bjorn2scan:0.1.0
 ```
 
 ### Vulnerability Scanning

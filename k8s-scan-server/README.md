@@ -259,12 +259,13 @@ Triggered when pushing a tag (e.g., `v0.1.0`):
 2. Runs full unit test suite
 3. Builds multi-architecture Docker images (AMD64 & ARM64)
 4. Pushes images to GitHub Container Registry (`ghcr.io`)
-5. Signs images with cosign (sigstore)
-6. Generates SBOM (Software Bill of Materials) using Syft
-7. Packages Helm chart with version from tag
-8. Pushes Helm chart as OCI artifact to GitHub Container Registry
-9. Creates GitHub release with chart and SBOM attached
-10. Scans released image with Grype for vulnerabilities
+5. Signs container images with cosign (sigstore)
+6. Packages Helm chart with version from tag
+7. Pushes Helm chart as OCI artifact to GitHub Container Registry
+8. Signs Helm chart with cosign (sigstore)
+9. Generates SBOM (Software Bill of Materials) using Syft
+10. Creates GitHub release with chart and SBOM attached
+11. Scans released images with Grype for vulnerabilities
 
 ### Creating a Release
 
@@ -307,15 +308,28 @@ helm install bjorn2scan ./bjorn2scan-0.1.0.tgz \
 docker pull ghcr.io/<owner>/<repo>/k8s-scan-server:0.1.0
 ```
 
-### Verifying Image Signatures
+### Verifying Signatures
+
+**Container Images:**
 
 Released container images are signed with cosign (sigstore):
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+  --certificate-identity-regexp="https://github.com/bvboe/b2s-go/*" \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-  ghcr.io/${{ github.repository }}/k8s-scan-server:v0.1.0
+  ghcr.io/bvboe/b2s-go/k8s-scan-server:0.1.0
+```
+
+**Helm Charts:**
+
+Released Helm charts (OCI artifacts) are also signed with cosign:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp="https://github.com/bvboe/b2s-go/*" \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  ghcr.io/bvboe/b2s-go/bjorn2scan:0.1.0
 ```
 
 ### GPG Commit Signing
