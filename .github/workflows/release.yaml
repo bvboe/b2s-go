@@ -141,12 +141,14 @@ jobs:
 
     - name: Scan released image with Grype
       run: |
-        grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} --fail-on critical --only-fixed
+        VERSION=${GITHUB_REF_NAME#v}
+        grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION} --fail-on critical --only-fixed
       continue-on-error: true
 
     - name: Generate Grype SARIF report
       run: |
-        grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} -o sarif > grype-results.sarif
+        VERSION=${GITHUB_REF_NAME#v}
+        grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION} -o sarif > grype-results.sarif
 
     - name: Upload Grype results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4
