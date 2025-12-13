@@ -61,12 +61,6 @@ on:
 env:
   REGISTRY: ghcr.io
 
-permissions:
-  contents: read
-  packages: write
-  id-token: write
-  security-events: write
-
 jobs:
   test:
     if: inputs.run-tests
