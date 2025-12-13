@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "bjorn2scan.fullname" . }}-pod-scanner
+  labels:
+    {{- include "bjorn2scan.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pod-scanner
+spec:
+  selector:
+    matchLabels:
+      {{- include "bjorn2scan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: pod-scanner
+  template:
+    metadata:
+      {{- with .Values.podScanner.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "bjorn2scan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pod-scanner
+    spec:
+      {{- with .Values.podScanner.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "bjorn2scan.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podScanner.podSecurityContext | nindent 8 }}
+      containers:
+      - name: pod-scanner
+        securityContext:
+          {{- toYaml .Values.podScanner.securityContext | nindent 12 }}
+        image: "{{ .Values.podScanner.image.repository }}:{{ .Values.podScanner.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.podScanner.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.podScanner.config.port }}
+          protocol: TCP
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: PORT
+          value: {{ .Values.podScanner.config.port | quote }}
+        livenessProbe:
+          {{- toYaml .Values.podScanner.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.podScanner.readinessProbe | nindent 10 }}
+        resources:
+          {{- toYaml .Values.podScanner.resources | nindent 10 }}
+      {{- with .Values.podScanner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podScanner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podScanner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

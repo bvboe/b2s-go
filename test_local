@@ -11,7 +11,8 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_NAMESPACE="test-$(date +%s)"
-IMAGE_NAME="k8s-scan-server"
+SCAN_SERVER_IMAGE="k8s-scan-server"
+POD_SCANNER_IMAGE="pod-scanner"
 IMAGE_TAG="local-test"
 CLEANUP_ON_EXIT=true
 
@@ -76,35 +77,56 @@ run_test() {
     fi
 }
 
-# Change to k8s-scan-server directory
-cd "$SCRIPT_DIR/k8s-scan-server"
-
 print_header "Local Test Suite"
 echo "Test namespace: $TEST_NAMESPACE"
-echo "Image: $IMAGE_NAME:$IMAGE_TAG"
+echo "Scan Server Image: $SCAN_SERVER_IMAGE:$IMAGE_TAG"
+echo "Pod Scanner Image: $POD_SCANNER_IMAGE:$IMAGE_TAG"
 echo ""
 
 # 1. Unit Tests
-print_header "1. Unit Tests"
-run_test "Go unit tests" go test -v ./...
-run_test "Go vet" go vet ./...
+print_header "1. Unit Tests - k8s-scan-server"
+cd "$SCRIPT_DIR/k8s-scan-server"
+run_test "k8s-scan-server: Go unit tests" go test -v ./...
+run_test "k8s-scan-server: Go vet" go vet ./...
+
+print_header "1. Unit Tests - pod-scanner"
+cd "$SCRIPT_DIR/pod-scanner"
+run_test "pod-scanner: Go unit tests" go test -v ./...
+run_test "pod-scanner: Go vet" go vet ./...
 
 # 2. Code Quality
-print_header "2. Code Quality"
+print_header "2. Code Quality - k8s-scan-server"
+cd "$SCRIPT_DIR/k8s-scan-server"
 if command -v golangci-lint &> /dev/null; then
-    run_test "golangci-lint" golangci-lint run ./...
+    run_test "k8s-scan-server: golangci-lint" golangci-lint run ./...
+else
+    print_error "golangci-lint not installed, skipping"
+    ((TESTS_FAILED++))
+fi
+
+print_header "2. Code Quality - pod-scanner"
+cd "$SCRIPT_DIR/pod-scanner"
+if command -v golangci-lint &> /dev/null; then
+    run_test "pod-scanner: golangci-lint" golangci-lint run ./...
 else
     print_error "golangci-lint not installed, skipping"
     ((TESTS_FAILED++))
 fi
 
 # 3. Build
-print_header "3. Build Tests"
-run_test "Go build" go build -v -o k8s-scan-server .
-run_test "Docker build" docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
+print_header "3. Build Tests - k8s-scan-server"
+cd "$SCRIPT_DIR/k8s-scan-server"
+run_test "k8s-scan-server: Go build" go build -v -o k8s-scan-server .
+run_test "k8s-scan-server: Docker build" docker build -t "$SCAN_SERVER_IMAGE:$IMAGE_TAG" .
+
+print_header "3. Build Tests - pod-scanner"
+cd "$SCRIPT_DIR/pod-scanner"
+run_test "pod-scanner: Go build" go build -v -o pod-scanner .
+run_test "pod-scanner: Docker build" docker build -t "$POD_SCANNER_IMAGE:$IMAGE_TAG" .
 
 # 4. Helm Tests
 print_header "4. Helm Tests"
+cd "$SCRIPT_DIR"
 run_test "Helm lint" helm lint ./helm/bjorn2scan
 run_test "Helm template" helm template test ./helm/bjorn2scan --namespace "$TEST_NAMESPACE" > /dev/null
 
@@ -115,17 +137,20 @@ print_info "Creating kind cluster..."
 if kind create cluster --name local-test --wait 5m; then
     print_success "kind cluster created"
 
-    print_info "Loading image to kind..."
-    kind load docker-image "$IMAGE_NAME:$IMAGE_TAG" --name local-test
+    print_info "Loading images to kind..."
+    kind load docker-image "$SCAN_SERVER_IMAGE:$IMAGE_TAG" --name local-test
+    kind load docker-image "$POD_SCANNER_IMAGE:$IMAGE_TAG" --name local-test
 
     print_info "Creating namespace..."
     kubectl create namespace "$TEST_NAMESPACE"
 
     print_info "Installing Helm chart..."
-    if helm install bjorn2scan ./helm/bjorn2scan \
+    if helm install bjorn2scan "$SCRIPT_DIR/helm/bjorn2scan" \
         --namespace "$TEST_NAMESPACE" \
-        --set image.repository="$IMAGE_NAME" \
-        --set image.tag="$IMAGE_TAG" \
+        --set scanServer.image.repository="$SCAN_SERVER_IMAGE" \
+        --set scanServer.image.tag="$IMAGE_TAG" \
+        --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
+        --set podScanner.image.tag="$IMAGE_TAG" \
         --wait --timeout 2m; then
 
         print_success "Helm chart installed on kind"
@@ -139,13 +164,13 @@ if kind create cluster --name local-test --wait 5m; then
             print_success "Pod ready on kind"
 
             # Run integration tests
-            print_info "Setting up port-forward..."
-            kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:8080 > /dev/null 2>&1 &
+            print_info "Setting up port-forward to scan-server..."
+            kubectl port-forward -n "$TEST_NAMESPACE" svc/scan-server 8080:8080 > /dev/null 2>&1 &
             PF_PID=$!
             sleep 3
 
             print_info "Running integration tests..."
-            cd test/integration
+            cd "$SCRIPT_DIR/k8s-scan-server/test/integration"
             if SERVICE_URL=http://localhost:8080 go test -v -timeout 5m ./...; then
                 print_success "Integration tests passed on kind"
                 ((TESTS_PASSED++))
@@ -153,7 +178,7 @@ if kind create cluster --name local-test --wait 5m; then
                 print_error "Integration tests failed on kind"
                 ((TESTS_FAILED++))
             fi
-            cd ../..
+            cd "$SCRIPT_DIR"
 
             # Cleanup port-forward
             kill $PF_PID 2>/dev/null || true
@@ -185,17 +210,20 @@ print_info "Starting minikube (if not running)..."
 if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
     print_success "minikube running"
 
-    print_info "Loading image to minikube..."
-    minikube image load "$IMAGE_NAME:$IMAGE_TAG"
+    print_info "Loading images to minikube..."
+    minikube image load "$SCAN_SERVER_IMAGE:$IMAGE_TAG"
+    minikube image load "$POD_SCANNER_IMAGE:$IMAGE_TAG"
 
     print_info "Creating namespace..."
     kubectl create namespace "$TEST_NAMESPACE" || true
 
     print_info "Installing Helm chart..."
-    if helm install bjorn2scan ./helm/bjorn2scan \
+    if helm install bjorn2scan "$SCRIPT_DIR/helm/bjorn2scan" \
         --namespace "$TEST_NAMESPACE" \
-        --set image.repository="$IMAGE_NAME" \
-        --set image.tag="$IMAGE_TAG" \
+        --set scanServer.image.repository="$SCAN_SERVER_IMAGE" \
+        --set scanServer.image.tag="$IMAGE_TAG" \
+        --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
+        --set podScanner.image.tag="$IMAGE_TAG" \
         --wait --timeout 2m; then
 
         print_success "Helm chart installed on minikube"
@@ -209,13 +237,13 @@ if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
             print_success "Pod ready on minikube"
 
             # Run integration tests
-            print_info "Setting up port-forward..."
-            kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:8080 > /dev/null 2>&1 &
+            print_info "Setting up port-forward to scan-server..."
+            kubectl port-forward -n "$TEST_NAMESPACE" svc/scan-server 8080:8080 > /dev/null 2>&1 &
             PF_PID=$!
             sleep 3
 
             print_info "Running integration tests..."
-            cd test/integration
+            cd "$SCRIPT_DIR/k8s-scan-server/test/integration"
             if SERVICE_URL=http://localhost:8080 go test -v -timeout 5m ./...; then
                 print_success "Integration tests passed on minikube"
                 ((TESTS_PASSED++))
@@ -223,7 +251,7 @@ if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
                 print_error "Integration tests failed on minikube"
                 ((TESTS_FAILED++))
             fi
-            cd ../..
+            cd "$SCRIPT_DIR"
 
             # Cleanup port-forward
             kill $PF_PID 2>/dev/null || true

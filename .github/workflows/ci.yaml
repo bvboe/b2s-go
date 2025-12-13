@@ -17,9 +17,12 @@ jobs:
 
   test-and-build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [k8s-scan-server, pod-scanner]
     defaults:
       run:
-        working-directory: ./k8s-scan-server
+        working-directory: ./${{ matrix.component }}
 
     steps:
     - name: Checkout code
@@ -29,7 +32,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.25'
-        cache-dependency-path: k8s-scan-server/go.sum
+        cache-dependency-path: ${{ matrix.component }}/go.sum
 
     - name: Install dependencies
       run: go mod download
@@ -38,7 +41,7 @@ jobs:
       run: go test -v -race -coverprofile=coverage.out ./...
 
     - name: Build binary
-      run: go build -v -o k8s-scan-server .
+      run: go build -v -o ${{ matrix.component }} .
 
     - name: Run go vet
       run: go vet ./...
@@ -46,15 +49,18 @@ jobs:
     - name: Upload coverage
       uses: codecov/codecov-action@v5
       with:
-        files: ./k8s-scan-server/coverage.out
-        flags: unittests
+        files: ./${{ matrix.component }}/coverage.out
+        flags: unittests-${{ matrix.component }}
       continue-on-error: true
 
   go-lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [k8s-scan-server, pod-scanner]
     defaults:
       run:
-        working-directory: ./k8s-scan-server
+        working-directory: ./${{ matrix.component }}
 
     steps:
     - name: Checkout code
@@ -69,7 +75,7 @@ jobs:
       uses: golangci/golangci-lint-action@v9
       with:
         version: latest
-        working-directory: k8s-scan-server
+        working-directory: ${{ matrix.component }}
 
     - name: Run gosec security scanner
       uses: securego/gosec@master
@@ -86,9 +92,12 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [k8s-scan-server, pod-scanner]
     defaults:
       run:
-        working-directory: ./k8s-scan-server
+        working-directory: ./${{ matrix.component }}
 
     steps:
     - name: Checkout code
@@ -100,9 +109,9 @@ jobs:
     - name: Build Docker image
       uses: docker/build-push-action@v6
       with:
-        context: ./k8s-scan-server
+        context: ./${{ matrix.component }}
         push: false
-        tags: k8s-scan-server:test
+        tags: ${{ matrix.component }}:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
         load: true
@@ -113,18 +122,18 @@ jobs:
 
     - name: Scan image with Grype
       run: |
-        grype k8s-scan-server:test --fail-on critical --only-fixed
+        grype ${{ matrix.component }}:test --fail-on critical --only-fixed
       continue-on-error: true
 
     - name: Generate Grype SARIF report
       run: |
-        grype k8s-scan-server:test -o sarif > grype-results.sarif
+        grype ${{ matrix.component }}:test -o sarif > grype-results.sarif
       continue-on-error: true
 
     - name: Upload Grype results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4
       with:
-        sarif_file: k8s-scan-server/grype-results.sarif
+        sarif_file: ${{ matrix.component }}/grype-results.sarif
       continue-on-error: true
 
   helm-lint:
@@ -140,7 +149,7 @@ jobs:
         version: 'latest'
 
     - name: Lint Helm chart
-      run: helm lint k8s-scan-server/helm/bjorn2scan
+      run: helm lint helm/bjorn2scan
 
     - name: Template Helm chart
-      run: helm template test k8s-scan-server/helm/bjorn2scan --debug
+      run: helm template test helm/bjorn2scan --debug

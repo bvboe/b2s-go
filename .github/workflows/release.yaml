@@ -7,7 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/k8s-scan-server
 
 permissions:
   contents: write
@@ -20,12 +19,19 @@ jobs:
     name: Integration Tests
     uses: ./.github/workflows/integration-test.yaml
 
-  build-and-release:
+  build-and-push-images:
     needs: [integration-tests]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component:
+          - name: k8s-scan-server
+            path: k8s-scan-server
+          - name: pod-scanner
+            path: pod-scanner
     defaults:
       run:
-        working-directory: ./k8s-scan-server
+        working-directory: ./${{ matrix.component.path }}
 
     steps:
     - name: Checkout code
@@ -37,7 +43,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.25'
-        cache-dependency-path: k8s-scan-server/go.sum
+        cache-dependency-path: ${{ matrix.component.path }}/go.sum
 
     - name: Run tests
       run: go test -v ./...
@@ -59,7 +65,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}
         tags: |
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
@@ -70,7 +76,7 @@ jobs:
       id: build-and-push
       uses: docker/build-push-action@v6
       with:
-        context: ./k8s-scan-server
+        context: ./${{ matrix.component.path }}
         platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
@@ -89,6 +95,50 @@ jobs:
         for tag in ${TAGS}; do
           cosign sign --yes "${tag}@${DIGEST}"
         done
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        path: ./${{ matrix.component.path }}
+        artifact-name: sbom-${{ matrix.component.name }}.spdx.json
+        output-file: ${{ matrix.component.path }}/sbom.spdx.json
+
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ matrix.component.name }}
+        path: ${{ matrix.component.path }}/sbom.spdx.json
+
+    - name: Install Grype
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+    - name: Scan released image with Grype
+      run: |
+        VERSION=${GITHUB_REF_NAME#v}
+        grype ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}:${VERSION} --fail-on critical --only-fixed
+      continue-on-error: true
+
+    - name: Generate Grype SARIF report
+      run: |
+        VERSION=${GITHUB_REF_NAME#v}
+        grype ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}:${VERSION} -o sarif > grype-results.sarif
+
+    - name: Upload Grype results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ matrix.component.path }}/grype-results.sarif
+      continue-on-error: true
+
+  helm-release:
+    needs: [build-and-push-images]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Helm
       uses: azure/setup-helm@v4
@@ -116,6 +166,9 @@ jobs:
         echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
         helm push bjorn2scan-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ github.repository }}
 
+    - name: Install cosign
+      uses: sigstore/cosign-installer@v3
+
     - name: Sign Helm chart OCI artifact
       run: |
         # Extract version from tag (remove 'v' prefix)
@@ -130,32 +183,36 @@ jobs:
         # Sign the chart using the OCI reference
         cosign sign --yes "${CHART_REF}"
 
-    - name: Generate SBOM
-      uses: anchore/sbom-action@v0
+    - name: Download SBOM artifacts
+      uses: actions/download-artifact@v4
       with:
-        path: ./k8s-scan-server
-        artifact-name: sbom.spdx.json
-        output-file: k8s-scan-server/sbom.spdx.json
+        path: sboms
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          k8s-scan-server/bjorn2scan-*.tgz
-          k8s-scan-server/sbom.spdx.json
+          bjorn2scan-*.tgz
+          sboms/**/*.spdx.json
         body: |
           ## 🐳 Container Images
 
           Multi-architecture images (amd64, arm64) available at GitHub Container Registry:
 
+          ### Scan Server
           ```bash
           docker pull ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${{ github.ref_name }}
           ```
 
-          **Available tags:**
-          - `${{ steps.meta.outputs.version }}` - Specific version (e.g., 0.1.0)
-          - Semantic version tags (e.g., 0.1, 0)
-          - `latest` - Latest release
+          ### Pod Scanner
+          ```bash
+          docker pull ghcr.io/${{ github.repository_owner }}/b2s-go/pod-scanner:${{ github.ref_name }}
+          ```
+
+          **Available tags for both images:**
+          - Version tag (e.g., `${{ github.ref_name }}`)
+          - Semantic version tags (e.g., major.minor, major)
+          - Commit SHA
 
           ## ⎈ Helm Chart (OCI)
 
@@ -163,18 +220,18 @@ jobs:
 
           ```bash
           helm install bjorn2scan oci://ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan \
-            --version ${{ steps.meta.outputs.version }} \
-            --namespace bjorn2scan \
+            --version ${GITHUB_REF_NAME#v} \
+            --namespace b2sv2 \
             --create-namespace
           ```
 
           **Or install from downloaded chart:**
 
-          Download `bjorn2scan-${{ steps.meta.outputs.version }}.tgz` from the assets below, then:
+          Download `bjorn2scan-*.tgz` from the assets below, then:
 
           ```bash
-          helm install bjorn2scan ./bjorn2scan-${{ steps.meta.outputs.version }}.tgz \
-            --namespace bjorn2scan \
+          helm install bjorn2scan ./bjorn2scan-*.tgz \
+            --namespace b2sv2 \
             --create-namespace
           ```
 
@@ -182,12 +239,20 @@ jobs:
 
           All artifacts are signed with [cosign](https://github.com/sigstore/cosign):
 
-          **Verify container image:**
+          **Verify scan-server image:**
           ```bash
           cosign verify \
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${GITHUB_REF_NAME#v}
+          ```
+
+          **Verify pod-scanner image:**
+          ```bash
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ghcr.io/${{ github.repository_owner }}/b2s-go/pod-scanner:${GITHUB_REF_NAME#v}
           ```
 
           **Verify Helm chart:**
@@ -195,13 +260,14 @@ jobs:
           cosign verify \
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan:${GITHUB_REF_NAME#v}
           ```
 
           ## 📦 Release Assets
 
           - **bjorn2scan-*.tgz** - Helm chart package for offline installation
-          - **sbom.spdx.json** - Software Bill of Materials
+          - **sbom-k8s-scan-server.spdx.json** - Software Bill of Materials for scan server
+          - **sbom-pod-scanner.spdx.json** - Software Bill of Materials for pod scanner
 
           ---
         generate_release_notes: true
@@ -209,24 +275,3 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Install Grype
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-
-    - name: Scan released image with Grype
-      run: |
-        VERSION=${GITHUB_REF_NAME#v}
-        grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION} --fail-on critical --only-fixed
-      continue-on-error: true
-
-    - name: Generate Grype SARIF report
-      run: |
-        VERSION=${GITHUB_REF_NAME#v}
-        grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION} -o sarif > grype-results.sarif
-
-    - name: Upload Grype results to GitHub Security
-      uses: github/codeql-action/upload-sarif@v4
-      with:
-        sarif_file: k8s-scan-server/grype-results.sarif
-      continue-on-error: true
