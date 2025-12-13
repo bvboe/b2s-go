@@ -33,3 +33,6 @@ Thumbs.db
 *.tmp
 *.log
 /tmp/
+
+# Local files
+dev-local/

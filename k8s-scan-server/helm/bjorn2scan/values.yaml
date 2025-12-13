@@ -5,9 +5,10 @@
 replicaCount: 1
 
 image:
-  repository: k8s-scan-server
+  repository: ghcr.io/bvboe/b2s-go/k8s-scan-server
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
