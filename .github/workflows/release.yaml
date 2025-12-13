@@ -107,6 +107,15 @@ jobs:
         # Package the chart
         helm package helm/bjorn2scan --destination .
 
+    - name: Push Helm chart as OCI artifact
+      run: |
+        # Extract version from tag (remove 'v' prefix)
+        VERSION=${GITHUB_REF_NAME#v}
+
+        # Push chart to GitHub Container Registry as OCI artifact
+        echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
+        helm push bjorn2scan-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ github.repository }}
+
     - name: Generate SBOM
       uses: anchore/sbom-action@v0
       with:

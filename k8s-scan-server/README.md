@@ -262,8 +262,9 @@ Triggered when pushing a tag (e.g., `v0.1.0`):
 5. Signs images with cosign (sigstore)
 6. Generates SBOM (Software Bill of Materials) using Syft
 7. Packages Helm chart with version from tag
-8. Creates GitHub release with chart and SBOM attached
-9. Scans released image with Grype for vulnerabilities
+8. Pushes Helm chart as OCI artifact to GitHub Container Registry
+9. Creates GitHub release with chart and SBOM attached
+10. Scans released image with Grype for vulnerabilities
 
 ### Creating a Release
 
@@ -279,16 +280,31 @@ git push origin v0.1.0
 # - Attach the Helm chart
 ```
 
-### Using Released Images
+### Using Released Artifacts
+
+**Install from OCI registry (Recommended):**
 
 ```bash
-# Pull the released image
-docker pull ghcr.io/${{ github.repository }}/k8s-scan-server:v0.1.0
+# Install Helm chart directly from OCI registry
+helm install bjorn2scan oci://ghcr.io/bvboe/b2s-go/bjorn2scan \
+  --version 0.1.0 \
+  --namespace bjorn2scan \
+  --create-namespace
+```
 
-# Or use in Helm
-helm install bjorn2scan ./helm/bjorn2scan \
-  --set image.repository=ghcr.io/${{ github.repository }}/k8s-scan-server \
-  --set image.tag=v0.1.0
+**Install from downloaded chart:**
+
+```bash
+# Download bjorn2scan-0.1.0.tgz from GitHub release page
+helm install bjorn2scan ./bjorn2scan-0.1.0.tgz \
+  --namespace bjorn2scan \
+  --create-namespace
+```
+
+**Pull container image:**
+
+```bash
+docker pull ghcr.io/<owner>/<repo>/k8s-scan-server:0.1.0
 ```
 
 ### Verifying Image Signatures

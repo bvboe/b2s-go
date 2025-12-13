@@ -39,16 +39,26 @@ helm install bjorn2scan ./k8s-scan-server/helm/bjorn2scan \
   --create-namespace
 ```
 
-### Using Released Images
+### Using Released Helm Chart (Recommended)
 
-When a release is available, you can install using the pre-built container images:
+When a release is available, you can install directly from the OCI registry:
 
 ```bash
-helm install bjorn2scan ./k8s-scan-server/helm/bjorn2scan \
+helm install bjorn2scan oci://ghcr.io/bvboe/b2s-go/bjorn2scan \
+  --version 0.1.0 \
   --namespace bjorn2scan \
-  --create-namespace \
-  --set image.repository=ghcr.io/bvboe/b2s-go/k8s-scan-server \
-  --set image.tag=v0.1.0
+  --create-namespace
+```
+
+### Using Downloaded Helm Chart
+
+Alternatively, download the chart from the GitHub release and install locally:
+
+```bash
+# Download bjorn2scan-0.1.0.tgz from GitHub releases
+helm install bjorn2scan ./bjorn2scan-0.1.0.tgz \
+  --namespace bjorn2scan \
+  --create-namespace
 ```
 
 ### Verify Installation
