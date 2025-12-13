@@ -5,7 +5,10 @@ metadata:
   labels:
     {{- include "bjorn2scan.labels" . | nindent 4 }}
 spec:
+  # Enforce singleton behavior - only one replica allowed
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "bjorn2scan.selectorLabels" . | nindent 6 }}

@@ -2,6 +2,7 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# IMPORTANT: This service must run as a singleton (single replica only)
 replicaCount: 1
 
 image:
@@ -12,7 +13,8 @@ image:
 
 imagePullSecrets: []
 nameOverride: ""
-fullnameOverride: ""
+# Override to set deployment name to "scan-server"
+fullnameOverride: "scan-server"
 
 serviceAccount:
   # Specifies whether a service account should be created
