@@ -17,6 +17,7 @@ bjorn2scan v2 provides:
   - kind, minikube, or any production cluster
 - Helm 3.x
 - kubectl configured to access your cluster
+- Go 1.25+ (for development)
 
 ## Installation
 

@@ -11,7 +11,7 @@ The k8s-scan-server is designed to run inside a Kubernetes cluster and will even
 
 ## Prerequisites
 
-- Go 1.21 or later
+- Go 1.25 or later
 - Docker
 - kubectl
 - Helm 3.x (for Helm deployments)
