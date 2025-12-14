@@ -1,0 +1,31 @@
+[Unit]
+Description=Bjorn2Scan Agent - Host-level security scanning agent
+Documentation=https://github.com/bvboe/b2s-go
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bjorn2scan
+Group=bjorn2scan
+ExecStart=/usr/local/bin/bjorn2scan-agent
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bjorn2scan
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bjorn2scan-agent
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

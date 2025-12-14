@@ -46,6 +46,18 @@ jobs:
       docker-push: false
       image-tag: test
 
+  # bjorn2scan-agent component (binary build)
+  bjorn2scan-agent:
+    name: bjorn2scan-agent
+    uses: ./.github/workflows/go-binary-reusable.yaml
+    with:
+      component-name: bjorn2scan-agent
+      component-path: bjorn2scan-agent
+      run-tests: true
+      run-lint: true
+      platforms: linux/amd64,linux/arm64
+      attach-to-release: false
+
   helm-lint:
     runs-on: ubuntu-latest
 

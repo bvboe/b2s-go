@@ -1,0 +1,161 @@
+name: Go Binary Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      component-name:
+        description: 'Name of the Go component (directory name)'
+        required: true
+        type: string
+      component-path:
+        description: 'Path to the component directory'
+        required: true
+        type: string
+      run-tests:
+        description: 'Whether to run tests'
+        required: false
+        type: boolean
+        default: true
+      run-lint:
+        description: 'Whether to run linting'
+        required: false
+        type: boolean
+        default: true
+      platforms:
+        description: 'Comma-separated list of platforms (e.g., linux/amd64,linux/arm64)'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      attach-to-release:
+        description: 'Whether to attach binaries to GitHub release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    if: inputs.run-tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./${{ inputs.component-path }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache-dependency-path: ${{ inputs.component-path }}/go.sum
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test -v -race -coverprofile=coverage.out ./...
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v5
+      with:
+        files: ./${{ inputs.component-path }}/coverage.out
+        flags: unittests-${{ inputs.component-name }}
+      continue-on-error: true
+
+  lint:
+    if: inputs.run-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./${{ inputs.component-path }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: latest
+        working-directory: ${{ inputs.component-path }}
+
+    - name: Run gosec security scanner
+      uses: securego/gosec@master
+      with:
+        args: '-fmt sarif -out gosec-results.sarif ./...'
+      continue-on-error: true
+
+  build-binaries:
+    needs: [test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./${{ inputs.component-path }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Need full history for git describe
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.ref_type }}" = "tag" ]; then
+          VERSION=${GITHUB_REF_NAME#v}
+        else
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Build binaries
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        mkdir -p dist
+
+        # Parse platforms
+        IFS=',' read -ra PLATFORMS <<< "${{ inputs.platforms }}"
+        for platform in "${PLATFORMS[@]}"; do
+          GOOS=${platform%/*}
+          GOARCH=${platform#*/}
+          output="dist/${{ inputs.component-name }}-${GOOS}-${GOARCH}"
+
+          echo "Building for ${GOOS}/${GOARCH}..."
+          GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0 go build \
+            -ldflags "-X main.version=${VERSION} -w -s" \
+            -o ${output} .
+
+          # Create tarballs for Linux binaries (for install script)
+          if [ "${GOOS}" = "linux" ]; then
+            tar -czf dist/${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz -C dist ${{ inputs.component-name }}-${GOOS}-${GOARCH}
+            sha256sum dist/${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz > dist/${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz.sha256
+          fi
+        done
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.component-name }}-binaries
+        path: ${{ inputs.component-path }}/dist/*
+
+    - name: Attach to release
+      if: inputs.attach-to-release && github.ref_type == 'tag'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ inputs.component-path }}/dist/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

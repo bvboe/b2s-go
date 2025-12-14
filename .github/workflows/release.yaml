@@ -51,8 +51,21 @@ jobs:
       docker-push: true
       docker-platforms: linux/amd64,linux/arm64
 
+  # bjorn2scan-agent component (binary release)
+  release-bjorn2scan-agent:
+    name: Release bjorn2scan-agent
+    needs: [integration-tests]
+    uses: ./.github/workflows/go-binary-reusable.yaml
+    with:
+      component-name: bjorn2scan-agent
+      component-path: bjorn2scan-agent
+      run-tests: true
+      run-lint: false
+      platforms: linux/amd64,linux/arm64
+      attach-to-release: true
+
   helm-release:
-    needs: [release-k8s-scan-server, release-pod-scanner]
+    needs: [release-k8s-scan-server, release-pod-scanner, release-bjorn2scan-agent]
     runs-on: ubuntu-latest
 
     steps:
@@ -124,6 +137,32 @@ jobs:
           bjorn2scan-*.tgz
           sboms/**/*.spdx.json
         body: |
+          ## 🖥️ Agent Binaries
+
+          **One-liner installation (Linux):**
+
+          ```bash
+          curl -sSfL https://raw.githubusercontent.com/${{ github.repository }}/main/bjorn2scan-agent/install.sh | sudo sh
+          ```
+
+          **Manual installation:**
+
+          Download the appropriate binary for your platform:
+          - **Linux amd64**: `bjorn2scan-agent-linux-amd64.tar.gz`
+          - **Linux arm64**: `bjorn2scan-agent-linux-arm64.tar.gz`
+
+          Extract and install:
+          ```bash
+          tar -xzf bjorn2scan-agent-linux-amd64.tar.gz
+          sudo install -m 755 bjorn2scan-agent-linux-amd64 /usr/local/bin/bjorn2scan-agent
+          ```
+
+          **Verify installation:**
+          ```bash
+          curl http://localhost:9999/health
+          curl http://localhost:9999/info
+          ```
+
           ## 🐳 Container Images
 
           Multi-architecture images (amd64, arm64) available at GitHub Container Registry:

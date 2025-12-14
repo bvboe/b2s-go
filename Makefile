@@ -18,11 +18,17 @@ build-all: ## Build all Go binaries
 	@echo "Building all components..."
 	$(MAKE) -C k8s-scan-server build
 	$(MAKE) -C pod-scanner build
+	$(MAKE) -C bjorn2scan-agent build
 
 test-all: ## Run tests for all components
 	@echo "Running tests for all components..."
 	$(MAKE) -C k8s-scan-server test
 	$(MAKE) -C pod-scanner test
+	$(MAKE) -C bjorn2scan-agent test
+
+build-agent-release: ## Build bjorn2scan-agent release binaries for all platforms
+	@echo "Building bjorn2scan-agent release binaries..."
+	$(MAKE) -C bjorn2scan-agent build-all
 
 docker-build-all: ## Build all Docker images
 	@echo "Building all Docker images..."
@@ -33,6 +39,7 @@ clean-all: ## Clean all build artifacts
 	@echo "Cleaning all build artifacts..."
 	$(MAKE) -C k8s-scan-server clean
 	$(MAKE) -C pod-scanner clean
+	$(MAKE) -C bjorn2scan-agent clean
 
 # Helm targets
 helm-lint: ## Lint the Helm chart

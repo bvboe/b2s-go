@@ -1,0 +1,303 @@
+#!/bin/sh
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Constants
+BINARY_NAME="bjorn2scan-agent"
+SERVICE_NAME="bjorn2scan-agent.service"
+INSTALL_DIR="/usr/local/bin"
+SERVICE_DIR="/etc/systemd/system"
+USER_NAME="bjorn2scan"
+GROUP_NAME="bjorn2scan"
+GITHUB_REPO="bvboe/b2s-go"
+
+# Helper functions
+log_info() { printf "${BLUE}[INFO]${NC} %s\n" "$1" >&2; }
+log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$1" >&2; }
+log_error() { printf "${RED}[ERROR]${NC} %s\n" "$1" >&2; }
+log_warning() { printf "${YELLOW}[WARNING]${NC} %s\n" "$1" >&2; }
+
+# Check if running as root
+check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        log_error "This script must be run as root"
+        log_info "Try: curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh | sudo sh"
+        exit 1
+    fi
+}
+
+# Detect OS
+detect_os() {
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    case "$OS" in
+        linux) OS="linux" ;;
+        *) log_error "Unsupported OS: $OS (only Linux is supported)"; exit 1 ;;
+    esac
+    log_info "Detected OS: $OS"
+}
+
+# Detect architecture
+detect_arch() {
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) log_error "Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+    log_info "Detected architecture: $ARCH"
+}
+
+# Detect Linux distribution (for systemd check)
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO="$ID"
+        DISTRO_VERSION="$VERSION_ID"
+        log_info "Detected distribution: $DISTRO $DISTRO_VERSION"
+    else
+        log_warning "Could not detect Linux distribution"
+    fi
+}
+
+# Check for systemd
+check_systemd() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        log_warning "Systemd not found - service will not be installed"
+        return 1
+    fi
+    return 0
+}
+
+# Get latest version from GitHub
+get_latest_version() {
+    log_info "Fetching latest version..."
+
+    if command -v curl >/dev/null 2>&1; then
+        VERSION=$(curl -sSfL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    elif command -v wget >/dev/null 2>&1; then
+        VERSION=$(wget -qO- "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    else
+        log_error "Neither curl nor wget found. Please install one of them."
+        exit 1
+    fi
+
+    if [ -z "$VERSION" ]; then
+        log_error "Failed to get latest version"
+        exit 1
+    fi
+
+    log_success "Latest version: $VERSION"
+}
+
+# Download binary
+download_binary() {
+    DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
+    CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
+
+    log_info "Downloading from: $DOWNLOAD_URL"
+
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSfL "$DOWNLOAD_URL" -o "${BINARY_NAME}.tar.gz"
+        curl -sSfL "$CHECKSUM_URL" -o "${BINARY_NAME}.tar.gz.sha256"
+    else
+        wget -q "$DOWNLOAD_URL" -O "${BINARY_NAME}.tar.gz"
+        wget -q "$CHECKSUM_URL" -O "${BINARY_NAME}.tar.gz.sha256"
+    fi
+
+    log_success "Download complete"
+}
+
+# Verify checksum
+verify_checksum() {
+    log_info "Verifying checksum..."
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "${BINARY_NAME}.tar.gz.sha256"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "${BINARY_NAME}.tar.gz.sha256"
+    else
+        log_warning "No checksum tool found, skipping verification"
+        return
+    fi
+
+    log_success "Checksum verified"
+}
+
+# Extract binary
+extract_binary() {
+    log_info "Extracting binary..."
+    tar -xzf "${BINARY_NAME}.tar.gz"
+    log_success "Extraction complete"
+}
+
+# Stop existing service
+stop_service() {
+    if check_systemd && systemctl is-active --quiet "$SERVICE_NAME"; then
+        log_info "Stopping existing service..."
+        systemctl stop "$SERVICE_NAME"
+        log_success "Service stopped"
+    fi
+}
+
+# Create user and group
+create_user() {
+    if ! getent group "$GROUP_NAME" >/dev/null 2>&1; then
+        log_info "Creating group: $GROUP_NAME"
+        groupadd --system "$GROUP_NAME"
+    fi
+
+    if ! getent passwd "$USER_NAME" >/dev/null 2>&1; then
+        log_info "Creating user: $USER_NAME"
+        useradd --system --gid "$GROUP_NAME" --no-create-home --shell /bin/false "$USER_NAME"
+    fi
+}
+
+# Install binary
+install_binary() {
+    log_info "Installing binary to $INSTALL_DIR..."
+
+    install -m 755 "${BINARY_NAME}-${OS}-${ARCH}" "${INSTALL_DIR}/${BINARY_NAME}"
+
+    log_success "Binary installed"
+}
+
+# Install systemd service
+install_service() {
+    if ! check_systemd; then
+        log_warning "Skipping service installation"
+        return
+    fi
+
+    log_info "Installing systemd service..."
+
+    # Download service file
+    SERVICE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/bjorn2scan-agent.service"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSfL "$SERVICE_URL" -o "${SERVICE_DIR}/${SERVICE_NAME}"
+    else
+        wget -q "$SERVICE_URL" -O "${SERVICE_DIR}/${SERVICE_NAME}"
+    fi
+
+    # Create data directory
+    mkdir -p /var/lib/bjorn2scan
+    chown "${USER_NAME}:${GROUP_NAME}" /var/lib/bjorn2scan
+
+    # Reload systemd
+    systemctl daemon-reload
+
+    log_success "Service installed"
+}
+
+# Enable and start service
+enable_service() {
+    if ! check_systemd; then
+        return
+    fi
+
+    log_info "Enabling service..."
+    systemctl enable "$SERVICE_NAME"
+
+    log_info "Starting service..."
+    systemctl start "$SERVICE_NAME"
+
+    sleep 2
+
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        log_success "Service is running"
+    else
+        log_error "Service failed to start"
+        log_info "Check logs: journalctl -u $SERVICE_NAME"
+        exit 1
+    fi
+}
+
+# Show installation summary
+show_summary() {
+    echo ""
+    echo "======================================"
+    echo "Installation Summary"
+    echo "======================================"
+    log_success "bjorn2scan-agent v${VERSION} installed successfully!"
+    echo ""
+    echo "Binary location: ${INSTALL_DIR}/${BINARY_NAME}"
+
+    if check_systemd; then
+        echo "Service: $SERVICE_NAME"
+        echo ""
+        echo "Useful commands:"
+        echo "  Status:  systemctl status $SERVICE_NAME"
+        echo "  Logs:    journalctl -u $SERVICE_NAME -f"
+        echo "  Stop:    systemctl stop $SERVICE_NAME"
+        echo "  Start:   systemctl start $SERVICE_NAME"
+        echo "  Restart: systemctl restart $SERVICE_NAME"
+    else
+        echo ""
+        echo "Run manually: ${BINARY_NAME}"
+    fi
+
+    echo ""
+    echo "Test endpoints:"
+    echo "  curl http://localhost:9999/health"
+    echo "  curl http://localhost:9999/info"
+    echo "======================================"
+}
+
+# Main installation flow
+main() {
+    log_info "Starting bjorn2scan-agent installation..."
+
+    check_root
+    detect_os
+    detect_arch
+    detect_distro
+    get_latest_version
+    download_binary
+    verify_checksum
+    extract_binary
+    stop_service
+    create_user
+    install_binary
+    install_service
+    enable_service
+
+    # Cleanup
+    cd /
+    rm -rf "$TMP_DIR"
+
+    show_summary
+}
+
+# Handle uninstall
+uninstall() {
+    log_info "Uninstalling bjorn2scan-agent..."
+
+    check_root
+
+    if check_systemd && systemctl is-active --quiet "$SERVICE_NAME"; then
+        systemctl stop "$SERVICE_NAME"
+        systemctl disable "$SERVICE_NAME"
+        rm -f "${SERVICE_DIR}/${SERVICE_NAME}"
+        systemctl daemon-reload
+    fi
+
+    rm -f "${INSTALL_DIR}/${BINARY_NAME}"
+
+    log_success "Uninstall complete"
+}
+
+# Parse arguments
+if [ "$1" = "uninstall" ]; then
+    uninstall
+else
+    main
+fi
