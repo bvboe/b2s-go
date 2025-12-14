@@ -23,6 +23,57 @@ log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$1" >&2; }
 log_error() { printf "${RED}[ERROR]${NC} %s\n" "$1" >&2; }
 log_warning() { printf "${YELLOW}[WARNING]${NC} %s\n" "$1" >&2; }
 
+# Show help
+show_help() {
+    cat << EOF
+bjorn2scan-agent installer
+
+DESCRIPTION:
+    Installs bjorn2scan-agent, a lightweight host-level security scanning agent
+    for the bjorn2scan v2 platform.
+
+USAGE:
+    # Install
+    curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh | sudo sh
+
+    # Uninstall
+    curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
+
+    # Show help (download first)
+    curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh -o install.sh
+    sh install.sh --help
+
+WHAT IT DOES:
+    - Detects your OS and architecture (Linux amd64/arm64 only)
+    - Downloads the latest release binary from GitHub
+    - Verifies checksum for security
+    - Installs binary to ${INSTALL_DIR}
+    - Creates systemd service for auto-start
+    - Starts the agent on port 9999
+
+REQUIREMENTS:
+    - Linux operating system (Ubuntu, Debian, RHEL, etc.)
+    - systemd (for service management)
+    - curl or wget
+    - Root/sudo access
+
+ENDPOINTS:
+    Once installed, the agent exposes:
+    - http://localhost:9999/health  - Health check
+    - http://localhost:9999/info    - System information
+
+USEFUL COMMANDS:
+    systemctl status ${SERVICE_NAME}   - Check status
+    systemctl restart ${SERVICE_NAME}  - Restart service
+    journalctl -u ${SERVICE_NAME} -f   - View logs
+
+MORE INFO:
+    https://github.com/${GITHUB_REPO}
+
+EOF
+    exit 0
+}
+
 # Check if running as root
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
@@ -106,11 +157,11 @@ download_binary() {
     cd "$TMP_DIR"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -sSfL "$DOWNLOAD_URL" -o "${BINARY_NAME}.tar.gz"
-        curl -sSfL "$CHECKSUM_URL" -o "${BINARY_NAME}.tar.gz.sha256"
+        curl -sSfL "$DOWNLOAD_URL" -o "${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
+        curl -sSfL "$CHECKSUM_URL" -o "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256"
     else
-        wget -q "$DOWNLOAD_URL" -O "${BINARY_NAME}.tar.gz"
-        wget -q "$CHECKSUM_URL" -O "${BINARY_NAME}.tar.gz.sha256"
+        wget -q "$DOWNLOAD_URL" -O "${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
+        wget -q "$CHECKSUM_URL" -O "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256"
     fi
 
     log_success "Download complete"
@@ -121,9 +172,9 @@ verify_checksum() {
     log_info "Verifying checksum..."
 
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum -c "${BINARY_NAME}.tar.gz.sha256"
+        sha256sum -c "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256"
     elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 -c "${BINARY_NAME}.tar.gz.sha256"
+        shasum -a 256 -c "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256"
     else
         log_warning "No checksum tool found, skipping verification"
         return
@@ -135,7 +186,7 @@ verify_checksum() {
 # Extract binary
 extract_binary() {
     log_info "Extracting binary..."
-    tar -xzf "${BINARY_NAME}.tar.gz"
+    tar -xzf "${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
     log_success "Extraction complete"
 }
 
@@ -296,8 +347,14 @@ uninstall() {
 }
 
 # Parse arguments
-if [ "$1" = "uninstall" ]; then
-    uninstall
-else
-    main
-fi
+case "$1" in
+    --help|-h|help)
+        show_help
+        ;;
+    uninstall)
+        uninstall
+        ;;
+    *)
+        main
+        ;;
+esac
