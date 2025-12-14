@@ -114,6 +114,7 @@ jobs:
     - name: Download SBOM artifacts
       uses: actions/download-artifact@v4
       with:
+        pattern: sbom-*
         path: sboms
 
     - name: Create Release
