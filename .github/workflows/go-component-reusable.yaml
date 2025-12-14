@@ -238,13 +238,7 @@ jobs:
       with:
         path: ./${{ inputs.component-path }}
         output-file: ${{ inputs.component-path }}/sbom-${{ inputs.component-name }}.spdx.json
-
-    - name: Upload SBOM artifact
-      if: inputs.docker-push
-      uses: actions/upload-artifact@v4
-      with:
-        name: sbom-${{ inputs.component-name }}
-        path: ${{ inputs.component-path }}/sbom-${{ inputs.component-name }}.spdx.json
+        artifact-name: sbom-${{ inputs.component-name }}
 
     - name: Install cosign
       if: inputs.docker-push
