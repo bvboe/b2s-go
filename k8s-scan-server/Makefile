@@ -2,6 +2,8 @@
 
 # Variables
 BINARY_NAME=k8s-scan-server
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
+LDFLAGS=-ldflags "-X main.version=$(VERSION) -w -s"
 IMAGE_NAME?=k8s-scan-server
 IMAGE_TAG?=latest
 
@@ -12,7 +14,8 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the Go binary
-	go build -v -o $(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) v$(VERSION)..."
+	go build $(LDFLAGS) -v -o $(BINARY_NAME) .
 
 test: ## Run tests
 	go test -v ./...

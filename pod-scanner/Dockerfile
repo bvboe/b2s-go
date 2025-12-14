@@ -1,13 +1,15 @@
 # Build stage
 FROM cgr.dev/chainguard/go:latest AS builder
 
+ARG VERSION=dev
+
 WORKDIR /app
 
 COPY go.mod ./
 RUN go mod download
 
 COPY main.go ./
-RUN CGO_ENABLED=0 GOOS=linux go build -o pod-scanner .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o pod-scanner .
 
 # Runtime stage
 FROM cgr.dev/chainguard/static:latest

@@ -87,7 +87,9 @@ jobs:
 
     - name: Build binary
       if: inputs.run-build
-      run: go build -v -o ${{ inputs.component-name }} .
+      run: |
+        VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
+        go build -ldflags "-X main.version=${VERSION} -w -s" -v -o ${{ inputs.component-name }} .
 
     - name: Run go vet
       run: go vet ./...
@@ -168,6 +170,16 @@ jobs:
           type=semver,pattern={{major}}
           type=sha
 
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.ref_type }}" = "tag" ]; then
+          VERSION=${GITHUB_REF_NAME#v}
+        else
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
     - name: Set image tags
       id: meta
       run: |
@@ -196,6 +208,8 @@ jobs:
         push: ${{ inputs.docker-push }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          VERSION=${{ steps.version.outputs.version }}
         cache-from: type=gha,scope=${{ inputs.component-name }}
         cache-to: type=gha,mode=max,scope=${{ inputs.component-name }}
         load: ${{ !inputs.docker-push }}

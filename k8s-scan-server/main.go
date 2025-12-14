@@ -8,7 +8,8 @@ import (
 	"os"
 )
 
-const version = "0.1.0"
+// version is set at build time via ldflags
+var version = "dev"
 
 type InfoResponse struct {
 	Version   string `json:"version"`
