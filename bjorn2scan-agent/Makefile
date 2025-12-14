@@ -33,7 +33,7 @@ build-all: clean ## Build binaries for all platforms (Linux amd64, arm64)
 		echo "Building for $${GOOS}/$${GOARCH}..." ; \
 		GOOS=$${GOOS} GOARCH=$${GOARCH} CGO_ENABLED=0 go build $(LDFLAGS) -o $${output} . ; \
 		tar -czf $(DIST_DIR)/$(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz -C $(DIST_DIR) $(BINARY_NAME)-$${GOOS}-$${GOARCH} ; \
-		sha256sum $(DIST_DIR)/$(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz > $(DIST_DIR)/$(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz.sha256 ; \
+		(cd $(DIST_DIR) && sha256sum $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz > $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz.sha256) ; \
 	done
 	@echo "Build complete! Artifacts in $(DIST_DIR)/"
 	@ls -lh $(DIST_DIR)/

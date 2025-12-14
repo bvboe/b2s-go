@@ -5,11 +5,12 @@ A Kubernetes-native container and workload scanner. bjorn2scan v2 is a complete 
 ## Overview
 
 bjorn2scan v2 provides:
-- Container vulnerability scanning with Grype
-- SBOM (Software Bill of Materials) generation using Syft
-- Kubernetes workload discovery and monitoring
-- RESTful API for integration with existing tools
-- Web UI for visualization
+- **Kubernetes Scanning**: Container vulnerability scanning with Grype
+- **SBOM Generation**: Software Bill of Materials using Syft
+- **Workload Monitoring**: Kubernetes workload discovery and monitoring
+- **Host Agent**: Lightweight agent for scanning Linux hosts outside Kubernetes
+- **RESTful API**: Integration with existing tools
+- **Web UI**: Visualization (planned)
 
 ## Prerequisites
 
@@ -21,7 +22,63 @@ bjorn2scan v2 provides:
 
 ## Installation
 
-### Quick Start with Helm
+### bjorn2scan-agent (Host Agent)
+
+For scanning Linux hosts outside of Kubernetes, install the bjorn2scan-agent:
+
+#### One-Liner Installation
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh
+```
+
+This will:
+- Download the latest release for your platform (amd64 or arm64)
+- Verify checksums
+- Install the binary to `/usr/local/bin/bjorn2scan-agent`
+- Create a systemd service
+- Start the agent automatically
+
+#### Manual Installation
+
+Download the appropriate binary from [releases](https://github.com/bvboe/b2s-go/releases):
+
+```bash
+# Download and extract
+curl -sSfL https://github.com/bvboe/b2s-go/releases/download/v0.1.0/bjorn2scan-agent-linux-amd64.tar.gz -o bjorn2scan-agent.tar.gz
+tar -xzf bjorn2scan-agent.tar.gz
+
+# Install binary
+sudo install -m 755 bjorn2scan-agent-linux-amd64 /usr/local/bin/bjorn2scan-agent
+
+# Verify installation
+curl http://localhost:9999/health
+curl http://localhost:9999/info
+```
+
+#### Agent Management
+
+```bash
+# Check status
+systemctl status bjorn2scan-agent
+
+# View logs
+journalctl -u bjorn2scan-agent -f
+
+# Restart agent
+systemctl restart bjorn2scan-agent
+
+# Uninstall
+curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
+```
+
+See [bjorn2scan-agent/README.md](bjorn2scan-agent/README.md) for detailed documentation.
+
+---
+
+### Kubernetes Deployment
+
+#### Quick Start with Helm
 
 Install bjorn2scan using Helm:
 
@@ -157,13 +214,27 @@ See [k8s-scan-server/README.md](k8s-scan-server/README.md) for detailed developm
 
 bjorn2scan v2 is built as a monorepo with the following components:
 
+### Current Components
+
 - **k8s-scan-server**: Core scanning service that runs inside Kubernetes
   - Container vulnerability scanning
   - SBOM generation
   - Workload discovery
-  - RESTful API
+  - RESTful API (port 8080)
 
-Future components (planned):
+- **pod-scanner**: DaemonSet agent for node-level scanning
+  - Runs on every Kubernetes node
+  - Local container scanning
+  - Node resource monitoring (port 8081)
+
+- **bjorn2scan-agent**: Lightweight host agent for Linux servers
+  - Runs directly on Linux hosts (outside Kubernetes)
+  - HTTP endpoints for health checks and system info (port 9999)
+  - Systemd integration
+  - Multi-architecture support (amd64, arm64)
+
+### Future Components (Planned)
+
 - Web UI for visualization
 - CLI tool for local scanning
 - Integration plugins
