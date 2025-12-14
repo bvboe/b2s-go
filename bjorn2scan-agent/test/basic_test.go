@@ -23,7 +23,9 @@ func TestHealthEndpoint(t *testing.T) {
 	// Create a simple handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK\n"))
+		if _, err := w.Write([]byte("OK\n")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	})
 
 	handler.ServeHTTP(w, req)
@@ -55,7 +57,9 @@ func TestInfoEndpoint(t *testing.T) {
 			Arch:      "amd64",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		if err := json.NewEncoder(w).Encode(info); err != nil {
+			t.Errorf("Failed to encode JSON: %v", err)
+		}
 	})
 
 	handler.ServeHTTP(w, req)
