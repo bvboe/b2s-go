@@ -172,8 +172,16 @@ jobs:
       id: meta
       run: |
         if [ "${{ inputs.docker-push }}" = "true" ]; then
-          echo "tags=${{ steps.meta-push.outputs.tags }}" >> $GITHUB_OUTPUT
-          echo "labels=${{ steps.meta-push.outputs.labels }}" >> $GITHUB_OUTPUT
+          {
+            echo "tags<<EOF"
+            echo "${{ steps.meta-push.outputs.tags }}"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          {
+            echo "labels<<EOF"
+            echo "${{ steps.meta-push.outputs.labels }}"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
         else
           echo "tags=${{ inputs.image-name }}:${{ inputs.image-tag }}" >> $GITHUB_OUTPUT
           echo "labels=" >> $GITHUB_OUTPUT
