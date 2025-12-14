@@ -183,95 +183,6 @@ check_what_exists() {
     fi
 }
 
-# Delete GitHub release
-delete_github_release() {
-    local version=$1
-    local tag="v$version"
-
-    log_info "Deleting GitHub release $tag..."
-    if gh release view "$tag" &>/dev/null; then
-        if gh release delete "$tag" --yes; then
-            log_success "GitHub release deleted"
-        else
-            log_error "Failed to delete GitHub release"
-            return 1
-        fi
-    else
-        log_info "GitHub release not found (already deleted or never created)"
-    fi
-}
-
-# Delete git tags
-delete_git_tags() {
-    local version=$1
-    local tag="v$version"
-
-    # Delete local tag
-    log_info "Deleting local git tag $tag..."
-    if git rev-parse "$tag" &>/dev/null; then
-        if git tag -d "$tag"; then
-            log_success "Local tag deleted"
-        else
-            log_error "Failed to delete local tag"
-            return 1
-        fi
-    else
-        log_info "Local tag not found (already deleted)"
-    fi
-
-    # Delete remote tag
-    log_info "Deleting remote git tag $tag..."
-    if git ls-remote --tags origin | grep -q "refs/tags/$tag"; then
-        if git push origin ":refs/tags/$tag"; then
-            log_success "Remote tag deleted"
-        else
-            log_error "Failed to delete remote tag"
-            return 1
-        fi
-    else
-        log_info "Remote tag not found (already deleted)"
-    fi
-}
-
-# Delete container image or Helm chart
-delete_package() {
-    local package=$1
-    local version=$2
-
-    log_info "Deleting package '$package' version $version..."
-
-    # Skip if no permissions
-    if [ "$SKIP_PACKAGES" = true ]; then
-        log_warning "Skipped (no package permissions)"
-        return 0
-    fi
-
-    # Find version ID
-    local api_response=$(gh api "/user/packages/container/b2s-go%2F${package}/versions" 2>&1)
-
-    # Check if API call failed
-    if [[ "$api_response" == *"message"* ]] || [[ "$api_response" == *"error"* ]]; then
-        log_warning "Failed to get package '$package' versions: API error (skipped)"
-        return 0
-    fi
-
-    local version_id=$(echo "$api_response" | jq -r ".[] | select(.metadata.container.tags[]? | contains(\"$version\")) | .id" 2>/dev/null || echo "")
-
-    if [ -z "$version_id" ] || [ "$version_id" = "null" ]; then
-        log_info "Package '$package' version $version not found (already deleted or never published)"
-        return 0
-    fi
-
-    # Delete the version
-    local delete_result=$(gh api -X DELETE "/user/packages/container/b2s-go%2F${package}/versions/$version_id" 2>&1)
-
-    if [ $? -eq 0 ]; then
-        log_success "Package '$package' version deleted"
-    else
-        log_warning "Failed to delete package '$package' (skipped)"
-        return 0
-    fi
-}
 
 # Delete all artifacts
 delete_all_artifacts() {
@@ -283,29 +194,131 @@ delete_all_artifacts() {
     echo "======================================"
     echo ""
 
-    local failed=false
+    # Track what succeeded and failed
+    local deleted=()
+    local failed_items=()
+    local skipped_items=()
 
     # Delete GitHub release first
-    delete_github_release "$version" || failed=true
+    log_info "Deleting GitHub release v$version..."
+    if gh release view "v$version" &>/dev/null; then
+        if gh release delete "v$version" --yes; then
+            log_success "GitHub release deleted"
+            deleted+=("GitHub release v$version")
+        else
+            log_error "Failed to delete GitHub release"
+            failed_items+=("GitHub release v$version")
+        fi
+    else
+        log_info "GitHub release not found (already deleted or never created)"
+    fi
 
-    # Delete git tags
-    delete_git_tags "$version" || failed=true
+    # Delete local tag
+    log_info "Deleting local git tag v$version..."
+    if git rev-parse "v$version" &>/dev/null; then
+        if git tag -d "v$version"; then
+            log_success "Local tag deleted"
+            deleted+=("Local git tag v$version")
+        else
+            log_error "Failed to delete local tag"
+            failed_items+=("Local git tag v$version")
+        fi
+    else
+        log_info "Local tag not found (already deleted)"
+    fi
+
+    # Delete remote tag
+    log_info "Deleting remote git tag v$version..."
+    if git ls-remote --tags origin | grep -q "refs/tags/v$version"; then
+        if git push origin ":refs/tags/v$version"; then
+            log_success "Remote tag deleted"
+            deleted+=("Remote git tag v$version")
+        else
+            log_error "Failed to delete remote tag"
+            failed_items+=("Remote git tag v$version")
+        fi
+    else
+        log_info "Remote tag not found (already deleted)"
+    fi
 
     # Delete container images and Helm chart
     local packages=("k8s-scan-server" "pod-scanner" "bjorn2scan")
     for package in "${packages[@]}"; do
-        delete_package "$package" "$version" || failed=true
+        log_info "Deleting package '$package' version $version..."
+
+        # Skip if no permissions
+        if [ "$SKIP_PACKAGES" = true ]; then
+            log_warning "Skipped (no package permissions)"
+            skipped_items+=("Package $package:$version")
+            continue
+        fi
+
+        # Find version ID
+        local api_response=$(gh api "/user/packages/container/b2s-go%2F${package}/versions" 2>&1)
+
+        # Check if API call failed
+        if [[ "$api_response" == *"message"* ]] || [[ "$api_response" == *"error"* ]]; then
+            log_warning "Failed to get package '$package' versions: API error (skipped)"
+            skipped_items+=("Package $package:$version (API error)")
+            continue
+        fi
+
+        local version_id=$(echo "$api_response" | jq -r ".[] | select(.metadata.container.tags[]? | contains(\"$version\")) | .id" 2>/dev/null || echo "")
+
+        if [ -z "$version_id" ] || [ "$version_id" = "null" ]; then
+            log_info "Package '$package' version $version not found (already deleted or never published)"
+            continue
+        fi
+
+        # Delete the version
+        local delete_result=$(gh api -X DELETE "/user/packages/container/b2s-go%2F${package}/versions/$version_id" 2>&1)
+
+        if [ $? -eq 0 ]; then
+            log_success "Package '$package' version deleted"
+            deleted+=("Package $package:$version")
+        else
+            log_warning "Failed to delete package '$package' (skipped)"
+            skipped_items+=("Package $package:$version (delete failed)")
+        fi
     done
+
+    # Print summary
+    echo ""
+    echo "======================================"
+    log_info "Deletion Summary"
+    echo "======================================"
+
+    if [ ${#deleted[@]} -gt 0 ]; then
+        echo ""
+        log_success "Successfully deleted (${#deleted[@]}):"
+        for item in "${deleted[@]}"; do
+            echo "  ✓ $item"
+        done
+    fi
+
+    if [ ${#skipped_items[@]} -gt 0 ]; then
+        echo ""
+        log_warning "Skipped (${#skipped_items[@]}):"
+        for item in "${skipped_items[@]}"; do
+            echo "  ⊘ $item"
+        done
+    fi
+
+    if [ ${#failed_items[@]} -gt 0 ]; then
+        echo ""
+        log_error "Failed (${#failed_items[@]}):"
+        for item in "${failed_items[@]}"; do
+            echo "  ✗ $item"
+        done
+    fi
 
     echo ""
 
     if [ "$SKIP_PACKAGES" = true ]; then
-        log_warning "Package deletion was skipped due to missing permissions"
-        log_info "You can delete packages manually at: https://github.com/bvboe?tab=packages"
+        log_info "Manual cleanup needed for packages: https://github.com/bvboe?tab=packages"
     fi
 
-    if [ "$failed" = true ]; then
-        log_error "Some deletions failed (see errors above)"
+    if [ ${#failed_items[@]} -gt 0 ]; then
         return 1
     fi
 
