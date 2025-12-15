@@ -19,6 +19,7 @@ k8s-scan-server/k8s-scan-server
 k8s-scan-server/test/integration/integration.test
 pod-scanner/pod-scanner
 bjorn2scan-agent/bjorn2scan-agent
+bjorn2scan-agent/bjorn2scan-agent-linux
 
 # Build directories
 dist/

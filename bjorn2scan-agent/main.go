@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
 
+	"github.com/bvboe/b2s-go/bjorn2scan-agent/docker"
+	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 )
 
@@ -38,17 +42,63 @@ func (a *AgentInfo) GetInfo() interface{} {
 	}
 }
 
+// setupLogging configures logging to write to both stdout and a log file
+func setupLogging() (*os.File, error) {
+	logDir := "/var/log/bjorn2scan"
+	logFile := filepath.Join(logDir, "agent.log")
+
+	// Try to create log file, but don't fail if we can't
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		// If we can't create the log file, just log to stdout
+		log.Printf("Warning: could not open log file %s: %v (logging to stdout only)", logFile, err)
+		return nil, nil
+	}
+
+	// Log to both stdout (systemd journal) and file
+	multiWriter := io.MultiWriter(os.Stdout, file)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.LstdFlags)
+
+	return file, nil
+}
+
 func main() {
+	// Setup logging to both stdout and file
+	logFile, _ := setupLogging()
+	if logFile != nil {
+		defer logFile.Close()
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "9999"
 	}
 
+	log.Printf("bjorn2scan-agent v%s starting", version)
+
+	// Create container manager
+	manager := containers.NewManager()
+
+	// Context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Check if Docker is available and start watcher
+	if docker.IsDockerAvailable() {
+		log.Println("Docker detected, starting container watcher")
+		go func() {
+			if err := docker.WatchContainers(ctx, manager); err != nil {
+				log.Printf("Docker watcher error: %v", err)
+			}
+		}()
+	} else {
+		log.Println("Docker not available or not accessible, container watching disabled")
+	}
+
+	// Setup HTTP server
 	infoProvider := &AgentInfo{}
-
 	mux := http.NewServeMux()
-
-	// Register standard scanner endpoints
 	handlers.RegisterHandlers(mux, infoProvider)
 
 	server := &http.Server{
@@ -56,26 +106,31 @@ func main() {
 		Handler: mux,
 	}
 
-	// Graceful shutdown support
+	// Handle shutdown gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
-		log.Printf("bjorn2scan-agent v%s starting on port %s", version, port)
+		log.Printf("bjorn2scan-agent listening on port %s", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
+			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	// Wait for shutdown signal
+	<-sigChan
+	log.Println("Shutdown signal received, shutting down gracefully...")
 
-	log.Println("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Cancel context to stop Docker watcher
+	cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	// Shutdown HTTP server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Error during shutdown: %v", err)
 	}
 
-	log.Println("Server exited")
+	log.Println("bjorn2scan-agent stopped")
 }

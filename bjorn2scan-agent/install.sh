@@ -239,9 +239,19 @@ install_service() {
         wget -q "$SERVICE_URL" -O "${SERVICE_DIR}/${SERVICE_NAME}"
     fi
 
-    # Create data directory
+    # Create required directories for the service
+    # Note: Service runs as root, but these directories need to exist for systemd mount namespacing
     mkdir -p /var/lib/bjorn2scan
-    chown "${USER_NAME}:${GROUP_NAME}" /var/lib/bjorn2scan
+    mkdir -p /var/log/bjorn2scan
+    chmod 755 /var/lib/bjorn2scan /var/log/bjorn2scan
+
+    # Install logrotate configuration
+    LOGROTATE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/logrotate.conf"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSfL "$LOGROTATE_URL" -o /etc/logrotate.d/bjorn2scan-agent 2>/dev/null || log_warning "Could not install logrotate config"
+    else
+        wget -q "$LOGROTATE_URL" -O /etc/logrotate.d/bjorn2scan-agent 2>/dev/null || log_warning "Could not install logrotate config"
+    fi
 
     # Reload systemd
     systemctl daemon-reload
@@ -342,6 +352,7 @@ uninstall() {
     fi
 
     rm -f "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -f /etc/logrotate.d/bjorn2scan-agent
 
     log_success "Uninstall complete"
 }

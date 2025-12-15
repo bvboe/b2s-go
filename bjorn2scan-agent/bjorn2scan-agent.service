@@ -1,23 +1,40 @@
 [Unit]
 Description=Bjorn2Scan Agent - Host-level security scanning agent
 Documentation=https://github.com/bvboe/b2s-go
-After=network-online.target
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=bjorn2scan
-Group=bjorn2scan
+User=root
+Group=root
 ExecStart=/usr/local/bin/bjorn2scan-agent
 Restart=on-failure
 RestartSec=5s
 
-# Security hardening
-NoNewPrivileges=true
-PrivateTmp=true
+# Filesystem access - read-only root with selective write access
 ProtectSystem=strict
-ProtectHome=true
 ReadWritePaths=/var/lib/bjorn2scan
+ReadWritePaths=/var/log/bjorn2scan
+ReadWritePaths=/tmp
+# Docker socket needs to be accessible
+BindReadOnlyPaths=/var/run/docker.sock
+
+# Security hardening - read-only access to most of the system
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectHostname=true
+
+# Allow Docker socket access
+SupplementaryGroups=docker
 
 # Logging
 StandardOutput=journal
@@ -26,6 +43,7 @@ SyslogIdentifier=bjorn2scan-agent
 
 # Resource limits
 LimitNOFILE=65536
+TasksMax=4096
 
 [Install]
 WantedBy=multi-user.target
