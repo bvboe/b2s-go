@@ -76,6 +76,15 @@ scanServer:
   config:
     port: "8080"
 
+  # Data persistence
+  persistence:
+    enabled: true  # Set to false to use emptyDir (for testing only)
+    size: 1Gi
+    storageClassName: ""  # Leave empty to use default storage class
+    accessMode: ReadWriteOnce
+    # Path where data (database, etc.) will be stored
+    mountPath: /var/lib/bjorn2scan
+
 # Pod Scanner (DaemonSet)
 # Runs on every node to scan local pods
 podScanner:

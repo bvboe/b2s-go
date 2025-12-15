@@ -49,12 +49,25 @@ spec:
               fieldPath: metadata.namespace
         - name: PORT
           value: {{ .Values.scanServer.config.port | quote }}
+        - name: DB_PATH
+          value: "{{ .Values.scanServer.persistence.mountPath }}/containers.db"
+        volumeMounts:
+        - name: data
+          mountPath: {{ .Values.scanServer.persistence.mountPath }}
         livenessProbe:
           {{- toYaml .Values.scanServer.livenessProbe | nindent 10 }}
         readinessProbe:
           {{- toYaml .Values.scanServer.readinessProbe | nindent 10 }}
         resources:
           {{- toYaml .Values.scanServer.resources | nindent 10 }}
+      volumes:
+      - name: data
+        {{- if .Values.scanServer.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ include "bjorn2scan.fullname" . }}-scan-server
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
       {{- with .Values.scanServer.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

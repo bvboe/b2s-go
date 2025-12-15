@@ -11,6 +11,7 @@ import (
 
 	"github.com/bvboe/b2s-go/k8s-scan-server/k8s"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 
 	"k8s.io/client-go/kubernetes"
@@ -58,6 +59,20 @@ func main() {
 	// Create container manager
 	manager := containers.NewManager()
 
+	// Initialize database
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "/var/lib/bjorn2scan/containers.db"
+	}
+	db, err := database.New(dbPath)
+	if err != nil {
+		log.Fatalf("Error initializing database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	// Connect database to manager
+	manager.SetDatabase(db)
+
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -72,10 +87,13 @@ func main() {
 
 	// Setup HTTP server
 	infoProvider := &K8sScanServerInfo{}
-	handlers.RegisterDefaultHandlers(infoProvider)
+	mux := http.NewServeMux()
+	handlers.RegisterHandlers(mux, infoProvider)
+	handlers.RegisterDatabaseHandlers(mux, db)
 
 	server := &http.Server{
-		Addr: ":" + port,
+		Addr:    ":" + port,
+		Handler: mux,
 	}
 
 	// Handle shutdown gracefully

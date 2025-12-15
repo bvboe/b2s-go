@@ -188,6 +188,7 @@ if kind create cluster --name local-test --wait 5m; then
         --set scanServer.image.tag="$IMAGE_TAG" \
         --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
         --set podScanner.image.tag="$IMAGE_TAG" \
+        --set scanServer.persistence.enabled=false \
         --wait --timeout 2m; then
 
         print_success "Helm chart installed on kind"
@@ -261,6 +262,7 @@ if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
         --set scanServer.image.tag="$IMAGE_TAG" \
         --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
         --set podScanner.image.tag="$IMAGE_TAG" \
+        --set scanServer.persistence.enabled=false \
         --wait --timeout 2m; then
 
         print_success "Helm chart installed on minikube"
