@@ -1,0 +1,85 @@
+name: Go Library CI (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      component-name:
+        description: 'Name of the Go library component (directory name)'
+        required: true
+        type: string
+      component-path:
+        description: 'Path to the component directory'
+        required: true
+        type: string
+      run-tests:
+        description: 'Whether to run tests'
+        required: false
+        type: boolean
+        default: true
+      run-lint:
+        description: 'Whether to run linting'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  test:
+    if: inputs.run-tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./${{ inputs.component-path }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache-dependency-path: ${{ inputs.component-path }}/go.sum
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test -v -race -coverprofile=coverage.out ./...
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v5
+      with:
+        files: ./${{ inputs.component-path }}/coverage.out
+        flags: unittests-${{ inputs.component-name }}
+      continue-on-error: true
+
+  lint:
+    if: inputs.run-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./${{ inputs.component-path }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: latest
+        working-directory: ${{ inputs.component-path }}
+
+    - name: Run gosec security scanner
+      uses: securego/gosec@master
+      with:
+        args: '-fmt sarif -out gosec-results.sarif ./...'
+      continue-on-error: true

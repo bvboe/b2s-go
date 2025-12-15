@@ -12,13 +12,25 @@ permissions:
   packages: read
 
 jobs:
+  # scanner-core library (dependency for other components)
+  scanner-core:
+    name: scanner-core
+    uses: ./.github/workflows/go-library-reusable.yaml
+    with:
+      component-name: scanner-core
+      component-path: scanner-core
+      run-tests: true
+      run-lint: true
+
   integration-tests:
     name: Integration Tests
+    needs: [scanner-core]
     uses: ./.github/workflows/integration-test.yaml
 
   # k8s-scan-server component
   k8s-scan-server:
     name: k8s-scan-server
+    needs: [scanner-core]
     uses: ./.github/workflows/go-component-reusable.yaml
     with:
       component-name: k8s-scan-server
@@ -34,6 +46,7 @@ jobs:
   # pod-scanner component
   pod-scanner:
     name: pod-scanner
+    needs: [scanner-core]
     uses: ./.github/workflows/go-component-reusable.yaml
     with:
       component-name: pod-scanner
@@ -49,6 +62,7 @@ jobs:
   # bjorn2scan-agent component (binary build)
   bjorn2scan-agent:
     name: bjorn2scan-agent
+    needs: [scanner-core]
     uses: ./.github/workflows/go-binary-reusable.yaml
     with:
       component-name: bjorn2scan-agent
