@@ -67,7 +67,7 @@ func main() {
 	// Setup logging to both stdout and file
 	logFile, _ := setupLogging()
 	if logFile != nil {
-		defer logFile.Close()
+		defer func() { _ = logFile.Close() }()
 	}
 
 	port := os.Getenv("PORT")

@@ -81,6 +81,7 @@ print_header "Local Test Suite"
 echo "Test namespace: $TEST_NAMESPACE"
 echo "Scan Server Image: $SCAN_SERVER_IMAGE:$IMAGE_TAG"
 echo "Pod Scanner Image: $POD_SCANNER_IMAGE:$IMAGE_TAG"
+echo "Agent Image: bjorn2scan-agent:$IMAGE_TAG"
 echo ""
 
 # 1. Unit Tests
@@ -98,6 +99,11 @@ print_header "1. Unit Tests - pod-scanner"
 cd "$SCRIPT_DIR/pod-scanner"
 run_test "pod-scanner: Go unit tests" go test -v ./...
 run_test "pod-scanner: Go vet" go vet ./...
+
+print_header "1. Unit Tests - bjorn2scan-agent"
+cd "$SCRIPT_DIR/bjorn2scan-agent"
+run_test "bjorn2scan-agent: Go unit tests" go test -v ./...
+run_test "bjorn2scan-agent: Go vet" go vet ./...
 
 # 2. Code Quality
 print_header "2. Code Quality - scanner-core"
@@ -127,6 +133,15 @@ else
     ((TESTS_FAILED++))
 fi
 
+print_header "2. Code Quality - bjorn2scan-agent"
+cd "$SCRIPT_DIR/bjorn2scan-agent"
+if command -v golangci-lint &> /dev/null; then
+    run_test "bjorn2scan-agent: golangci-lint" golangci-lint run ./...
+else
+    print_error "golangci-lint not installed, skipping"
+    ((TESTS_FAILED++))
+fi
+
 # 3. Build
 print_header "3. Build Tests - k8s-scan-server"
 cd "$SCRIPT_DIR/k8s-scan-server"
@@ -139,6 +154,12 @@ cd "$SCRIPT_DIR/pod-scanner"
 run_test "pod-scanner: Go build" go build -v -o pod-scanner .
 cd "$SCRIPT_DIR"
 run_test "pod-scanner: Docker build" docker build -f pod-scanner/Dockerfile -t "$POD_SCANNER_IMAGE:$IMAGE_TAG" --build-arg VERSION=local-test .
+
+print_header "3. Build Tests - bjorn2scan-agent"
+cd "$SCRIPT_DIR/bjorn2scan-agent"
+run_test "bjorn2scan-agent: Go build" go build -v -o bjorn2scan-agent .
+cd "$SCRIPT_DIR"
+run_test "bjorn2scan-agent: Docker build" docker build -f bjorn2scan-agent/Dockerfile -t bjorn2scan-agent:$IMAGE_TAG --build-arg VERSION=local-test .
 
 # 4. Helm Tests
 print_header "4. Helm Tests"

@@ -221,6 +221,11 @@ install_binary() {
     log_success "Binary installed"
 }
 
+# Get systemd version
+get_systemd_version() {
+    systemctl --version | head -n 1 | awk '{print $2}'
+}
+
 # Install systemd service
 install_service() {
     if ! check_systemd; then
@@ -230,8 +235,17 @@ install_service() {
 
     log_info "Installing systemd service..."
 
+    # Check systemd version and choose appropriate service file
+    SYSTEMD_VERSION=$(get_systemd_version)
+    SERVICE_FILE="bjorn2scan-agent.service"
+
+    if [ "$SYSTEMD_VERSION" -lt 232 ]; then
+        log_warning "Old systemd detected (v$SYSTEMD_VERSION), using compatibility mode"
+        SERVICE_FILE="bjorn2scan-agent-compat.service"
+    fi
+
     # Download service file
-    SERVICE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/bjorn2scan-agent.service"
+    SERVICE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/${SERVICE_FILE}"
 
     if command -v curl >/dev/null 2>&1; then
         curl -sSfL "$SERVICE_URL" -o "${SERVICE_DIR}/${SERVICE_NAME}"

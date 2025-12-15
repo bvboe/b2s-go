@@ -86,7 +86,7 @@ func IsDockerAvailable() bool {
 	if err != nil {
 		return false
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -101,7 +101,7 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// Test connection
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
