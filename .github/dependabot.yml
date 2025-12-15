@@ -1,5 +1,27 @@
 version: 2
 updates:
+  # Go dependencies for scanner-core
+  - package-ecosystem: "gomod"
+    directory: "/scanner-core"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # Go dependencies for k8s-scan-server
   - package-ecosystem: "gomod"
     directory: "/k8s-scan-server"
@@ -22,9 +44,69 @@ updates:
           - "minor"
           - "patch"
 
-  # Go dependencies for integration tests
+  # Go dependencies for k8s-scan-server integration tests
   - package-ecosystem: "gomod"
     directory: "/k8s-scan-server/test/integration"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "go"
+      - "tests"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Go dependencies for pod-scanner
+  - package-ecosystem: "gomod"
+    directory: "/pod-scanner"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Go dependencies for bjorn2scan-agent
+  - package-ecosystem: "gomod"
+    directory: "/bjorn2scan-agent"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Go dependencies for bjorn2scan-agent tests
+  - package-ecosystem: "gomod"
+    directory: "/bjorn2scan-agent/test"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -60,9 +142,39 @@ updates:
           - "minor"
           - "patch"
 
-  # Docker base images
+  # Docker base images for k8s-scan-server
   - package-ecosystem: "docker"
     directory: "/k8s-scan-server"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Docker base images for pod-scanner
+  - package-ecosystem: "docker"
+    directory: "/pod-scanner"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Docker base images for bjorn2scan-agent
+  - package-ecosystem: "docker"
+    directory: "/bjorn2scan-agent"
     schedule:
       interval: "weekly"
       day: "monday"
