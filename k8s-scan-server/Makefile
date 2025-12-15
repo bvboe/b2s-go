@@ -24,4 +24,4 @@ clean: ## Clean build artifacts
 	rm -f $(BINARY_NAME)
 
 docker-build: ## Build Docker image
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	cd .. && docker build -f k8s-scan-server/Dockerfile -t $(IMAGE_NAME):$(IMAGE_TAG) --build-arg VERSION=$(VERSION) .
