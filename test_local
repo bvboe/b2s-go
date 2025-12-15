@@ -117,12 +117,14 @@ fi
 print_header "3. Build Tests - k8s-scan-server"
 cd "$SCRIPT_DIR/k8s-scan-server"
 run_test "k8s-scan-server: Go build" go build -v -o k8s-scan-server .
-run_test "k8s-scan-server: Docker build" docker build -t "$SCAN_SERVER_IMAGE:$IMAGE_TAG" .
+cd "$SCRIPT_DIR"
+run_test "k8s-scan-server: Docker build" docker build -f k8s-scan-server/Dockerfile -t "$SCAN_SERVER_IMAGE:$IMAGE_TAG" --build-arg VERSION=local-test .
 
 print_header "3. Build Tests - pod-scanner"
 cd "$SCRIPT_DIR/pod-scanner"
 run_test "pod-scanner: Go build" go build -v -o pod-scanner .
-run_test "pod-scanner: Docker build" docker build -t "$POD_SCANNER_IMAGE:$IMAGE_TAG" .
+cd "$SCRIPT_DIR"
+run_test "pod-scanner: Docker build" docker build -f pod-scanner/Dockerfile -t "$POD_SCANNER_IMAGE:$IMAGE_TAG" --build-arg VERSION=local-test .
 
 # 4. Helm Tests
 print_header "4. Helm Tests"

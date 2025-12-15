@@ -135,9 +135,6 @@ jobs:
     outputs:
       digest: ${{ steps.build-and-push.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
-    defaults:
-      run:
-        working-directory: ./${{ inputs.component-path }}
 
     steps:
     - name: Checkout code
@@ -203,7 +200,8 @@ jobs:
       id: build-and-push
       uses: docker/build-push-action@v6
       with:
-        context: ./${{ inputs.component-path }}
+        context: .
+        file: ./${{ inputs.component-path }}/Dockerfile
         platforms: ${{ inputs.docker-push && inputs.docker-platforms || 'linux/amd64' }}
         push: ${{ inputs.docker-push }}
         tags: ${{ steps.meta.outputs.tags }}
@@ -237,7 +235,7 @@ jobs:
         else
           IMAGE="${{ inputs.image-name }}:${{ inputs.image-tag }}"
         fi
-        grype "${IMAGE}" -o sarif > grype-results.sarif
+        grype "${IMAGE}" -o sarif > ${{ inputs.component-path }}/grype-results.sarif
 
     - name: Upload Grype results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4

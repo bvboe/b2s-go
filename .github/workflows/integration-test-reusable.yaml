@@ -28,7 +28,8 @@ jobs:
     - name: Build k8s-scan-server image
       uses: docker/build-push-action@v6
       with:
-        context: ./k8s-scan-server
+        context: .
+        file: ./k8s-scan-server/Dockerfile
         push: false
         tags: k8s-scan-server:test
         cache-from: type=gha,scope=k8s-scan-server
@@ -38,7 +39,8 @@ jobs:
     - name: Build pod-scanner image
       uses: docker/build-push-action@v6
       with:
-        context: ./pod-scanner
+        context: .
+        file: ./pod-scanner/Dockerfile
         push: false
         tags: pod-scanner:test
         cache-from: type=gha,scope=pod-scanner
