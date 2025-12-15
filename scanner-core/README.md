@@ -18,6 +18,17 @@ Common HTTP endpoint handlers for health checks and system information:
 - **HealthHandler**: Returns a simple "OK" response for health checks
 - **InfoHandler**: Returns component-specific information as JSON
 
+### Container Instance Management
+
+Go API for managing container instance lifecycle events in memory:
+
+- **Manager.AddContainerInstance()**: Add a single container instance
+- **Manager.RemoveContainerInstance()**: Remove a single container instance
+- **Manager.SetContainerInstances()**: Replace entire collection of container instances
+- **Manager.GetAllInstances()**: Retrieve all container instances
+- **Manager.GetInstance()**: Get a specific container instance
+- **Manager.GetInstanceCount()**: Get the count of container instances
+
 ## Usage
 
 ### Installing
@@ -133,6 +144,94 @@ func main() {
 
     http.ListenAndServe(":8080", nil)
 }
+```
+
+### Using Container Instance Manager
+
+**Creating and using the manager:**
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/bvboe/b2s-go/scanner-core/containers"
+)
+
+func main() {
+    // Create a new container manager
+    manager := containers.NewManager()
+
+    // Add a container instance
+    instance := containers.ContainerInstance{
+        Namespace:  "default",
+        Pod:        "nginx-abc123",
+        Container:  "nginx",
+        Repository: "nginx",
+        Tag:        "1.21",
+        ImageID:    "sha256:abc123def456",
+    }
+    manager.AddContainerInstance(instance)
+
+    // Add multiple instances at once
+    instances := []containers.ContainerInstance{
+        {
+            Namespace:  "default",
+            Pod:        "app-pod-1",
+            Container:  "web",
+            Repository: "myapp",
+            Tag:        "v1.0.0",
+            ImageID:    "sha256:xyz789",
+        },
+        {
+            Namespace:  "kube-system",
+            Pod:        "proxy-pod",
+            Container:  "proxy",
+            Repository: "envoy",
+            Tag:        "v1.20",
+            ImageID:    "sha256:def456",
+        },
+    }
+    manager.SetContainerInstances(instances)
+
+    // Get a specific instance
+    if inst, exists := manager.GetInstance("default", "nginx-abc123", "nginx"); exists {
+        log.Printf("Found instance: %+v", inst)
+    }
+
+    // Get all instances
+    allInstances := manager.GetAllInstances()
+    log.Printf("Total instances: %d", len(allInstances))
+
+    // Remove an instance
+    manager.RemoveContainerInstance(instance)
+
+    // Get count
+    count := manager.GetInstanceCount()
+    log.Printf("Remaining instances: %d", count)
+}
+```
+
+**Thread-safe usage:**
+
+The Manager is thread-safe and can be called from multiple goroutines:
+
+```go
+manager := containers.NewManager()
+
+// Multiple goroutines can safely add/remove instances
+go func() {
+    manager.AddContainerInstance(instance1)
+}()
+
+go func() {
+    manager.AddContainerInstance(instance2)
+}()
+
+go func() {
+    instances := manager.GetAllInstances()
+    log.Printf("Count: %d", len(instances))
+}()
 ```
 
 ## Development

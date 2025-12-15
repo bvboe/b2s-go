@@ -1,11 +1,20 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/bvboe/b2s-go/k8s-scan-server/k8s"
+	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // version is set at build time via ldflags
@@ -33,11 +42,67 @@ func main() {
 		port = "8080"
 	}
 
-	infoProvider := &K8sScanServerInfo{}
+	log.Printf("k8s-scan-server v%s starting", version)
 
-	// Register standard scanner endpoints
+	// Create Kubernetes client
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		log.Fatalf("Error creating Kubernetes config: %v", err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Error creating Kubernetes client: %v", err)
+	}
+
+	// Create container manager
+	manager := containers.NewManager()
+
+	// Context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Perform initial sync
+	if err := k8s.SyncInitialPods(ctx, clientset, manager); err != nil {
+		log.Fatalf("Error performing initial pod sync: %v", err)
+	}
+
+	// Start pod watcher in background
+	go k8s.WatchPods(ctx, clientset, manager)
+
+	// Setup HTTP server
+	infoProvider := &K8sScanServerInfo{}
 	handlers.RegisterDefaultHandlers(infoProvider)
 
-	log.Printf("k8s-scan-server v%s starting on port %s", version, port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	server := &http.Server{
+		Addr: ":" + port,
+	}
+
+	// Handle shutdown gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("k8s-scan-server listening on port %s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal
+	<-sigChan
+	log.Println("Shutdown signal received, shutting down gracefully...")
+
+	// Cancel context to stop pod watcher
+	cancel()
+
+	// Shutdown HTTP server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Error during shutdown: %v", err)
+	}
+
+	log.Println("k8s-scan-server stopped")
 }
