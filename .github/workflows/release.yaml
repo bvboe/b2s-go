@@ -79,7 +79,7 @@ jobs:
       with:
         version: 'latest'
 
-    - name: Package Helm chart
+    - name: Update Chart.yaml version
       run: |
         # Extract version from tag (remove 'v' prefix)
         VERSION=${GITHUB_REF_NAME#v}
@@ -88,7 +88,25 @@ jobs:
         sed -i "s/^version:.*/version: ${VERSION}/" helm/bjorn2scan/Chart.yaml
         sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" helm/bjorn2scan/Chart.yaml
 
-        # Package the chart
+        # Commit the version update back to main branch
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        git checkout main
+        git add helm/bjorn2scan/Chart.yaml
+
+        # Only commit if there are changes
+        if ! git diff --cached --quiet; then
+          git commit -m "chore: Update Helm chart version to ${VERSION} [skip ci]"
+          git push origin main
+        fi
+
+    - name: Package Helm chart
+      run: |
+        # Extract version from tag (remove 'v' prefix)
+        VERSION=${GITHUB_REF_NAME#v}
+
+        # Package the chart (Chart.yaml already updated in previous step)
         helm package helm/bjorn2scan --destination .
 
     - name: Push Helm chart as OCI artifact

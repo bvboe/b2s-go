@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: scan-server
+  name: {{ include "bjorn2scan.fullname" . }}-scan-server
   labels:
     {{- include "bjorn2scan.labels" . | nindent 4 }}
     app.kubernetes.io/component: scan-server

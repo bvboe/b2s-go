@@ -95,7 +95,7 @@ jobs:
 
     - name: Port forward service
       run: |
-        kubectl port-forward -n default svc/scan-server 8080:8080 &
+        kubectl port-forward -n default svc/bjorn2scan 8080:80 &
         sleep 5
         curl -f http://localhost:8080/health || exit 1
 

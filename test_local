@@ -181,7 +181,7 @@ if kind create cluster --name local-test --wait 5m; then
 
             # Run integration tests
             print_info "Setting up port-forward to scan-server..."
-            kubectl port-forward -n "$TEST_NAMESPACE" svc/scan-server 8080:8080 > /dev/null 2>&1 &
+            kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:80 > /dev/null 2>&1 &
             PF_PID=$!
             sleep 3
 
@@ -254,7 +254,7 @@ if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
 
             # Run integration tests
             print_info "Setting up port-forward to scan-server..."
-            kubectl port-forward -n "$TEST_NAMESPACE" svc/scan-server 8080:8080 > /dev/null 2>&1 &
+            kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:80 > /dev/null 2>&1 &
             PF_PID=$!
             sleep 3
 
