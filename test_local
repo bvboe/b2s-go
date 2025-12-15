@@ -84,6 +84,11 @@ echo "Pod Scanner Image: $POD_SCANNER_IMAGE:$IMAGE_TAG"
 echo ""
 
 # 1. Unit Tests
+print_header "1. Unit Tests - scanner-core"
+cd "$SCRIPT_DIR/scanner-core"
+run_test "scanner-core: Go unit tests" go test -v ./...
+run_test "scanner-core: Go vet" go vet ./...
+
 print_header "1. Unit Tests - k8s-scan-server"
 cd "$SCRIPT_DIR/k8s-scan-server"
 run_test "k8s-scan-server: Go unit tests" go test -v ./...
@@ -95,6 +100,15 @@ run_test "pod-scanner: Go unit tests" go test -v ./...
 run_test "pod-scanner: Go vet" go vet ./...
 
 # 2. Code Quality
+print_header "2. Code Quality - scanner-core"
+cd "$SCRIPT_DIR/scanner-core"
+if command -v golangci-lint &> /dev/null; then
+    run_test "scanner-core: golangci-lint" golangci-lint run ./...
+else
+    print_error "golangci-lint not installed, skipping"
+    ((TESTS_FAILED++))
+fi
+
 print_header "2. Code Quality - k8s-scan-server"
 cd "$SCRIPT_DIR/k8s-scan-server"
 if command -v golangci-lint &> /dev/null; then
