@@ -10,6 +10,12 @@ type DatabaseInterface interface {
 	AddInstance(instance ContainerInstance) (bool, error)
 	RemoveInstance(id ContainerInstanceID) error
 	SetInstances(instances []ContainerInstance) error
+	GetImageScanStatus(digest string) (string, error)
+}
+
+// ScanQueueInterface defines the interface for enqueuing scan jobs
+type ScanQueueInterface interface {
+	EnqueueScan(image ImageID, nodeName string, containerRuntime string)
 }
 
 // Manager handles container instance lifecycle management
@@ -17,6 +23,7 @@ type Manager struct {
 	mu        sync.RWMutex
 	instances map[string]ContainerInstance // key: namespace/pod/container
 	db        DatabaseInterface            // optional database persistence
+	scanQueue ScanQueueInterface           // optional scan queue for SBOM generation
 }
 
 // NewManager creates a new container instance manager
@@ -32,6 +39,14 @@ func (m *Manager) SetDatabase(db DatabaseInterface) {
 	defer m.mu.Unlock()
 	m.db = db
 	log.Println("Container manager: database persistence enabled")
+}
+
+// SetScanQueue configures the manager to use a scan queue for SBOM generation
+func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scanQueue = queue
+	log.Println("Container manager: scan queue enabled")
 }
 
 // makeKey creates a unique key for a container instance
@@ -55,6 +70,20 @@ func (m *Manager) AddContainerInstance(instance ContainerInstance) {
 	if m.db != nil {
 		if _, err := m.db.AddInstance(instance); err != nil {
 			log.Printf("Error adding instance to database: %v", err)
+			return
+		}
+
+		// Check if this image needs scanning
+		if m.scanQueue != nil && instance.Image.Digest != "" {
+			scanStatus, err := m.db.GetImageScanStatus(instance.Image.Digest)
+			if err != nil {
+				log.Printf("Error checking scan status: %v", err)
+			} else if scanStatus == "pending" {
+				// Image needs scanning, enqueue a scan job
+				log.Printf("Enqueuing scan for new image: %s:%s (digest=%s)",
+					instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+				m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+			}
 		}
 	}
 }
@@ -103,6 +132,38 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 	if m.db != nil {
 		if err := m.db.SetInstances(instances); err != nil {
 			log.Printf("Error setting instances in database: %v", err)
+			return
+		}
+
+		// Enqueue scan jobs for images that need scanning
+		if m.scanQueue != nil {
+			// Track unique images to avoid duplicate scan jobs
+			seenDigests := make(map[string]bool)
+
+			for _, instance := range instances {
+				if instance.Image.Digest == "" {
+					continue // Skip instances without digest
+				}
+
+				// Skip if we've already processed this digest
+				if seenDigests[instance.Image.Digest] {
+					continue
+				}
+				seenDigests[instance.Image.Digest] = true
+
+				// Check if this image needs scanning
+				scanStatus, err := m.db.GetImageScanStatus(instance.Image.Digest)
+				if err != nil {
+					log.Printf("Error checking scan status: %v", err)
+					continue
+				}
+
+				if scanStatus == "pending" {
+					log.Printf("Enqueuing scan for image: %s:%s (digest=%s)",
+						instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+					m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+				}
+			}
 		}
 	}
 }

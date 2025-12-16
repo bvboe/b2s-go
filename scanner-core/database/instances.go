@@ -10,15 +10,17 @@ import (
 
 // ContainerInstanceRow represents a container instance in the database
 type ContainerInstanceRow struct {
-	ID         int64  `json:"id"`
-	Namespace  string `json:"namespace"`
-	Pod        string `json:"pod"`
-	Container  string `json:"container"`
-	ImageID    int64  `json:"image_id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Digest     string `json:"digest"`
-	CreatedAt  string `json:"created_at"`
+	ID               int64  `json:"id"`
+	Namespace        string `json:"namespace"`
+	Pod              string `json:"pod"`
+	Container        string `json:"container"`
+	ImageID          int64  `json:"image_id"`
+	Repository       string `json:"repository"`
+	Tag              string `json:"tag"`
+	Digest           string `json:"digest"`
+	CreatedAt        string `json:"created_at"`
+	NodeName         string `json:"node_name"`
+	ContainerRuntime string `json:"container_runtime"`
 }
 
 // AddInstance adds a container instance to the database
@@ -65,9 +67,9 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 			// Image has changed (or digest was empty before), update it
 			_, err = tx.Exec(`
 				UPDATE container_instances
-				SET image_id = ?, repository = ?, tag = ?
+				SET image_id = ?, repository = ?, tag = ?, node_name = ?, container_runtime = ?
 				WHERE id = ?
-			`, imageID, instance.Image.Repository, instance.Image.Tag, existingID)
+			`, imageID, instance.Image.Repository, instance.Image.Tag, instance.NodeName, instance.ContainerRuntime, existingID)
 
 			if err != nil {
 				return false, fmt.Errorf("failed to update instance: %w", err)
@@ -96,10 +98,10 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 
 	// Instance doesn't exist, create it
 	_, err = tx.Exec(`
-		INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id, node_name, container_runtime)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-		instance.Image.Repository, instance.Image.Tag, imageID)
+		instance.Image.Repository, instance.Image.Tag, imageID, instance.NodeName, instance.ContainerRuntime)
 
 	if err != nil {
 		return false, fmt.Errorf("failed to insert instance: %w", err)
@@ -181,10 +183,10 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
 
 		// Insert instance
 		_, err = tx.Exec(`
-			INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id)
-			VALUES (?, ?, ?, ?, ?, ?)
+			INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id, node_name, container_runtime)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-			instance.Image.Repository, instance.Image.Tag, imageID)
+			instance.Image.Repository, instance.Image.Tag, imageID, instance.NodeName, instance.ContainerRuntime)
 
 		if err != nil {
 			return fmt.Errorf("failed to insert instance: %w", err)
@@ -210,7 +212,7 @@ func (db *DB) GetAllInstances() (interface{}, error) {
 		SELECT
 			ci.id, ci.namespace, ci.pod, ci.container,
 			ci.repository, ci.tag, ci.image_id, img.digest,
-			ci.created_at
+			ci.created_at, ci.node_name, ci.container_runtime
 		FROM container_instances ci
 		JOIN container_images img ON ci.image_id = img.id
 		ORDER BY ci.created_at DESC
@@ -223,10 +225,18 @@ func (db *DB) GetAllInstances() (interface{}, error) {
 	var instances []ContainerInstanceRow
 	for rows.Next() {
 		var inst ContainerInstanceRow
+		var nodeName, containerRuntime sql.NullString
 		err := rows.Scan(&inst.ID, &inst.Namespace, &inst.Pod, &inst.Container,
-			&inst.Repository, &inst.Tag, &inst.ImageID, &inst.Digest, &inst.CreatedAt)
+			&inst.Repository, &inst.Tag, &inst.ImageID, &inst.Digest, &inst.CreatedAt,
+			&nodeName, &containerRuntime)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan instance: %w", err)
+		}
+		if nodeName.Valid {
+			inst.NodeName = nodeName.String
+		}
+		if containerRuntime.Valid {
+			inst.ContainerRuntime = containerRuntime.String
 		}
 		instances = append(instances, inst)
 	}

@@ -74,24 +74,50 @@ func extractDigestFromImageID(imageID string) string {
 func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 	var instances []containers.ContainerInstance
 
+	// Get node name from pod spec
+	nodeName := pod.Spec.NodeName
+
 	// Process all containers (init, regular, and ephemeral)
 	allContainers := append([]corev1.Container{}, pod.Spec.Containers...)
 	allContainers = append(allContainers, pod.Spec.InitContainers...)
 
-	// Get container statuses to find imageIDs
-	statusMap := make(map[string]string)
+	// Get container statuses to find imageIDs and runtimes
+	type containerStatus struct {
+		imageID string
+		runtime string
+	}
+	statusMap := make(map[string]containerStatus)
+
+	// Extract runtime from containerID (e.g., "docker://abc123" or "containerd://abc123")
+	extractRuntime := func(containerID string) string {
+		if strings.HasPrefix(containerID, "docker://") {
+			return "docker"
+		} else if strings.HasPrefix(containerID, "containerd://") {
+			return "containerd"
+		} else if strings.HasPrefix(containerID, "cri-o://") {
+			return "cri-o"
+		}
+		return "unknown"
+	}
+
 	for _, status := range pod.Status.ContainerStatuses {
-		statusMap[status.Name] = status.ImageID
+		statusMap[status.Name] = containerStatus{
+			imageID: status.ImageID,
+			runtime: extractRuntime(status.ContainerID),
+		}
 	}
 	for _, status := range pod.Status.InitContainerStatuses {
-		statusMap[status.Name] = status.ImageID
+		statusMap[status.Name] = containerStatus{
+			imageID: status.ImageID,
+			runtime: extractRuntime(status.ContainerID),
+		}
 	}
 
 	for _, container := range allContainers {
 		repository, tag := parseImageName(container.Image)
-		imageID := statusMap[container.Name]
+		status := statusMap[container.Name]
 		// Extract just the digest part (e.g., "sha256:abc123...")
-		digest := extractDigestFromImageID(imageID)
+		digest := extractDigestFromImageID(status.imageID)
 
 		// Validate that we have complete data before including this instance
 		if digest == "" {
@@ -119,6 +145,8 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 				Tag:        tag,
 				Digest:     digest,
 			},
+			NodeName:         nodeName,
+			ContainerRuntime: status.runtime,
 		}
 		instances = append(instances, instance)
 	}

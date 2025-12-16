@@ -16,8 +16,10 @@ type ImageID struct {
 
 // ContainerInstance represents a running container instance in the cluster
 type ContainerInstance struct {
-	ID    ContainerInstanceID `json:"id"`
-	Image ImageID             `json:"image"`
+	ID               ContainerInstanceID `json:"id"`
+	Image            ImageID             `json:"image"`
+	NodeName         string              `json:"node_name"`          // K8s node name (empty for agent)
+	ContainerRuntime string              `json:"container_runtime"` // "docker" or "containerd"
 }
 
 // ContainerInstanceCollection represents a collection of container instances

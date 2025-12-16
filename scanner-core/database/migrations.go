@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 type migration struct {
 	version int
@@ -24,6 +24,11 @@ var migrations = []migration{
 		version: 2,
 		name:    "remove_repo_tag_from_images",
 		up:      migrateToV2,
+	},
+	{
+		version: 3,
+		name:    "add_sbom_and_node_tracking",
+		up:      migrateToV3,
 	},
 }
 
@@ -236,6 +241,51 @@ func migrateToV2(conn *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// migrateToV3 adds SBOM storage and node tracking capabilities
+func migrateToV3(conn *sql.DB) error {
+	// Start a transaction for the migration
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Step 1: Add SBOM and scan tracking columns to container_images
+	_, err = tx.Exec(`
+		ALTER TABLE container_images ADD COLUMN sbom TEXT;
+		ALTER TABLE container_images ADD COLUMN scan_status TEXT DEFAULT 'pending';
+		ALTER TABLE container_images ADD COLUMN scan_error TEXT;
+		ALTER TABLE container_images ADD COLUMN scanned_at DATETIME;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add SBOM columns to container_images: %w", err)
+	}
+
+	// Step 2: Add node and runtime tracking columns to container_instances
+	_, err = tx.Exec(`
+		ALTER TABLE container_instances ADD COLUMN node_name TEXT;
+		ALTER TABLE container_instances ADD COLUMN container_runtime TEXT;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add node tracking columns to container_instances: %w", err)
+	}
+
+	// Step 3: Create index on scan_status for efficient queries
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_scan_status ON container_images(scan_status);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create scan_status index: %w", err)
 	}
 
 	// Commit the transaction
