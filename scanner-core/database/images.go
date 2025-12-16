@@ -29,6 +29,12 @@ func (db *DB) getOrCreateImageTx(exec interface {
 	QueryRow(query string, args ...interface{}) *sql.Row
 	Exec(query string, args ...interface{}) (sql.Result, error)
 }, image containers.ImageID) (int64, bool, error) {
+	// Validate required fields
+	if image.Digest == "" {
+		return 0, false, fmt.Errorf("cannot create/get image without digest: repository=%s, tag=%s",
+			image.Repository, image.Tag)
+	}
+
 	// Try to get existing image by digest
 	var id int64
 	err := exec.QueryRow(`

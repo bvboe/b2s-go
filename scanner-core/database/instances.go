@@ -24,6 +24,20 @@ type ContainerInstanceRow struct {
 // AddInstance adds a container instance to the database
 // Returns whether the instance was newly created
 func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
+	// Validate required fields
+	if instance.Image.Digest == "" {
+		return false, fmt.Errorf("cannot add instance without digest: namespace=%s, pod=%s, container=%s",
+			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+	}
+	if instance.Image.Repository == "" {
+		return false, fmt.Errorf("cannot add instance without repository: namespace=%s, pod=%s, container=%s",
+			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+	}
+	if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
+		return false, fmt.Errorf("cannot add instance with empty identifier: namespace=%s, pod=%s, container=%s",
+			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+	}
+
 	// Start a transaction to ensure atomic operation across both tables
 	tx, err := db.conn.Begin()
 	if err != nil {
@@ -37,16 +51,39 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 		return false, fmt.Errorf("failed to get/create image: %w", err)
 	}
 
-	// Check if instance already exists
+	// Check if instance already exists and get its current image_id
 	var existingID int64
+	var existingImageID int64
 	err = tx.QueryRow(`
-		SELECT id FROM container_instances
+		SELECT id, image_id FROM container_instances
 		WHERE namespace = ? AND pod = ? AND container = ?
-	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container).Scan(&existingID)
+	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container).Scan(&existingID, &existingImageID)
 
 	if err == nil {
-		// Instance already exists, do nothing
-		// Commit the transaction (even though we didn't change anything)
+		// Instance already exists, check if image has changed
+		if existingImageID != imageID {
+			// Image has changed (or digest was empty before), update it
+			_, err = tx.Exec(`
+				UPDATE container_instances
+				SET image_id = ?, repository = ?, tag = ?
+				WHERE id = ?
+			`, imageID, instance.Image.Repository, instance.Image.Tag, existingID)
+
+			if err != nil {
+				return false, fmt.Errorf("failed to update instance: %w", err)
+			}
+
+			// Commit the transaction
+			if err := tx.Commit(); err != nil {
+				return false, fmt.Errorf("failed to commit transaction: %w", err)
+			}
+
+			log.Printf("Updated container instance in database: namespace=%s, pod=%s, container=%s (image_id=%d)",
+				instance.ID.Namespace, instance.ID.Pod, instance.ID.Container, imageID)
+			return true, nil
+		}
+
+		// Image hasn't changed, nothing to do
 		if err := tx.Commit(); err != nil {
 			return false, fmt.Errorf("failed to commit transaction: %w", err)
 		}
@@ -105,6 +142,22 @@ func (db *DB) RemoveInstance(id containers.ContainerInstanceID) error {
 
 // SetInstances replaces all instances with the given set
 func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
+	// Validate all instances before starting transaction
+	for i, instance := range instances {
+		if instance.Image.Digest == "" {
+			return fmt.Errorf("instance %d has empty digest: namespace=%s, pod=%s, container=%s",
+				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+		}
+		if instance.Image.Repository == "" {
+			return fmt.Errorf("instance %d has empty repository: namespace=%s, pod=%s, container=%s",
+				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+		}
+		if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
+			return fmt.Errorf("instance %d has empty identifier: namespace=%s, pod=%s, container=%s",
+				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+		}
+	}
+
 	// Start a transaction to ensure atomic replacement
 	tx, err := db.conn.Begin()
 	if err != nil {
