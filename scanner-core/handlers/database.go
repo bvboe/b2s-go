@@ -14,6 +14,18 @@ type DatabaseProvider interface {
 	GetSBOM(digest string) ([]byte, error)
 }
 
+// DatabaseProviderWithNodeLookup extends DatabaseProvider with node lookup capability
+type DatabaseProviderWithNodeLookup interface {
+	DatabaseProvider
+	GetFirstInstanceForImage(digest string) (NodeInfo, error)
+}
+
+// NodeInfo contains information about which node has an image
+type NodeInfo struct {
+	NodeName         string
+	ContainerRuntime string
+}
+
 // DatabaseInstancesHandler creates an HTTP handler for /containers/instances endpoint
 func DatabaseInstancesHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

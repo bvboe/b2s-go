@@ -103,21 +103,19 @@ podScanner:
   podSecurityContext: {}
     # fsGroup: 2000
 
-  securityContext: {}
-    # capabilities:
-    #   drop:
-    #   - ALL
-    # readOnlyRootFilesystem: true
-    # runAsNonRoot: true
-    # runAsUser: 1000
+  # Privileged security context required for container runtime socket access
+  securityContext:
+    privileged: true
+    runAsUser: 0  # Run as root to access container runtime sockets
 
+  # Increased resources for SBOM generation (spikes during scan)
   resources:
     limits:
-      cpu: 100m
-      memory: 64Mi
+      cpu: 2000m
+      memory: 2Gi
     requests:
-      cpu: 50m
-      memory: 32Mi
+      cpu: 100m      # Low baseline when idle
+      memory: 256Mi
 
   livenessProbe:
     httpGet:

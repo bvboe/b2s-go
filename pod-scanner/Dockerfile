@@ -23,6 +23,8 @@ COPY scanner-core/ ./scanner-core/
 
 WORKDIR /workspace/pod-scanner
 COPY pod-scanner/main.go ./
+COPY pod-scanner/runtime/ ./runtime/
+COPY pod-scanner/handlers/ ./handlers/
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o pod-scanner .

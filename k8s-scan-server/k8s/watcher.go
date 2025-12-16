@@ -179,11 +179,17 @@ func WatchPods(ctx context.Context, clientset *kubernetes.Clientset, manager *co
 
 				switch event.Type {
 				case watch.Added, watch.Modified:
-					// Only process running pods or pods with container statuses
-					if pod.Status.Phase == corev1.PodRunning || len(pod.Status.ContainerStatuses) > 0 {
+					// Only process running pods
+					if pod.Status.Phase == corev1.PodRunning {
 						instances := extractContainerInstances(pod)
 						for _, instance := range instances {
 							manager.AddContainerInstance(instance)
+						}
+					} else if pod.Status.Phase != corev1.PodRunning {
+						// If pod is no longer running, remove its containers
+						instances := extractContainerInstances(pod)
+						for _, instance := range instances {
+							manager.RemoveContainerInstance(instance.ID)
 						}
 					}
 
@@ -213,7 +219,8 @@ func SyncInitialPods(ctx context.Context, clientset *kubernetes.Clientset, manag
 
 	var allInstances []containers.ContainerInstance
 	for _, pod := range podList.Items {
-		if pod.Status.Phase == corev1.PodRunning || len(pod.Status.ContainerStatuses) > 0 {
+		// Only track containers from running pods
+		if pod.Status.Phase == corev1.PodRunning {
 			instances := extractContainerInstances(&pod)
 			allInstances = append(allInstances, instances...)
 		}

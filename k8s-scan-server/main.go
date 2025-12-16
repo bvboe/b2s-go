@@ -9,10 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bvboe/b2s-go/k8s-scan-server/handlers"
 	"github.com/bvboe/b2s-go/k8s-scan-server/k8s"
+	"github.com/bvboe/b2s-go/k8s-scan-server/podscanner"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
-	"github.com/bvboe/b2s-go/scanner-core/handlers"
+	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
+	"github.com/bvboe/b2s-go/scanner-core/scanning"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -85,12 +88,37 @@ func main() {
 	// Start pod watcher in background
 	go k8s.WatchPods(ctx, clientset, manager)
 
+	// Create pod-scanner client for SBOM routing
+	podScannerClient := podscanner.NewClient()
+
+	// Create SBOM retriever function that uses pod-scanner
+	sbomRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
+		return podScannerClient.GetSBOMFromNode(ctx, clientset, nodeName, image.Digest)
+	}
+
+	// Create scan queue for automatic SBOM generation
+	scanQueue := scanning.NewJobQueue(db, sbomRetriever)
+	defer scanQueue.Shutdown()
+
+	// Connect scan queue to manager
+	manager.SetScanQueue(scanQueue)
+
 	// Setup HTTP server
 	infoProvider := &K8sScanServerInfo{}
 	mux := http.NewServeMux()
-	handlers.RegisterHandlers(mux, infoProvider)
-	handlers.RegisterDatabaseHandlers(mux, db)
-	handlers.RegisterStaticHandlers(mux)
+
+	// Register standard handlers
+	corehandlers.RegisterHandlers(mux, infoProvider)
+
+	// Register database handlers (instances, images)
+	mux.HandleFunc("/containers/instances", corehandlers.DatabaseInstancesHandler(db))
+	mux.HandleFunc("/containers/images", corehandlers.DatabaseImagesHandler(db))
+
+	// Register SBOM handler with pod-scanner routing
+	mux.HandleFunc("/sbom/", handlers.SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient))
+
+	// Register static file handlers (web UI)
+	corehandlers.RegisterStaticHandlers(mux)
 
 	server := &http.Server{
 		Addr:    ":" + port,

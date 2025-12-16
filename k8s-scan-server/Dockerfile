@@ -24,6 +24,8 @@ COPY scanner-core/ ./scanner-core/
 WORKDIR /workspace/k8s-scan-server
 COPY k8s-scan-server/main.go ./
 COPY k8s-scan-server/k8s/ ./k8s/
+COPY k8s-scan-server/podscanner/ ./podscanner/
+COPY k8s-scan-server/handlers/ ./handlers/
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o k8s-scan-server .
