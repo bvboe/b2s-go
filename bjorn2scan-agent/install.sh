@@ -51,6 +51,14 @@ WHAT IT DOES:
     - Creates systemd service for auto-start
     - Starts the agent on port 9999
 
+DIRECTORIES USED:
+    ${INSTALL_DIR}             - Binary installation location
+    /etc/systemd/system        - Systemd service file
+    /var/lib/bjorn2scan        - Data directory
+    /var/log/bjorn2scan        - Log files
+    /etc/logrotate.d           - Logrotate configuration
+    /tmp/bjorn2scan-*          - Temporary download directory (auto-cleaned)
+
 REQUIREMENTS:
     - Linux operating system (Ubuntu, Debian, RHEL, etc.)
     - systemd (for service management)
@@ -304,10 +312,14 @@ show_summary() {
     echo "======================================"
     log_success "bjorn2scan-agent v${VERSION} installed successfully!"
     echo ""
-    echo "Binary location: ${INSTALL_DIR}/${BINARY_NAME}"
+    echo "Installed files and directories:"
+    echo "  Binary:    ${INSTALL_DIR}/${BINARY_NAME}"
+    echo "  Data:      /var/lib/bjorn2scan"
+    echo "  Logs:      /var/log/bjorn2scan"
 
     if check_systemd; then
-        echo "Service: $SERVICE_NAME"
+        echo "  Service:   ${SERVICE_DIR}/${SERVICE_NAME}"
+        echo "  Logrotate: /etc/logrotate.d/bjorn2scan-agent"
         echo ""
         echo "Useful commands:"
         echo "  Status:  systemctl status $SERVICE_NAME"
@@ -327,14 +339,28 @@ show_summary() {
     echo "======================================"
 }
 
+# Show directories that will be used
+show_directories() {
+    log_info "Directories that will be used:"
+    echo "  Binary:         ${INSTALL_DIR}/${BINARY_NAME}"
+    echo "  Systemd:        ${SERVICE_DIR}/${SERVICE_NAME}"
+    echo "  Data:           /var/lib/bjorn2scan"
+    echo "  Logs:           /var/log/bjorn2scan"
+    echo "  Logrotate:      /etc/logrotate.d/bjorn2scan-agent"
+    echo "  Temp download:  \$TMPDIR (auto-cleaned)"
+    echo ""
+}
+
 # Main installation flow
 main() {
     log_info "Starting bjorn2scan-agent installation..."
+    echo ""
 
     check_root
     detect_os
     detect_arch
     detect_distro
+    show_directories
     get_latest_version
     download_binary
     verify_checksum
