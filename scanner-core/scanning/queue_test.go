@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -195,11 +196,11 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 	}
 	defer func() { _ = database.Close(db) }()
 
-	retrieverCallCount := 0
+	var retrieverCallCount atomic.Int32
 
 	// Mock SBOM retriever
 	mockRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
-		retrieverCallCount++
+		retrieverCallCount.Add(1)
 		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
 	}
 
@@ -244,8 +245,8 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 	// Wait for first scan to complete
 	time.Sleep(1 * time.Second)
 
-	if retrieverCallCount != 1 {
-		t.Errorf("Expected retriever to be called once, got %d", retrieverCallCount)
+	if retrieverCallCount.Load() != 1 {
+		t.Errorf("Expected retriever to be called once, got %d", retrieverCallCount.Load())
 	}
 
 	// Second scan of the same image (should be skipped)
@@ -254,8 +255,8 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 	// Wait to see if second scan happens
 	time.Sleep(1 * time.Second)
 
-	if retrieverCallCount != 1 {
-		t.Errorf("Expected retriever to still be called once, got %d", retrieverCallCount)
+	if retrieverCallCount.Load() != 1 {
+		t.Errorf("Expected retriever to still be called once, got %d", retrieverCallCount.Load())
 	}
 }
 
@@ -271,11 +272,11 @@ func TestJobQueueForceScan(t *testing.T) {
 	}
 	defer func() { _ = database.Close(db) }()
 
-	retrieverCallCount := 0
+	var retrieverCallCount atomic.Int32
 
 	// Mock SBOM retriever
 	mockRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
-		retrieverCallCount++
+		retrieverCallCount.Add(1)
 		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
 	}
 
@@ -320,8 +321,8 @@ func TestJobQueueForceScan(t *testing.T) {
 	// Wait for first scan to complete
 	time.Sleep(1 * time.Second)
 
-	if retrieverCallCount != 1 {
-		t.Errorf("Expected retriever to be called once, got %d", retrieverCallCount)
+	if retrieverCallCount.Load() != 1 {
+		t.Errorf("Expected retriever to be called once, got %d", retrieverCallCount.Load())
 	}
 
 	// Force rescan of the same image
@@ -331,7 +332,7 @@ func TestJobQueueForceScan(t *testing.T) {
 	// Wait for rescan to complete
 	time.Sleep(1 * time.Second)
 
-	if retrieverCallCount != 2 {
-		t.Errorf("Expected retriever to be called twice (force scan), got %d", retrieverCallCount)
+	if retrieverCallCount.Load() != 2 {
+		t.Errorf("Expected retriever to be called twice (force scan), got %d", retrieverCallCount.Load())
 	}
 }
