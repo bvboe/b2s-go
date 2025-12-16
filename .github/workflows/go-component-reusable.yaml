@@ -291,7 +291,7 @@ jobs:
       id: platforms
       run: |
         PLATFORMS='${{ inputs.docker-platforms }}'
-        JSON_ARRAY=$(echo "$PLATFORMS" | jq -R 'split(",") | map(gsub(" "; ""))')
+        JSON_ARRAY=$(echo "$PLATFORMS" | jq -Rc 'split(",") | map(gsub(" "; ""))')
         echo "json=$JSON_ARRAY" >> $GITHUB_OUTPUT
     
     - name: Get version
