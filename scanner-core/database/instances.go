@@ -24,21 +24,32 @@ type ContainerInstanceRow struct {
 // AddInstance adds a container instance to the database
 // Returns whether the instance was newly created
 func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
-	// First, get or create the image
-	imageID, _, err := db.GetOrCreateImage(instance.Image)
+	// Start a transaction to ensure atomic operation across both tables
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return false, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// First, get or create the image (using transaction-aware helper)
+	imageID, _, err := db.getOrCreateImageTx(tx, instance.Image)
 	if err != nil {
 		return false, fmt.Errorf("failed to get/create image: %w", err)
 	}
 
 	// Check if instance already exists
 	var existingID int64
-	err = db.conn.QueryRow(`
+	err = tx.QueryRow(`
 		SELECT id FROM container_instances
 		WHERE namespace = ? AND pod = ? AND container = ?
 	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container).Scan(&existingID)
 
 	if err == nil {
 		// Instance already exists, do nothing
+		// Commit the transaction (even though we didn't change anything)
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("failed to commit transaction: %w", err)
+		}
 		return false, nil
 	}
 
@@ -47,7 +58,7 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 	}
 
 	// Instance doesn't exist, create it
-	_, err = db.conn.Exec(`
+	_, err = tx.Exec(`
 		INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
@@ -55,6 +66,11 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 
 	if err != nil {
 		return false, fmt.Errorf("failed to insert instance: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	log.Printf("New container instance added to database: namespace=%s, pod=%s, container=%s (image_id=%d)",
@@ -89,22 +105,29 @@ func (db *DB) RemoveInstance(id containers.ContainerInstanceID) error {
 
 // SetInstances replaces all instances with the given set
 func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
+	// Start a transaction to ensure atomic replacement
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// Delete all existing instances
-	_, err := db.conn.Exec("DELETE FROM container_instances")
+	_, err = tx.Exec("DELETE FROM container_instances")
 	if err != nil {
 		return fmt.Errorf("failed to delete instances: %w", err)
 	}
 
 	// Add new instances
 	for _, instance := range instances {
-		// Get or create image
-		imageID, newImage, err := db.GetOrCreateImage(instance.Image)
+		// Get or create image (using transaction-aware helper)
+		imageID, newImage, err := db.getOrCreateImageTx(tx, instance.Image)
 		if err != nil {
 			return fmt.Errorf("failed to get/create image: %w", err)
 		}
 
 		// Insert instance
-		_, err = db.conn.Exec(`
+		_, err = tx.Exec(`
 			INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id)
 			VALUES (?, ?, ?, ?, ?, ?)
 		`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
@@ -117,6 +140,11 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
 		if newImage {
 			log.Printf("TODO: Request SBOM for image: %s:%s", instance.Image.Repository, instance.Image.Tag)
 		}
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	log.Printf("Set container instances in database: %d instances", len(instances))

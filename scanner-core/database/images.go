@@ -21,9 +21,17 @@ type ContainerImage struct {
 // GetOrCreateImage gets an existing image or creates a new one based on digest
 // Returns the image ID and whether it was newly created
 func (db *DB) GetOrCreateImage(image containers.ImageID) (int64, bool, error) {
+	return db.getOrCreateImageTx(db.conn, image)
+}
+
+// getOrCreateImageTx is a transaction-aware version that works with both *sql.DB and *sql.Tx
+func (db *DB) getOrCreateImageTx(exec interface {
+	QueryRow(query string, args ...interface{}) *sql.Row
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}, image containers.ImageID) (int64, bool, error) {
 	// Try to get existing image by digest
 	var id int64
-	err := db.conn.QueryRow(`
+	err := exec.QueryRow(`
 		SELECT id FROM container_images
 		WHERE digest = ?
 	`, image.Digest).Scan(&id)
@@ -38,7 +46,7 @@ func (db *DB) GetOrCreateImage(image containers.ImageID) (int64, bool, error) {
 	}
 
 	// Image doesn't exist, create it
-	result, err := db.conn.Exec(`
+	result, err := exec.Exec(`
 		INSERT INTO container_images (digest, sbom_requested)
 		VALUES (?, 0)
 	`, image.Digest)
