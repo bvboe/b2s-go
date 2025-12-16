@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/bvboe/b2s-go/bjorn2scan-agent/docker"
+	"github.com/bvboe/b2s-go/bjorn2scan-agent/syft"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
+	"github.com/bvboe/b2s-go/scanner-core/scanning"
 )
 
 // version is set at build time via ldflags
@@ -94,6 +96,20 @@ func main() {
 
 	// Connect database to manager
 	manager.SetDatabase(db)
+
+	// Create SBOM retriever using syft library
+	// For the agent, we scan local Docker images directly
+	sbomRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
+		// nodeName and runtime are ignored for local agent - we scan from local Docker daemon
+		return syft.GenerateSBOM(ctx, image)
+	}
+
+	// Initialize scan queue
+	scanQueue := scanning.NewJobQueue(db, sbomRetriever)
+	defer scanQueue.Shutdown()
+
+	// Connect scan queue to manager
+	manager.SetScanQueue(scanQueue)
 
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

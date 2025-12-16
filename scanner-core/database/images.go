@@ -14,6 +14,7 @@ type ContainerImage struct {
 	Digest        string `json:"digest"`
 	SBOMRequested bool   `json:"sbom_requested"`
 	SBOMReceived  bool   `json:"sbom_received"`
+	ScanStatus    string `json:"scan_status"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
 }
@@ -76,7 +77,7 @@ func (db *DB) getOrCreateImageTx(exec interface {
 // GetAllImages returns all container images from the database
 func (db *DB) GetAllImages() (interface{}, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, digest, sbom_requested, sbom_received, created_at, updated_at
+		SELECT id, digest, sbom_requested, sbom_received, scan_status, created_at, updated_at
 		FROM container_images
 		ORDER BY created_at DESC
 	`)
@@ -89,13 +90,19 @@ func (db *DB) GetAllImages() (interface{}, error) {
 	for rows.Next() {
 		var img ContainerImage
 		var sbomRequested, sbomReceived int
+		var scanStatus sql.NullString
 		err := rows.Scan(&img.ID, &img.Digest,
-			&sbomRequested, &sbomReceived, &img.CreatedAt, &img.UpdatedAt)
+			&sbomRequested, &sbomReceived, &scanStatus, &img.CreatedAt, &img.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan image: %w", err)
 		}
 		img.SBOMRequested = sbomRequested == 1
 		img.SBOMReceived = sbomReceived == 1
+		if scanStatus.Valid {
+			img.ScanStatus = scanStatus.String
+		} else {
+			img.ScanStatus = "pending"
+		}
 		images = append(images, img)
 	}
 
@@ -106,12 +113,13 @@ func (db *DB) GetAllImages() (interface{}, error) {
 func (db *DB) GetImageByID(id int64) (*ContainerImage, error) {
 	var img ContainerImage
 	var sbomRequested, sbomReceived int
+	var scanStatus sql.NullString
 	err := db.conn.QueryRow(`
-		SELECT id, digest, sbom_requested, sbom_received, created_at, updated_at
+		SELECT id, digest, sbom_requested, sbom_received, scan_status, created_at, updated_at
 		FROM container_images
 		WHERE id = ?
 	`, id).Scan(&img.ID, &img.Digest,
-		&sbomRequested, &sbomReceived, &img.CreatedAt, &img.UpdatedAt)
+		&sbomRequested, &sbomReceived, &scanStatus, &img.CreatedAt, &img.UpdatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image: %w", err)
@@ -119,5 +127,10 @@ func (db *DB) GetImageByID(id int64) (*ContainerImage, error) {
 
 	img.SBOMRequested = sbomRequested == 1
 	img.SBOMReceived = sbomReceived == 1
+	if scanStatus.Valid {
+		img.ScanStatus = scanStatus.String
+	} else {
+		img.ScanStatus = "pending"
+	}
 	return &img, nil
 }

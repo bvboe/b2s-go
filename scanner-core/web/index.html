@@ -172,6 +172,45 @@
             color: #495057;
         }
 
+        .badge-info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .download-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+            transform: translateY(-1px);
+        }
+
+        .download-btn:active {
+            transform: translateY(0);
+        }
+
+        .download-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
         .code {
             font-family: 'Monaco', 'Courier New', monospace;
             background: #f8f9fa;
@@ -318,6 +357,8 @@
                             <th>Digest</th>
                             <th>SBOM Requested</th>
                             <th>SBOM Received</th>
+                            <th>Scan Status</th>
+                            <th>Actions</th>
                             <th>Created</th>
                             <th>Updated</th>
                         </tr>
@@ -419,6 +460,8 @@
                         <td><span class="code" style="font-size: 0.75rem;">${truncateDigest(image.digest)}</span></td>
                         <td>${getBadge(image.sbom_requested)}</td>
                         <td>${getBadge(image.sbom_received)}</td>
+                        <td>${getScanStatusBadge(image.scan_status)}</td>
+                        <td>${getDownloadButton(image.digest, image.scan_status)}</td>
                         <td>${formatDate(image.created_at)}</td>
                         <td>${formatDate(image.updated_at)}</td>
                     </tr>
@@ -445,6 +488,29 @@
                 return '<span class="badge badge-success">✓ Yes</span>';
             }
             return '<span class="badge badge-warning">✗ No</span>';
+        }
+
+        function getScanStatusBadge(status) {
+            if (!status || status === 'pending') {
+                return '<span class="badge badge-secondary">Pending</span>';
+            }
+            if (status === 'scanning') {
+                return '<span class="badge badge-info">Scanning...</span>';
+            }
+            if (status === 'scanned') {
+                return '<span class="badge badge-success">✓ Scanned</span>';
+            }
+            if (status === 'failed') {
+                return '<span class="badge badge-danger">✗ Failed</span>';
+            }
+            return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
+        }
+
+        function getDownloadButton(digest, scanStatus) {
+            if (scanStatus === 'scanned') {
+                return `<a href="/sbom/${encodeURIComponent(digest)}" class="download-btn" download>↓ Download SBOM</a>`;
+            }
+            return '<span style="color: #999; font-size: 0.75rem;">-</span>';
         }
 
         function formatDate(dateStr) {
