@@ -16,6 +16,13 @@ POD_SCANNER_IMAGE="pod-scanner"
 IMAGE_TAG="local-test"
 CLEANUP_ON_EXIT=true
 
+# Test environment selection
+# Set TEST_CLUSTERS to control which clusters to test:
+#   "kind" (default) - Test on kind only (faster)
+#   "minikube" - Test on minikube only
+#   "both" - Test on both kind and minikube
+TEST_CLUSTERS="${TEST_CLUSTERS:-kind}"
+
 # Track test results
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -77,8 +84,49 @@ run_test() {
     fi
 }
 
+# Run integration tests against a deployed cluster
+# Args: cluster_name (for display)
+run_integration_tests() {
+    local cluster_name=$1
+
+    print_info "Waiting for pod to be ready..."
+    if kubectl wait --for=condition=ready pod \
+        -l app.kubernetes.io/name=bjorn2scan \
+        -n "$TEST_NAMESPACE" \
+        --timeout=120s; then
+
+        print_success "Pod ready on $cluster_name"
+
+        # Run integration tests
+        print_info "Setting up port-forward to scan-server..."
+        kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:80 > /dev/null 2>&1 &
+        local pf_pid=$!
+        sleep 3
+
+        print_info "Running integration tests..."
+        cd "$SCRIPT_DIR/k8s-scan-server/test/integration"
+        if SERVICE_URL=http://localhost:8080 go test -v -timeout 5m ./...; then
+            print_success "Integration tests passed on $cluster_name"
+            ((TESTS_PASSED++))
+        else
+            print_error "Integration tests failed on $cluster_name"
+            ((TESTS_FAILED++))
+        fi
+        cd "$SCRIPT_DIR"
+
+        # Cleanup port-forward
+        kill $pf_pid 2>/dev/null || true
+    else
+        print_error "Pod failed to become ready on $cluster_name"
+        kubectl get pods -n "$TEST_NAMESPACE"
+        kubectl logs -l app.kubernetes.io/name=bjorn2scan -n "$TEST_NAMESPACE" --tail=50
+        ((TESTS_FAILED++))
+    fi
+}
+
 print_header "Local Test Suite"
 echo "Test namespace: $TEST_NAMESPACE"
+echo "Test clusters: $TEST_CLUSTERS"
 echo "Scan Server Image: $SCAN_SERVER_IMAGE:$IMAGE_TAG"
 echo "Pod Scanner Image: $POD_SCANNER_IMAGE:$IMAGE_TAG"
 echo "Agent Image: bjorn2scan-agent:$IMAGE_TAG"
@@ -168,148 +216,94 @@ run_test "Helm lint" helm lint ./helm/bjorn2scan
 run_test "Helm template" helm template test ./helm/bjorn2scan --namespace "$TEST_NAMESPACE" > /dev/null
 
 # 5. Integration Tests - kind
-print_header "5. Integration Tests - kind"
+if [ "$TEST_CLUSTERS" = "kind" ] || [ "$TEST_CLUSTERS" = "both" ]; then
+    print_header "5. Integration Tests - kind"
 
-print_info "Creating kind cluster..."
-if kind create cluster --name local-test --wait 5m; then
-    print_success "kind cluster created"
+    print_info "Creating kind cluster..."
+    if kind create cluster --name local-test --wait 5m; then
+        print_success "kind cluster created"
 
-    print_info "Loading images to kind..."
-    kind load docker-image "$SCAN_SERVER_IMAGE:$IMAGE_TAG" --name local-test
-    kind load docker-image "$POD_SCANNER_IMAGE:$IMAGE_TAG" --name local-test
+        print_info "Loading images to kind..."
+        kind load docker-image "$SCAN_SERVER_IMAGE:$IMAGE_TAG" --name local-test
+        kind load docker-image "$POD_SCANNER_IMAGE:$IMAGE_TAG" --name local-test
 
-    print_info "Creating namespace..."
-    kubectl create namespace "$TEST_NAMESPACE"
+        print_info "Creating namespace..."
+        kubectl create namespace "$TEST_NAMESPACE"
 
-    print_info "Installing Helm chart..."
-    if helm install bjorn2scan "$SCRIPT_DIR/helm/bjorn2scan" \
-        --namespace "$TEST_NAMESPACE" \
-        --set scanServer.image.repository="$SCAN_SERVER_IMAGE" \
-        --set scanServer.image.tag="$IMAGE_TAG" \
-        --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
-        --set podScanner.image.tag="$IMAGE_TAG" \
-        --set scanServer.persistence.enabled=false \
-        --wait --timeout 2m; then
+        print_info "Installing Helm chart..."
+        if helm install bjorn2scan "$SCRIPT_DIR/helm/bjorn2scan" \
+            --namespace "$TEST_NAMESPACE" \
+            --set scanServer.image.repository="$SCAN_SERVER_IMAGE" \
+            --set scanServer.image.tag="$IMAGE_TAG" \
+            --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
+            --set podScanner.image.tag="$IMAGE_TAG" \
+            --set scanServer.persistence.enabled=false \
+            --wait --timeout 2m; then
 
-        print_success "Helm chart installed on kind"
+            print_success "Helm chart installed on kind"
 
-        print_info "Waiting for pod to be ready..."
-        if kubectl wait --for=condition=ready pod \
-            -l app.kubernetes.io/name=bjorn2scan \
-            -n "$TEST_NAMESPACE" \
-            --timeout=120s; then
+            # Run integration tests using shared function
+            run_integration_tests "kind"
 
-            print_success "Pod ready on kind"
-
-            # Run integration tests
-            print_info "Setting up port-forward to scan-server..."
-            kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:80 > /dev/null 2>&1 &
-            PF_PID=$!
-            sleep 3
-
-            print_info "Running integration tests..."
-            cd "$SCRIPT_DIR/k8s-scan-server/test/integration"
-            if SERVICE_URL=http://localhost:8080 go test -v -timeout 5m ./...; then
-                print_success "Integration tests passed on kind"
-                ((TESTS_PASSED++))
-            else
-                print_error "Integration tests failed on kind"
-                ((TESTS_FAILED++))
-            fi
-            cd "$SCRIPT_DIR"
-
-            # Cleanup port-forward
-            kill $PF_PID 2>/dev/null || true
+            print_info "Uninstalling from kind..."
+            helm uninstall bjorn2scan -n "$TEST_NAMESPACE"
         else
-            print_error "Pod failed to become ready on kind"
-            kubectl get pods -n "$TEST_NAMESPACE"
-            kubectl logs -l app.kubernetes.io/name=bjorn2scan -n "$TEST_NAMESPACE" --tail=50
+            print_error "Failed to install Helm chart on kind"
             ((TESTS_FAILED++))
         fi
 
-        print_info "Uninstalling from kind..."
-        helm uninstall bjorn2scan -n "$TEST_NAMESPACE"
+        print_info "Deleting kind cluster..."
+        kind delete cluster --name local-test
     else
-        print_error "Failed to install Helm chart on kind"
+        print_error "Failed to create kind cluster"
         ((TESTS_FAILED++))
     fi
-
-    print_info "Deleting kind cluster..."
-    kind delete cluster --name local-test
 else
-    print_error "Failed to create kind cluster"
-    ((TESTS_FAILED++))
+    print_info "Skipping kind integration tests (TEST_CLUSTERS=$TEST_CLUSTERS)"
 fi
 
 # 6. Integration Tests - minikube
-print_header "6. Integration Tests - minikube"
+if [ "$TEST_CLUSTERS" = "minikube" ] || [ "$TEST_CLUSTERS" = "both" ]; then
+    print_header "6. Integration Tests - minikube"
 
-print_info "Starting minikube (if not running)..."
-if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
-    print_success "minikube running"
+    print_info "Starting minikube (if not running)..."
+    if minikube start 2>/dev/null || minikube status > /dev/null 2>&1; then
+        print_success "minikube running"
 
-    print_info "Loading images to minikube..."
-    minikube image load "$SCAN_SERVER_IMAGE:$IMAGE_TAG"
-    minikube image load "$POD_SCANNER_IMAGE:$IMAGE_TAG"
+        print_info "Loading images to minikube..."
+        minikube image load "$SCAN_SERVER_IMAGE:$IMAGE_TAG"
+        minikube image load "$POD_SCANNER_IMAGE:$IMAGE_TAG"
 
-    print_info "Creating namespace..."
-    kubectl create namespace "$TEST_NAMESPACE" || true
+        print_info "Creating namespace..."
+        kubectl create namespace "$TEST_NAMESPACE" || true
 
-    print_info "Installing Helm chart..."
-    if helm install bjorn2scan "$SCRIPT_DIR/helm/bjorn2scan" \
-        --namespace "$TEST_NAMESPACE" \
-        --set scanServer.image.repository="$SCAN_SERVER_IMAGE" \
-        --set scanServer.image.tag="$IMAGE_TAG" \
-        --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
-        --set podScanner.image.tag="$IMAGE_TAG" \
-        --set scanServer.persistence.enabled=false \
-        --wait --timeout 2m; then
+        print_info "Installing Helm chart..."
+        if helm install bjorn2scan "$SCRIPT_DIR/helm/bjorn2scan" \
+            --namespace "$TEST_NAMESPACE" \
+            --set scanServer.image.repository="$SCAN_SERVER_IMAGE" \
+            --set scanServer.image.tag="$IMAGE_TAG" \
+            --set podScanner.image.repository="$POD_SCANNER_IMAGE" \
+            --set podScanner.image.tag="$IMAGE_TAG" \
+            --set scanServer.persistence.enabled=false \
+            --wait --timeout 2m; then
 
-        print_success "Helm chart installed on minikube"
+            print_success "Helm chart installed on minikube"
 
-        print_info "Waiting for pod to be ready..."
-        if kubectl wait --for=condition=ready pod \
-            -l app.kubernetes.io/name=bjorn2scan \
-            -n "$TEST_NAMESPACE" \
-            --timeout=120s; then
+            # Run integration tests using shared function
+            run_integration_tests "minikube"
 
-            print_success "Pod ready on minikube"
-
-            # Run integration tests
-            print_info "Setting up port-forward to scan-server..."
-            kubectl port-forward -n "$TEST_NAMESPACE" svc/bjorn2scan 8080:80 > /dev/null 2>&1 &
-            PF_PID=$!
-            sleep 3
-
-            print_info "Running integration tests..."
-            cd "$SCRIPT_DIR/k8s-scan-server/test/integration"
-            if SERVICE_URL=http://localhost:8080 go test -v -timeout 5m ./...; then
-                print_success "Integration tests passed on minikube"
-                ((TESTS_PASSED++))
-            else
-                print_error "Integration tests failed on minikube"
-                ((TESTS_FAILED++))
-            fi
-            cd "$SCRIPT_DIR"
-
-            # Cleanup port-forward
-            kill $PF_PID 2>/dev/null || true
+            print_info "Uninstalling from minikube..."
+            helm uninstall bjorn2scan -n "$TEST_NAMESPACE"
         else
-            print_error "Pod failed to become ready on minikube"
-            kubectl get pods -n "$TEST_NAMESPACE"
-            kubectl logs -l app.kubernetes.io/name=bjorn2scan -n "$TEST_NAMESPACE" --tail=50
+            print_error "Failed to install Helm chart on minikube"
             ((TESTS_FAILED++))
         fi
-
-        print_info "Uninstalling from minikube..."
-        helm uninstall bjorn2scan -n "$TEST_NAMESPACE"
     else
-        print_error "Failed to install Helm chart on minikube"
+        print_error "Failed to start minikube"
         ((TESTS_FAILED++))
     fi
 else
-    print_error "Failed to start minikube"
-    ((TESTS_FAILED++))
+    print_info "Skipping minikube integration tests (TEST_CLUSTERS=$TEST_CLUSTERS)"
 fi
 
 # Summary
