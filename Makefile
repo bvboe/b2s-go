@@ -6,7 +6,9 @@ HELM_RELEASE?=bjorn2scan
 HELM_CHART=./helm/bjorn2scan
 SCAN_SERVER_IMAGE?=ghcr.io/bvboe/b2s-go/k8s-scan-server
 POD_SCANNER_IMAGE?=ghcr.io/bvboe/b2s-go/pod-scanner
-IMAGE_TAG?=latest
+# Use timestamp for local builds to ensure unique tags (evaluated once and exported)
+IMAGE_TAG:=$(if $(IMAGE_TAG),$(IMAGE_TAG),local-$(shell date +%s))
+export IMAGE_TAG
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -59,8 +61,10 @@ helm-install: helm-lint ## Install the Helm chart
 		--create-namespace \
 		--set scanServer.image.repository=$(SCAN_SERVER_IMAGE) \
 		--set scanServer.image.tag=$(IMAGE_TAG) \
+		--set scanServer.image.pullPolicy=IfNotPresent \
 		--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
-		--set podScanner.image.tag=$(IMAGE_TAG)
+		--set podScanner.image.tag=$(IMAGE_TAG) \
+		--set podScanner.image.pullPolicy=IfNotPresent
 
 helm-upgrade: ## Upgrade the Helm release
 	@echo "Upgrading Helm release $(HELM_RELEASE) in namespace $(NAMESPACE)..."
@@ -68,8 +72,13 @@ helm-upgrade: ## Upgrade the Helm release
 		--namespace $(NAMESPACE) \
 		--set scanServer.image.repository=$(SCAN_SERVER_IMAGE) \
 		--set scanServer.image.tag=$(IMAGE_TAG) \
+		--set scanServer.image.pullPolicy=IfNotPresent \
 		--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
-		--set podScanner.image.tag=$(IMAGE_TAG)
+		--set podScanner.image.tag=$(IMAGE_TAG) \
+		--set podScanner.image.pullPolicy=IfNotPresent
+	@echo "Rolling out restart to pick up new images..."
+	kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(NAMESPACE)
+	kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(NAMESPACE)
 
 helm-uninstall: ## Uninstall the Helm release
 	@echo "Uninstalling Helm release $(HELM_RELEASE) from namespace $(NAMESPACE)..."
@@ -77,6 +86,9 @@ helm-uninstall: ## Uninstall the Helm release
 
 # Quick Helm deploy for kind (build all + load all + install/upgrade)
 helm-kind-deploy: docker-build-all ## Build and deploy to kind
+	@echo "============================================"
+	@echo "Deploying to kind with image tag: $(IMAGE_TAG)"
+	@echo "============================================"
 	@echo "Loading images into kind cluster..."
 	kind load docker-image $(SCAN_SERVER_IMAGE):$(IMAGE_TAG)
 	kind load docker-image $(POD_SCANNER_IMAGE):$(IMAGE_TAG)
@@ -85,10 +97,19 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 	else \
 		$(MAKE) helm-install; \
 	fi
-	@echo "Deployment complete! Check status with: kubectl get pods -n $(NAMESPACE)"
+	@echo "============================================"
+	@echo "Deployment complete!"
+	@echo "Image tag used: $(IMAGE_TAG)"
+	@echo "Check status: kubectl get pods -n $(NAMESPACE)"
+	@echo "View logs: kubectl logs -l app.kubernetes.io/name=bjorn2scan -n $(NAMESPACE)"
+	@echo "Port forward: kubectl port-forward svc/$(HELM_RELEASE) 8080:80 -n $(NAMESPACE)"
+	@echo "============================================"
 
 # Quick Helm deploy for minikube (build all + load all + install/upgrade)
 helm-minikube-deploy: docker-build-all ## Build and deploy to minikube
+	@echo "============================================"
+	@echo "Deploying to minikube with image tag: $(IMAGE_TAG)"
+	@echo "============================================"
 	@echo "Loading images into minikube..."
 	minikube image load $(SCAN_SERVER_IMAGE):$(IMAGE_TAG)
 	minikube image load $(POD_SCANNER_IMAGE):$(IMAGE_TAG)
@@ -97,4 +118,10 @@ helm-minikube-deploy: docker-build-all ## Build and deploy to minikube
 	else \
 		$(MAKE) helm-install; \
 	fi
-	@echo "Deployment complete! Check status with: kubectl get pods -n $(NAMESPACE)"
+	@echo "============================================"
+	@echo "Deployment complete!"
+	@echo "Image tag used: $(IMAGE_TAG)"
+	@echo "Check status: kubectl get pods -n $(NAMESPACE)"
+	@echo "View logs: kubectl logs -l app.kubernetes.io/name=bjorn2scan -n $(NAMESPACE)"
+	@echo "Port forward: kubectl port-forward svc/$(HELM_RELEASE) 8080:80 -n $(NAMESPACE)"
+	@echo "============================================"

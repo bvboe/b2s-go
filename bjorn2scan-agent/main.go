@@ -116,6 +116,7 @@ func main() {
 	mux := http.NewServeMux()
 	handlers.RegisterHandlers(mux, infoProvider)
 	handlers.RegisterDatabaseHandlers(mux, db)
+	handlers.RegisterStaticHandlers(mux)
 
 	server := &http.Server{
 		Addr:    ":" + port,

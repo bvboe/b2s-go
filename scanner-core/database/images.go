@@ -10,12 +10,12 @@ import (
 
 // ContainerImage represents a container image in the database
 type ContainerImage struct {
-	ID            int64
-	Digest        string
-	SBOMRequested bool
-	SBOMReceived  bool
-	CreatedAt     string
-	UpdatedAt     string
+	ID            int64  `json:"id"`
+	Digest        string `json:"digest"`
+	SBOMRequested bool   `json:"sbom_requested"`
+	SBOMReceived  bool   `json:"sbom_received"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // GetOrCreateImage gets an existing image or creates a new one based on digest

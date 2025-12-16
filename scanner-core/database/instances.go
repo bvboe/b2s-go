@@ -10,15 +10,15 @@ import (
 
 // ContainerInstanceRow represents a container instance in the database
 type ContainerInstanceRow struct {
-	ID         int64
-	Namespace  string
-	Pod        string
-	Container  string
-	ImageID    int64
-	Repository string
-	Tag        string
-	Digest     string
-	CreatedAt  string
+	ID         int64  `json:"id"`
+	Namespace  string `json:"namespace"`
+	Pod        string `json:"pod"`
+	Container  string `json:"container"`
+	ImageID    int64  `json:"image_id"`
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	Digest     string `json:"digest"`
+	CreatedAt  string `json:"created_at"`
 }
 
 // AddInstance adds a container instance to the database

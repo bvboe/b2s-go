@@ -22,8 +22,13 @@ func DatabaseInstancesHandler(provider DatabaseProvider) http.HandlerFunc {
 			return
 		}
 
+		// Wrap response in an object with "instances" key
+		response := map[string]interface{}{
+			"instances": instances,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(instances); err != nil {
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			log.Printf("Error encoding instances response: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
@@ -40,8 +45,13 @@ func DatabaseImagesHandler(provider DatabaseProvider) http.HandlerFunc {
 			return
 		}
 
+		// Wrap response in an object with "images" key
+		response := map[string]interface{}{
+			"images": images,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(images); err != nil {
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			log.Printf("Error encoding images response: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
