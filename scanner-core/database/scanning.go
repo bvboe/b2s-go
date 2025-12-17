@@ -152,3 +152,86 @@ func (db *DB) GetFirstInstanceForImage(digest string) (*ContainerInstanceRow, er
 
 	return &inst, nil
 }
+
+// GetImageVulnerabilityStatus returns the vulnerability scan status for an image by digest
+// Returns: "pending", "scanning", "scanned", or "failed"
+func (db *DB) GetImageVulnerabilityStatus(digest string) (string, error) {
+	var status string
+	err := db.conn.QueryRow(`
+		SELECT vulnerability_status FROM container_images
+		WHERE digest = ?
+	`, digest).Scan(&status)
+
+	if err == sql.ErrNoRows {
+		return "pending", nil // Image not found means not scanned
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get vulnerability status: %w", err)
+	}
+
+	return status, nil
+}
+
+// UpdateVulnerabilityStatus updates the vulnerability scan status and error message for an image
+func (db *DB) UpdateVulnerabilityStatus(digest string, status string, errorMsg string) error {
+	var scannedAt interface{}
+	if status == "scanned" {
+		scannedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	_, err := db.conn.Exec(`
+		UPDATE container_images
+		SET vulnerability_status = ?,
+		    vulnerability_error = ?,
+		    vulnerabilities_scanned_at = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE digest = ?
+	`, status, errorMsg, scannedAt, digest)
+
+	if err != nil {
+		return fmt.Errorf("failed to update vulnerability status: %w", err)
+	}
+
+	return nil
+}
+
+// StoreVulnerabilities stores the vulnerability scan JSON for an image and marks it as scanned
+func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte) error {
+	_, err := db.conn.Exec(`
+		UPDATE container_images
+		SET vulnerabilities = ?,
+		    vulnerability_status = 'scanned',
+		    vulnerability_error = NULL,
+		    vulnerabilities_scanned_at = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE digest = ?
+	`, string(vulnJSON), time.Now().UTC().Format(time.RFC3339), digest)
+
+	if err != nil {
+		return fmt.Errorf("failed to store vulnerabilities: %w", err)
+	}
+
+	return nil
+}
+
+// GetVulnerabilities retrieves the vulnerability scan JSON for an image by digest
+func (db *DB) GetVulnerabilities(digest string) ([]byte, error) {
+	var vuln sql.NullString
+	err := db.conn.QueryRow(`
+		SELECT vulnerabilities FROM container_images
+		WHERE digest = ?
+	`, digest).Scan(&vuln)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("image not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vulnerabilities: %w", err)
+	}
+
+	if !vuln.Valid || vuln.String == "" {
+		return nil, fmt.Errorf("vulnerabilities not available")
+	}
+
+	return []byte(vuln.String), nil
+}

@@ -10,13 +10,14 @@ import (
 
 // ContainerImage represents a container image in the database
 type ContainerImage struct {
-	ID            int64  `json:"id"`
-	Digest        string `json:"digest"`
-	SBOMRequested bool   `json:"sbom_requested"`
-	SBOMReceived  bool   `json:"sbom_received"`
-	ScanStatus    string `json:"scan_status"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID                   int64  `json:"id"`
+	Digest               string `json:"digest"`
+	SBOMRequested        bool   `json:"sbom_requested"`
+	SBOMReceived         bool   `json:"sbom_received"`
+	ScanStatus           string `json:"scan_status"`
+	VulnerabilityStatus  string `json:"vulnerability_status"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
 }
 
 // GetOrCreateImage gets an existing image or creates a new one based on digest
@@ -77,7 +78,7 @@ func (db *DB) getOrCreateImageTx(exec interface {
 // GetAllImages returns all container images from the database
 func (db *DB) GetAllImages() (interface{}, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, digest, sbom_requested, sbom_received, scan_status, created_at, updated_at
+		SELECT id, digest, sbom_requested, sbom_received, scan_status, vulnerability_status, created_at, updated_at
 		FROM container_images
 		ORDER BY created_at DESC
 	`)
@@ -90,9 +91,9 @@ func (db *DB) GetAllImages() (interface{}, error) {
 	for rows.Next() {
 		var img ContainerImage
 		var sbomRequested, sbomReceived int
-		var scanStatus sql.NullString
+		var scanStatus, vulnStatus sql.NullString
 		err := rows.Scan(&img.ID, &img.Digest,
-			&sbomRequested, &sbomReceived, &scanStatus, &img.CreatedAt, &img.UpdatedAt)
+			&sbomRequested, &sbomReceived, &scanStatus, &vulnStatus, &img.CreatedAt, &img.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan image: %w", err)
 		}
@@ -102,6 +103,11 @@ func (db *DB) GetAllImages() (interface{}, error) {
 			img.ScanStatus = scanStatus.String
 		} else {
 			img.ScanStatus = "pending"
+		}
+		if vulnStatus.Valid {
+			img.VulnerabilityStatus = vulnStatus.String
+		} else {
+			img.VulnerabilityStatus = "pending"
 		}
 		images = append(images, img)
 	}
@@ -113,13 +119,13 @@ func (db *DB) GetAllImages() (interface{}, error) {
 func (db *DB) GetImageByID(id int64) (*ContainerImage, error) {
 	var img ContainerImage
 	var sbomRequested, sbomReceived int
-	var scanStatus sql.NullString
+	var scanStatus, vulnStatus sql.NullString
 	err := db.conn.QueryRow(`
-		SELECT id, digest, sbom_requested, sbom_received, scan_status, created_at, updated_at
+		SELECT id, digest, sbom_requested, sbom_received, scan_status, vulnerability_status, created_at, updated_at
 		FROM container_images
 		WHERE id = ?
 	`, id).Scan(&img.ID, &img.Digest,
-		&sbomRequested, &sbomReceived, &scanStatus, &img.CreatedAt, &img.UpdatedAt)
+		&sbomRequested, &sbomReceived, &scanStatus, &vulnStatus, &img.CreatedAt, &img.UpdatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image: %w", err)
@@ -131,6 +137,11 @@ func (db *DB) GetImageByID(id int64) (*ContainerImage, error) {
 		img.ScanStatus = scanStatus.String
 	} else {
 		img.ScanStatus = "pending"
+	}
+	if vulnStatus.Valid {
+		img.VulnerabilityStatus = vulnStatus.String
+	} else {
+		img.VulnerabilityStatus = "pending"
 	}
 	return &img, nil
 }

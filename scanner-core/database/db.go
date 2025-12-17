@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-
-	_ "modernc.org/sqlite" // SQLite driver
 )
 
 // DB wraps the database connection

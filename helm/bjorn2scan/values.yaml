@@ -47,11 +47,11 @@ scanServer:
 
   resources:
     limits:
-      cpu: 200m
-      memory: 128Mi
+      cpu: 2000m
+      memory: 1Gi  # Increased for Grype vulnerability database download (~200MB)
     requests:
-      cpu: 100m
-      memory: 64Mi
+      cpu: 200m
+      memory: 512Mi  # Increased to handle vulnerability scanning workload
 
   livenessProbe:
     httpGet:

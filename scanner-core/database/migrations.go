@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 type migration struct {
 	version int
@@ -29,6 +29,11 @@ var migrations = []migration{
 		version: 3,
 		name:    "add_sbom_and_node_tracking",
 		up:      migrateToV3,
+	},
+	{
+		version: 4,
+		name:    "add_vulnerability_scanning",
+		up:      migrateToV4,
 	},
 }
 
@@ -286,6 +291,42 @@ func migrateToV3(conn *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create scan_status index: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// migrateToV4 adds vulnerability scanning capabilities
+func migrateToV4(conn *sql.DB) error {
+	// Start a transaction for the migration
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Step 1: Add vulnerability scanning columns to container_images
+	_, err = tx.Exec(`
+		ALTER TABLE container_images ADD COLUMN vulnerabilities TEXT;
+		ALTER TABLE container_images ADD COLUMN vulnerability_status TEXT DEFAULT 'pending';
+		ALTER TABLE container_images ADD COLUMN vulnerability_error TEXT;
+		ALTER TABLE container_images ADD COLUMN vulnerabilities_scanned_at DATETIME;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add vulnerability columns to container_images: %w", err)
+	}
+
+	// Step 2: Create index on vulnerability_status for efficient queries
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_vulnerability_status ON container_images(vulnerability_status);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerability_status index: %w", err)
 	}
 
 	// Commit the transaction

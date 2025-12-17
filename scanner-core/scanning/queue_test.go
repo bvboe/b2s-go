@@ -10,6 +10,9 @@ import (
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/grype"
+	// Note: SQLite driver is imported via Grype's dependencies
+	// DO NOT import sqlitedriver here to avoid duplicate registration
 )
 
 // TestJobQueueIntegration tests the complete scanning workflow
@@ -35,8 +38,8 @@ func TestJobQueueIntegration(t *testing.T) {
 		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
 	}
 
-	// Create job queue
-	queue := NewJobQueue(db, mockRetriever)
+	// Create job queue (with default grype config for this test)
+	queue := NewJobQueue(db, mockRetriever, grype.Config{})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -123,8 +126,8 @@ func TestJobQueueErrorHandling(t *testing.T) {
 		return nil, errors.New("scan failed: image not found")
 	}
 
-	// Create job queue
-	queue := NewJobQueue(db, mockRetriever)
+	// Create job queue (with default grype config for this test)
+	queue := NewJobQueue(db, mockRetriever, grype.Config{})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -204,8 +207,8 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
 	}
 
-	// Create job queue
-	queue := NewJobQueue(db, mockRetriever)
+	// Create job queue (with default grype config for this test)
+	queue := NewJobQueue(db, mockRetriever, grype.Config{})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -280,8 +283,8 @@ func TestJobQueueForceScan(t *testing.T) {
 		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
 	}
 
-	// Create job queue
-	queue := NewJobQueue(db, mockRetriever)
+	// Create job queue (with default grype config for this test)
+	queue := NewJobQueue(db, mockRetriever, grype.Config{})
 	defer queue.Shutdown()
 
 	// Create a test image

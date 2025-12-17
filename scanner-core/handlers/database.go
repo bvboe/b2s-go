@@ -12,6 +12,7 @@ type DatabaseProvider interface {
 	GetAllInstances() (interface{}, error)
 	GetAllImages() (interface{}, error)
 	GetSBOM(digest string) ([]byte, error)
+	GetVulnerabilities(digest string) ([]byte, error)
 }
 
 // DatabaseProviderWithNodeLookup extends DatabaseProvider with node lookup capability
@@ -118,9 +119,56 @@ func SBOMDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
 	}
 }
 
+// VulnerabilitiesDownloadHandler creates an HTTP handler for /vulnerabilities/{digest} endpoint
+// Downloads vulnerability report as a JSON file
+func VulnerabilitiesDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		// Expected format: /vulnerabilities/sha256:abc123...
+		path := r.URL.Path
+		if len(path) <= 17 { // "/vulnerabilities/" is 17 characters
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		digest := path[17:] // Remove "/vulnerabilities/" prefix
+
+		if digest == "" {
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+
+		// Get vulnerabilities from database
+		vulnData, err := provider.GetVulnerabilities(digest)
+		if err != nil {
+			log.Printf("Error retrieving vulnerabilities for %s: %v", digest, err)
+			http.Error(w, "Vulnerabilities not found", http.StatusNotFound)
+			return
+		}
+
+		// Create a safe filename from digest
+		filename := digest
+		if len(filename) > 20 {
+			// Use shortened version for filename: sha256_abc123.json
+			filename = filename[:7] + "_" + filename[7:19]
+		}
+		filename += ".json"
+
+		// Set headers for file download
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"vulnerabilities_"+filename+"\"")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(vulnData)))
+
+		// Write vulnerability data
+		if _, err := w.Write(vulnData); err != nil {
+			log.Printf("Error writing vulnerabilities response: %v", err)
+		}
+	}
+}
+
 // RegisterDatabaseHandlers registers database query endpoints on the provided mux
 func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider) {
 	mux.HandleFunc("/containers/instances", DatabaseInstancesHandler(provider))
 	mux.HandleFunc("/containers/images", DatabaseImagesHandler(provider))
 	mux.HandleFunc("/sbom/", SBOMDownloadHandler(provider))
+	mux.HandleFunc("/vulnerabilities/", VulnerabilitiesDownloadHandler(provider))
 }

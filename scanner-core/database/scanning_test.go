@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	_ "github.com/bvboe/b2s-go/scanner-core/sqlitedriver"
 )
 
 func TestGetImageScanStatus(t *testing.T) {

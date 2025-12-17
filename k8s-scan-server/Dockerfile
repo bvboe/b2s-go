@@ -31,7 +31,8 @@ COPY k8s-scan-server/handlers/ ./handlers/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o k8s-scan-server .
 
 # Runtime stage
-FROM cgr.dev/chainguard/static:latest
+#FROM cgr.dev/chainguard/static:latest
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 COPY --from=builder /workspace/k8s-scan-server/k8s-scan-server /k8s-scan-server
 

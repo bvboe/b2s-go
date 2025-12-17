@@ -104,8 +104,8 @@ func main() {
 		return syft.GenerateSBOM(ctx, image)
 	}
 
-	// Initialize scan queue
-	scanQueue := scanning.NewJobQueue(db, sbomRetriever)
+	// Initialize scan queue with SBOM and vulnerability scanning (using default Grype config)
+	scanQueue := scanning.NewJobQueueWithDefaults(db, sbomRetriever)
 	defer scanQueue.Shutdown()
 
 	// Connect scan queue to manager

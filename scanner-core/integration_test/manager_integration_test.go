@@ -7,6 +7,7 @@ import (
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	_ "github.com/bvboe/b2s-go/scanner-core/sqlitedriver"
 )
 
 // MockScanQueue implements ScanQueueInterface for testing

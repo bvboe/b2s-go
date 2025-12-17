@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -14,8 +15,10 @@ import (
 	"github.com/bvboe/b2s-go/k8s-scan-server/podscanner"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/grype"
 	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
+	// SQLite driver is registered by Grype's dependencies
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -96,8 +99,16 @@ func main() {
 		return podScannerClient.GetSBOMFromNode(ctx, clientset, nodeName, image.Digest)
 	}
 
-	// Create scan queue for automatic SBOM generation
-	scanQueue := scanning.NewJobQueue(db, sbomRetriever)
+	// Configure Grype to use persistent storage
+	// Get the data directory from the database path
+	dataDir := filepath.Dir(dbPath)
+	grypeCfg := grype.Config{
+		DBRootDir: dataDir, // Store Grype database in same persistent volume as SQLite database
+	}
+	log.Printf("Grype will use persistent storage at: %s/grype/", dataDir)
+
+	// Create scan queue for automatic SBOM generation and vulnerability scanning
+	scanQueue := scanning.NewJobQueue(db, sbomRetriever, grypeCfg)
 	defer scanQueue.Shutdown()
 
 	// Connect scan queue to manager
@@ -116,6 +127,9 @@ func main() {
 
 	// Register SBOM handler with pod-scanner routing
 	mux.HandleFunc("/sbom/", handlers.SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient))
+
+	// Register vulnerabilities handler (vulnerabilities are scanned locally, no routing needed)
+	mux.HandleFunc("/vulnerabilities/", corehandlers.VulnerabilitiesDownloadHandler(db))
 
 	// Register static file handlers (web UI)
 	corehandlers.RegisterStaticHandlers(mux)

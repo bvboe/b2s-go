@@ -357,7 +357,8 @@
                             <th>Digest</th>
                             <th>SBOM Requested</th>
                             <th>SBOM Received</th>
-                            <th>Scan Status</th>
+                            <th>SBOM Status</th>
+                            <th>Vuln Status</th>
                             <th>Actions</th>
                             <th>Created</th>
                             <th>Updated</th>
@@ -461,7 +462,8 @@
                         <td>${getBadge(image.sbom_requested)}</td>
                         <td>${getBadge(image.sbom_received)}</td>
                         <td>${getScanStatusBadge(image.scan_status)}</td>
-                        <td>${getDownloadButton(image.digest, image.scan_status)}</td>
+                        <td>${getVulnStatusBadge(image.vulnerability_status)}</td>
+                        <td>${getDownloadButtons(image.digest, image.scan_status, image.vulnerability_status)}</td>
                         <td>${formatDate(image.created_at)}</td>
                         <td>${formatDate(image.updated_at)}</td>
                     </tr>
@@ -506,11 +508,38 @@
             return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
         }
 
-        function getDownloadButton(digest, scanStatus) {
-            if (scanStatus === 'scanned') {
-                return `<a href="/sbom/${encodeURIComponent(digest)}" class="download-btn" download>↓ Download SBOM</a>`;
+        function getVulnStatusBadge(status) {
+            if (!status || status === 'pending') {
+                return '<span class="badge badge-secondary">Pending</span>';
             }
-            return '<span style="color: #999; font-size: 0.75rem;">-</span>';
+            if (status === 'scanning') {
+                return '<span class="badge badge-info">Scanning...</span>';
+            }
+            if (status === 'scanned') {
+                return '<span class="badge badge-success">✓ Scanned</span>';
+            }
+            if (status === 'failed') {
+                return '<span class="badge badge-danger">✗ Failed</span>';
+            }
+            return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
+        }
+
+        function getDownloadButtons(digest, scanStatus, vulnStatus) {
+            let buttons = [];
+
+            if (scanStatus === 'scanned') {
+                buttons.push(`<a href="/sbom/${encodeURIComponent(digest)}" class="download-btn" download>↓ SBOM</a>`);
+            }
+
+            if (vulnStatus === 'scanned') {
+                buttons.push(`<a href="/vulnerabilities/${encodeURIComponent(digest)}" class="download-btn" download style="margin-left: 4px;">↓ Vulns</a>`);
+            }
+
+            if (buttons.length === 0) {
+                return '<span style="color: #999; font-size: 0.75rem;">-</span>';
+            }
+
+            return buttons.join('');
         }
 
         function formatDate(dateStr) {
