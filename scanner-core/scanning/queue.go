@@ -90,6 +90,18 @@ func (q *JobQueue) EnqueueScan(image containers.ImageID, nodeName string, contai
 	q.Enqueue(job)
 }
 
+// EnqueueForceScan enqueues a scan job with ForceScan=true to retry failed or incomplete scans
+// This implements the ScanQueueInterface used by the container manager
+func (q *JobQueue) EnqueueForceScan(image containers.ImageID, nodeName string, containerRuntime string) {
+	job := ScanJob{
+		Image:            image,
+		NodeName:         nodeName,
+		ContainerRuntime: containerRuntime,
+		ForceScan:        true,
+	}
+	q.Enqueue(job)
+}
+
 // worker processes jobs from the queue serially (one at a time)
 func (q *JobQueue) worker() {
 	defer q.wg.Done()

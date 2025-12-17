@@ -12,7 +12,8 @@ import (
 
 // MockScanQueue implements ScanQueueInterface for testing
 type MockScanQueue struct {
-	enqueuedScans []EnqueuedScan
+	enqueuedScans      []EnqueuedScan
+	enqueuedForceScans []EnqueuedScan
 }
 
 type EnqueuedScan struct {
@@ -23,6 +24,14 @@ type EnqueuedScan struct {
 
 func (m *MockScanQueue) EnqueueScan(image containers.ImageID, nodeName string, containerRuntime string) {
 	m.enqueuedScans = append(m.enqueuedScans, EnqueuedScan{
+		Image:            image,
+		NodeName:         nodeName,
+		ContainerRuntime: containerRuntime,
+	})
+}
+
+func (m *MockScanQueue) EnqueueForceScan(image containers.ImageID, nodeName string, containerRuntime string) {
+	m.enqueuedForceScans = append(m.enqueuedForceScans, EnqueuedScan{
 		Image:            image,
 		NodeName:         nodeName,
 		ContainerRuntime: containerRuntime,
@@ -522,5 +531,223 @@ func TestManagerWithoutScanQueue(t *testing.T) {
 	instanceRows := allInstances.([]database.ContainerInstanceRow)
 	if len(instanceRows) != 1 {
 		t.Errorf("Expected 1 instance in database, got %d", len(instanceRows))
+	}
+}
+
+func TestManagerRetryFailedScan(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_manager_retry_failed_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	// Create manager with database and scan queue
+	manager := containers.NewManager()
+	manager.SetDatabase(db)
+
+	mockQueue := &MockScanQueue{
+		enqueuedScans:      []EnqueuedScan{},
+		enqueuedForceScans: []EnqueuedScan{},
+	}
+	manager.SetScanQueue(mockQueue)
+
+	// Add first instance (should enqueue normal scan)
+	instance := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "test-pod",
+			Container: "nginx",
+		},
+		Image: containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:failed",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+
+	manager.AddContainerInstance(instance)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify normal scan was enqueued
+	if len(mockQueue.enqueuedScans) != 1 {
+		t.Fatalf("Expected 1 normal scan, got %d", len(mockQueue.enqueuedScans))
+	}
+
+	// Mark the scan as failed
+	err = db.UpdateScanStatus("sha256:failed", "failed", "test error")
+	if err != nil {
+		t.Fatalf("Failed to update scan status: %v", err)
+	}
+
+	// Add same instance again (should enqueue force scan)
+	manager.AddContainerInstance(instance)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify force scan was enqueued
+	if len(mockQueue.enqueuedForceScans) != 1 {
+		t.Errorf("Expected 1 force scan for failed image, got %d", len(mockQueue.enqueuedForceScans))
+	}
+	if mockQueue.enqueuedForceScans[0].Image.Digest != "sha256:failed" {
+		t.Errorf("Expected digest sha256:failed, got %s", mockQueue.enqueuedForceScans[0].Image.Digest)
+	}
+}
+
+func TestManagerRetryIncompleteData(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_manager_retry_incomplete_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	// Create manager with database and scan queue
+	manager := containers.NewManager()
+	manager.SetDatabase(db)
+
+	mockQueue := &MockScanQueue{
+		enqueuedScans:      []EnqueuedScan{},
+		enqueuedForceScans: []EnqueuedScan{},
+	}
+	manager.SetScanQueue(mockQueue)
+
+	// Add first instance
+	instance := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "test-pod",
+			Container: "nginx",
+		},
+		Image: containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:incomplete",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+
+	manager.AddContainerInstance(instance)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify normal scan was enqueued
+	if len(mockQueue.enqueuedScans) != 1 {
+		t.Fatalf("Expected 1 normal scan, got %d", len(mockQueue.enqueuedScans))
+	}
+
+	// Store SBOM but mark as scanned (simulating incomplete data - missing vulnerabilities)
+	sbomJSON := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`)
+	err = db.StoreSBOM("sha256:incomplete", sbomJSON)
+	if err != nil {
+		t.Fatalf("Failed to store SBOM: %v", err)
+	}
+
+	// Verify data is incomplete
+	isComplete, err := db.IsScanDataComplete("sha256:incomplete")
+	if err != nil {
+		t.Fatalf("Failed to check data completeness: %v", err)
+	}
+	if isComplete {
+		t.Fatal("Expected data to be incomplete (missing vulnerabilities)")
+	}
+
+	// Add same instance again (should enqueue force scan because data is incomplete)
+	manager.AddContainerInstance(instance)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify force scan was enqueued
+	if len(mockQueue.enqueuedForceScans) != 1 {
+		t.Errorf("Expected 1 force scan for incomplete data, got %d", len(mockQueue.enqueuedForceScans))
+	}
+	if mockQueue.enqueuedForceScans[0].Image.Digest != "sha256:incomplete" {
+		t.Errorf("Expected digest sha256:incomplete, got %s", mockQueue.enqueuedForceScans[0].Image.Digest)
+	}
+}
+
+func TestManagerNoRetryForCompleteData(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_manager_no_retry_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	// Create manager with database and scan queue
+	manager := containers.NewManager()
+	manager.SetDatabase(db)
+
+	mockQueue := &MockScanQueue{
+		enqueuedScans:      []EnqueuedScan{},
+		enqueuedForceScans: []EnqueuedScan{},
+	}
+	manager.SetScanQueue(mockQueue)
+
+	// Add first instance
+	instance := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "test-pod",
+			Container: "nginx",
+		},
+		Image: containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:complete",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+
+	manager.AddContainerInstance(instance)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify normal scan was enqueued
+	if len(mockQueue.enqueuedScans) != 1 {
+		t.Fatalf("Expected 1 normal scan, got %d", len(mockQueue.enqueuedScans))
+	}
+
+	// Store complete data (SBOM and vulnerabilities)
+	sbomJSON := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`)
+	err = db.StoreSBOM("sha256:complete", sbomJSON)
+	if err != nil {
+		t.Fatalf("Failed to store SBOM: %v", err)
+	}
+
+	vulnJSON := []byte(`{"vulnerabilities":[]}`)
+	err = db.StoreVulnerabilities("sha256:complete", vulnJSON)
+	if err != nil {
+		t.Fatalf("Failed to store vulnerabilities: %v", err)
+	}
+
+	// Verify data is complete
+	isComplete, err := db.IsScanDataComplete("sha256:complete")
+	if err != nil {
+		t.Fatalf("Failed to check data completeness: %v", err)
+	}
+	if !isComplete {
+		t.Fatal("Expected data to be complete")
+	}
+
+	// Add same instance again (should NOT enqueue any scan - data is complete)
+	manager.AddContainerInstance(instance)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify no additional scans were enqueued
+	if len(mockQueue.enqueuedScans) != 1 {
+		t.Errorf("Expected still 1 normal scan (no retry), got %d", len(mockQueue.enqueuedScans))
+	}
+	if len(mockQueue.enqueuedForceScans) != 0 {
+		t.Errorf("Expected 0 force scans for complete data, got %d", len(mockQueue.enqueuedForceScans))
 	}
 }

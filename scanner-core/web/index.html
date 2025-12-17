@@ -293,12 +293,12 @@
                 <div class="value" id="images-count">-</div>
             </div>
             <div class="stat-card">
-                <div class="label">SBOM Requested</div>
-                <div class="value" id="sbom-requested">-</div>
+                <div class="label">SBOM Scanned</div>
+                <div class="value" id="sbom-scanned">-</div>
             </div>
             <div class="stat-card">
-                <div class="label">SBOM Received</div>
-                <div class="value" id="sbom-received">-</div>
+                <div class="label">Vuln Scanned</div>
+                <div class="value" id="vuln-scanned">-</div>
             </div>
         </div>
 
@@ -355,8 +355,6 @@
                     <thead>
                         <tr>
                             <th>Digest</th>
-                            <th>SBOM Requested</th>
-                            <th>SBOM Received</th>
                             <th>SBOM Status</th>
                             <th>Vuln Status</th>
                             <th>Actions</th>
@@ -442,12 +440,12 @@
                 const response = await fetch('/containers/images');
                 const data = await response.json();
 
-                const sbomRequested = data.images?.filter(img => img.sbom_requested).length || 0;
-                const sbomReceived = data.images?.filter(img => img.sbom_received).length || 0;
+                const sbomScanned = data.images?.filter(img => img.scan_status === 'scanned').length || 0;
+                const vulnScanned = data.images?.filter(img => img.vulnerability_status === 'scanned').length || 0;
 
                 document.getElementById('images-count').textContent = data.images?.length || 0;
-                document.getElementById('sbom-requested').textContent = sbomRequested;
-                document.getElementById('sbom-received').textContent = sbomReceived;
+                document.getElementById('sbom-scanned').textContent = sbomScanned;
+                document.getElementById('vuln-scanned').textContent = vulnScanned;
                 document.getElementById('images-updated').textContent = `Last updated: ${new Date().toLocaleString()}`;
 
                 if (!data.images || data.images.length === 0) {
@@ -459,8 +457,6 @@
                 tbody.innerHTML = data.images.map(image => `
                     <tr>
                         <td><span class="code" style="font-size: 0.75rem;">${truncateDigest(image.digest)}</span></td>
-                        <td>${getBadge(image.sbom_requested)}</td>
-                        <td>${getBadge(image.sbom_received)}</td>
                         <td>${getScanStatusBadge(image.scan_status)}</td>
                         <td>${getVulnStatusBadge(image.vulnerability_status)}</td>
                         <td>${getDownloadButtons(image.digest, image.scan_status, image.vulnerability_status)}</td>

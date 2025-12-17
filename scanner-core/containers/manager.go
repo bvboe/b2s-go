@@ -11,11 +11,13 @@ type DatabaseInterface interface {
 	RemoveInstance(id ContainerInstanceID) error
 	SetInstances(instances []ContainerInstance) error
 	GetImageScanStatus(digest string) (string, error)
+	IsScanDataComplete(digest string) (bool, error)
 }
 
 // ScanQueueInterface defines the interface for enqueuing scan jobs
 type ScanQueueInterface interface {
 	EnqueueScan(image ImageID, nodeName string, containerRuntime string)
+	EnqueueForceScan(image ImageID, nodeName string, containerRuntime string)
 }
 
 // Manager handles container instance lifecycle management
@@ -73,17 +75,9 @@ func (m *Manager) AddContainerInstance(instance ContainerInstance) {
 			return
 		}
 
-		// Check if this image needs scanning
+		// Check if this image needs scanning or retrying
 		if m.scanQueue != nil && instance.Image.Digest != "" {
-			scanStatus, err := m.db.GetImageScanStatus(instance.Image.Digest)
-			if err != nil {
-				log.Printf("Error checking scan status: %v", err)
-			} else if scanStatus == "pending" {
-				// Image needs scanning, enqueue a scan job
-				log.Printf("Enqueuing scan for new image: %s:%s (digest=%s)",
-					instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
-				m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
-			}
+			m.checkAndEnqueueScan(instance)
 		}
 	}
 }
@@ -135,7 +129,7 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 			return
 		}
 
-		// Enqueue scan jobs for images that need scanning
+		// Enqueue scan jobs for images that need scanning or retrying
 		if m.scanQueue != nil {
 			// Track unique images to avoid duplicate scan jobs
 			seenDigests := make(map[string]bool)
@@ -151,18 +145,8 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 				}
 				seenDigests[instance.Image.Digest] = true
 
-				// Check if this image needs scanning
-				scanStatus, err := m.db.GetImageScanStatus(instance.Image.Digest)
-				if err != nil {
-					log.Printf("Error checking scan status: %v", err)
-					continue
-				}
-
-				if scanStatus == "pending" {
-					log.Printf("Enqueuing scan for image: %s:%s (digest=%s)",
-						instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
-					m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
-				}
+				// Check and enqueue scan with retry logic
+				m.checkAndEnqueueScan(instance)
 			}
 		}
 	}
@@ -195,4 +179,49 @@ func (m *Manager) GetInstance(namespace, pod, container string) (ContainerInstan
 	key := makeKey(namespace, pod, container)
 	instance, exists := m.instances[key]
 	return instance, exists
+}
+
+// checkAndEnqueueScan checks if an image needs scanning and enqueues it with appropriate flags
+// This method handles retrying failed or incomplete scans
+func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
+	scanStatus, err := m.db.GetImageScanStatus(instance.Image.Digest)
+	if err != nil {
+		log.Printf("Error checking scan status for %s: %v", instance.Image.Digest, err)
+		return
+	}
+
+	// Handle different scan statuses
+	switch scanStatus {
+	case "pending":
+		// New image, enqueue normal scan
+		log.Printf("Enqueuing scan for new image: %s:%s (digest=%s)",
+			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+
+	case "failed":
+		// Previous scan failed, retry with force scan
+		log.Printf("Retrying failed scan for image: %s:%s (digest=%s)",
+			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+
+	case "scanned":
+		// Check if data is actually complete
+		isComplete, err := m.db.IsScanDataComplete(instance.Image.Digest)
+		if err != nil {
+			log.Printf("Error checking scan data completeness for %s: %v", instance.Image.Digest, err)
+			return
+		}
+		if !isComplete {
+			// Data is incomplete, retry with force scan
+			log.Printf("Retrying scan for image with incomplete data: %s:%s (digest=%s)",
+				instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+			m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+		}
+		// If complete, no action needed
+
+	case "scanning":
+		// Scan already in progress, no action needed
+		log.Printf("Scan already in progress for image: %s:%s (digest=%s)",
+			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+	}
 }

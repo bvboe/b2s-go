@@ -25,6 +25,33 @@ func (db *DB) GetImageScanStatus(digest string) (string, error) {
 	return status, nil
 }
 
+// IsScanDataComplete checks if an image has complete scan data (SBOM and vulnerabilities)
+// Returns true only if status is "scanned" AND both SBOM and vulnerability data exist
+func (db *DB) IsScanDataComplete(digest string) (bool, error) {
+	var status string
+	var hasSBOM bool
+	var hasVulns bool
+
+	err := db.conn.QueryRow(`
+		SELECT
+			scan_status,
+			sbom IS NOT NULL AND LENGTH(sbom) > 0,
+			vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0
+		FROM container_images
+		WHERE digest = ?
+	`, digest).Scan(&status, &hasSBOM, &hasVulns)
+
+	if err == sql.ErrNoRows {
+		return false, nil // Image not found means incomplete
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check scan data completeness: %w", err)
+	}
+
+	// Data is complete only if status is scanned AND we have both SBOM and vulnerabilities
+	return status == "scanned" && hasSBOM && hasVulns, nil
+}
+
 // UpdateScanStatus updates the scan status and error message for an image
 func (db *DB) UpdateScanStatus(digest string, status string, errorMsg string) error {
 	var scannedAt interface{}
@@ -92,7 +119,7 @@ func (db *DB) GetSBOM(digest string) ([]byte, error) {
 // GetImagesByS canStatus returns all images with a specific scan status
 func (db *DB) GetImagesByScanStatus(status string) ([]ContainerImage, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, digest, sbom_requested, sbom_received, created_at, updated_at,
+		SELECT id, digest, created_at, updated_at,
 		       scan_status, scan_error, scanned_at
 		FROM container_images
 		WHERE scan_status = ?
@@ -106,19 +133,19 @@ func (db *DB) GetImagesByScanStatus(status string) ([]ContainerImage, error) {
 	var images []ContainerImage
 	for rows.Next() {
 		var img ContainerImage
-		var sbomRequested, sbomReceived int
 		var scanStatus, scanError sql.NullString
 		var scannedAt sql.NullString
 
 		err := rows.Scan(&img.ID, &img.Digest,
-			&sbomRequested, &sbomReceived, &img.CreatedAt, &img.UpdatedAt,
+			&img.CreatedAt, &img.UpdatedAt,
 			&scanStatus, &scanError, &scannedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan image row: %w", err)
 		}
 
-		img.SBOMRequested = sbomRequested == 1
-		img.SBOMReceived = sbomReceived == 1
+		if scanStatus.Valid {
+			img.ScanStatus = scanStatus.String
+		}
 		images = append(images, img)
 	}
 

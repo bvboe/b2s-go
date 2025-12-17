@@ -16,6 +16,7 @@ import (
 	"github.com/bvboe/b2s-go/bjorn2scan-agent/syft"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 )
@@ -104,8 +105,13 @@ func main() {
 		return syft.GenerateSBOM(ctx, image)
 	}
 
-	// Initialize scan queue with SBOM and vulnerability scanning (using default Grype config)
-	scanQueue := scanning.NewJobQueueWithDefaults(db, sbomRetriever)
+	// Configure Grype to store vulnerability database in /var/lib/bjorn2scan
+	grypeCfg := grype.Config{
+		DBRootDir: "/var/lib/bjorn2scan",
+	}
+
+	// Initialize scan queue with SBOM and vulnerability scanning
+	scanQueue := scanning.NewJobQueue(db, sbomRetriever, grypeCfg)
 	defer scanQueue.Shutdown()
 
 	// Connect scan queue to manager

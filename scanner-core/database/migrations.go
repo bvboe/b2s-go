@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 type migration struct {
 	version int
@@ -34,6 +34,11 @@ var migrations = []migration{
 		version: 4,
 		name:    "add_vulnerability_scanning",
 		up:      migrateToV4,
+	},
+	{
+		version: 5,
+		name:    "remove_redundant_sbom_fields",
+		up:      migrateToV5,
 	},
 }
 
@@ -327,6 +332,84 @@ func migrateToV4(conn *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create vulnerability_status index: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// migrateToV5 removes redundant sbom_requested and sbom_received fields
+// These fields are replaced by scan_status and vulnerability_status tracking
+func migrateToV5(conn *sql.DB) error {
+	// Start a transaction for the migration
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+	// Step 1: Create new table without sbom_requested and sbom_received columns
+	_, err = tx.Exec(`
+		CREATE TABLE container_images_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			digest TEXT UNIQUE NOT NULL,
+			sbom TEXT,
+			scan_status TEXT DEFAULT 'pending',
+			scan_error TEXT,
+			scanned_at DATETIME,
+			vulnerabilities TEXT,
+			vulnerability_status TEXT DEFAULT 'pending',
+			vulnerability_error TEXT,
+			vulnerabilities_scanned_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new images table: %w", err)
+	}
+
+	// Step 2: Copy data from old table to new table
+	_, err = tx.Exec(`
+		INSERT INTO container_images_new (
+			id, digest, sbom, scan_status, scan_error, scanned_at,
+			vulnerabilities, vulnerability_status, vulnerability_error, vulnerabilities_scanned_at,
+			created_at, updated_at
+		)
+		SELECT
+			id, digest, sbom, scan_status, scan_error, scanned_at,
+			vulnerabilities, vulnerability_status, vulnerability_error, vulnerabilities_scanned_at,
+			created_at, updated_at
+		FROM container_images
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy data to new table: %w", err)
+	}
+
+	// Step 3: Drop old table
+	_, err = tx.Exec(`DROP TABLE container_images`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old table: %w", err)
+	}
+
+	// Step 4: Rename new table
+	_, err = tx.Exec(`ALTER TABLE container_images_new RENAME TO container_images`)
+	if err != nil {
+		return fmt.Errorf("failed to rename table: %w", err)
+	}
+
+	// Step 5: Recreate indexes
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_scan_status ON container_images(scan_status);
+		CREATE INDEX IF NOT EXISTS idx_images_vulnerability_status ON container_images(vulnerability_status);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create indexes: %w", err)
 	}
 
 	// Commit the transaction
