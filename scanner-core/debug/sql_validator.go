@@ -9,16 +9,21 @@ import (
 var dangerousKeywords = []string{
 	"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
 	"TRUNCATE", "REPLACE", "GRANT", "REVOKE",
-	"EXEC", "EXECUTE", "PRAGMA",
+	"EXEC", "EXECUTE",
 }
 
-// IsSelectQuery validates that a SQL query is a safe read-only SELECT statement.
+// allowedStatements are read-only SQL statement types that are safe for debug queries.
+var allowedStatements = []string{
+	"SELECT", "DESCRIBE", "DESC", "EXPLAIN", "PRAGMA", "SHOW",
+}
+
+// IsSelectQuery validates that a SQL query is a safe read-only statement.
 // It returns true if the query is valid, false otherwise, along with an error
 // describing any validation failure.
 //
 // Validation rules:
-//  1. Query must start with SELECT (case-insensitive)
-//  2. Query must not contain semicolons (prevents multiple statements)
+//  1. Query must start with an allowed read-only statement (SELECT, DESCRIBE, EXPLAIN, PRAGMA, etc.)
+//  2. A single trailing semicolon is allowed, but multiple statements are prevented
 //  3. Query must not contain dangerous keywords (INSERT, UPDATE, DELETE, etc.)
 func IsSelectQuery(sql string) (bool, error) {
 	if sql == "" {
@@ -27,6 +32,18 @@ func IsSelectQuery(sql string) (bool, error) {
 
 	// Trim whitespace and normalize to uppercase for checking
 	trimmed := strings.TrimSpace(sql)
+
+	// Allow a single trailing semicolon but strip it for validation
+	// This prevents multiple statements while allowing standard SQL convention
+	if strings.HasSuffix(trimmed, ";") {
+		trimmed = strings.TrimSpace(trimmed[:len(trimmed)-1])
+	}
+
+	// Check for semicolons after stripping trailing one (prevents multiple statements)
+	if strings.Contains(trimmed, ";") {
+		return false, fmt.Errorf("multiple statements not allowed")
+	}
+
 	upper := strings.ToUpper(trimmed)
 
 	// Remove single-line comments (--) for validation
@@ -43,14 +60,16 @@ func IsSelectQuery(sql string) (bool, error) {
 	upper = strings.Join(cleanedLines, "\n")
 	upper = strings.TrimSpace(upper)
 
-	// Check if query starts with SELECT
-	if !strings.HasPrefix(upper, "SELECT") {
-		return false, fmt.Errorf("query must start with SELECT")
+	// Check if query starts with an allowed statement
+	allowed := false
+	for _, stmt := range allowedStatements {
+		if strings.HasPrefix(upper, stmt) {
+			allowed = true
+			break
+		}
 	}
-
-	// Check for semicolons (prevents multiple statements)
-	if strings.Contains(trimmed, ";") {
-		return false, fmt.Errorf("semicolons not allowed (prevents multiple statements)")
+	if !allowed {
+		return false, fmt.Errorf("query must start with one of: %s", strings.Join(allowedStatements, ", "))
 	}
 
 	// Check for dangerous keywords

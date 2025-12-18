@@ -1,7 +1,9 @@
 # Fast local development Makefile
 # Source this to use: include Makefile.fast
 
-.PHONY: fast-build fast-deploy fast-restart dev-mode
+.DEFAULT_GOAL := help
+
+.PHONY: help fast-build fast-deploy fast-restart dev-mode
 
 # Enable Docker BuildKit for faster builds
 export DOCKER_BUILDKIT=1
@@ -14,12 +16,32 @@ SCAN_SERVER_IMAGE?=ghcr.io/bvboe/b2s-go/k8s-scan-server
 POD_SCANNER_IMAGE?=ghcr.io/bvboe/b2s-go/pod-scanner
 IMAGE_TAG?=dev-latest
 
+## HELP ##
+
+help: ## Show this help message
+	@echo "════════════════════════════════════════════════════════════════"
+	@echo "  🚀 Fast Development Makefile for Bjorn2Scan"
+	@echo "════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "Usage: make -f Makefile.fast <target>"
+	@echo ""
+	@echo "Available targets:"
+	@echo ""
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "Examples:"
+	@echo "  make -f Makefile.fast fast-build      # Build all images in parallel"
+	@echo "  make -f Makefile.fast fast-deploy     # Build and deploy to kind"
+	@echo "  make -f Makefile.fast fast-scan-server # Build only scan-server"
+	@echo ""
+	@echo "════════════════════════════════════════════════════════════════"
+
 ## FAST BUILD OPTIONS ##
 
 # Option 1: Parallel Docker builds (2-3x faster)
 fast-build: ## Build Docker images in parallel with BuildKit
 	@echo "🚀 Building images in parallel with BuildKit..."
-	@$(MAKE) -j2 _build-scan-server _build-pod-scanner
+	@$(MAKE) -f $(MAKEFILE_LIST) -j2 _build-scan-server _build-pod-scanner
 	@echo "✅ Build complete!"
 
 _build-scan-server:

@@ -43,10 +43,9 @@ jobs:
       docker-push: false
       image-tag: test
 
-  # pod-scanner component
+  # pod-scanner component (independent - no dependencies)
   pod-scanner:
     name: pod-scanner
-    needs: [scanner-core]
     uses: ./.github/workflows/go-component-reusable.yaml
     with:
       component-name: pod-scanner

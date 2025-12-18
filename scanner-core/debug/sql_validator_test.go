@@ -17,6 +17,12 @@ func TestIsSelectQuery_ValidQueries(t *testing.T) {
 		"SELECT * FROM images WHERE digest = 'sha256:abc123'",
 		"-- This is a comment\nSELECT * FROM images",
 		"SELECT * FROM images -- comment at end",
+		// Queries with single trailing semicolon (standard SQL convention)
+		"SELECT * FROM images;",
+		"SELECT * FROM images LIMIT 10;",
+		"DESCRIBE images;",
+		"EXPLAIN QUERY PLAN SELECT * FROM images;",
+		"PRAGMA table_info(images);",
 	}
 
 	for _, query := range validQueries {
@@ -56,24 +62,29 @@ func TestIsSelectQuery_InvalidStart(t *testing.T) {
 	}
 }
 
-func TestIsSelectQuery_Semicolon(t *testing.T) {
-	queriesWithSemicolon := []string{
-		"SELECT * FROM images;",
+func TestIsSelectQuery_MultipleStatements(t *testing.T) {
+	// Queries with multiple statements should be blocked
+	invalidQueries := []string{
 		"SELECT * FROM images; DROP TABLE images;",
+		"SELECT * FROM images; DROP TABLE images",
+		"SELECT * FROM images;DROP TABLE images",
+		"SELECT id FROM images; SELECT * FROM users",
+		// Semicolons in string literals are also blocked (overly strict but acceptable for security)
 		"SELECT * FROM images WHERE name = 'test;123'",
+		"SELECT * FROM images WHERE desc = 'foo;bar;baz'",
 	}
 
-	for _, query := range queriesWithSemicolon {
+	for _, query := range invalidQueries {
 		t.Run(query, func(t *testing.T) {
 			valid, err := IsSelectQuery(query)
 			if valid {
-				t.Errorf("Expected query with semicolon to be invalid: %s", query)
+				t.Errorf("Expected query with multiple statements to be invalid: %s", query)
 			}
 			if err == nil {
-				t.Error("Expected error for query with semicolon")
+				t.Error("Expected error for query with multiple statements")
 			}
-			if err != nil && err.Error() != "semicolons not allowed (prevents multiple statements)" {
-				t.Errorf("Expected semicolon error, got: %v", err)
+			if err != nil && err.Error() != "multiple statements not allowed" {
+				t.Errorf("Expected 'multiple statements not allowed' error, got: %v", err)
 			}
 		})
 	}

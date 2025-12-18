@@ -1,11 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 
-	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/pod-scanner/handlers"
 	"github.com/bvboe/b2s-go/pod-scanner/runtime"
 )
@@ -21,15 +22,28 @@ type InfoResponse struct {
 	Namespace string `json:"namespace"`
 }
 
-type PodScannerInfo struct{}
+// healthHandler returns a simple OK response for health checks
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	if _, err := fmt.Fprintln(w, "OK"); err != nil {
+		log.Printf("Error writing health response: %v", err)
+	}
+}
 
-func (p *PodScannerInfo) GetInfo() interface{} {
-	return InfoResponse{
+// infoHandler returns component information as JSON
+func infoHandler(w http.ResponseWriter, r *http.Request) {
+	info := InfoResponse{
 		Component: "pod-scanner",
 		Version:   version,
 		NodeName:  os.Getenv("NODE_NAME"),
 		PodName:   os.Getenv("HOSTNAME"),
 		Namespace: os.Getenv("NAMESPACE"),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(info); err != nil {
+		log.Printf("Error encoding info response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
@@ -52,12 +66,9 @@ func main() {
 
 	log.Printf("Using container runtime: %s", runtimeMgr.ActiveRuntime())
 
-	infoProvider := &PodScannerInfo{}
-
-	// Register standard scanner endpoints (health, info)
-	corehandlers.RegisterDefaultHandlers(infoProvider)
-
-	// Register SBOM generation endpoint
+	// Register HTTP endpoints
+	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/info", infoHandler)
 	http.HandleFunc("/sbom/", handlers.SBOMHandler(runtimeMgr))
 
 	log.Printf("pod-scanner v%s starting on port %s (node: %s)", version, port, os.Getenv("NODE_NAME"))

@@ -16,8 +16,7 @@ import (
 	"github.com/containerd/containerd/namespaces"
 	"github.com/opencontainers/go-digest"
 
-	// Import SQLite driver for syft RPM database parsing
-	_ "modernc.org/sqlite"
+	// Note: SQLite driver is already imported transitively by syft for RPM database parsing
 )
 
 const (
