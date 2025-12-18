@@ -36,10 +36,33 @@ type GrypeArtifact struct {
 
 // GrypeVulnerability represents vulnerability details
 type GrypeVulnerability struct {
-	ID       string   `json:"id"`
-	Severity string   `json:"severity"`
-	Fix      GrypeFix `json:"fix"`
-	Risk     float64  `json:"risk"`
+	ID             string             `json:"id"`
+	Severity       string             `json:"severity"`
+	Fix            GrypeFix           `json:"fix"`
+	Risk           float64            `json:"risk"`
+	EPSS           []GrypeEPSS        `json:"epss"`
+	KnownExploited []GrypeKnownExploit `json:"knownExploited"`
+}
+
+// GrypeEPSS represents EPSS (Exploit Prediction Scoring System) data
+type GrypeEPSS struct {
+	CVE        string  `json:"cve"`
+	Score      float64 `json:"epss"`
+	Percentile float64 `json:"percentile"`
+	Date       string  `json:"date"`
+}
+
+// GrypeKnownExploit represents known exploit information from CISA KEV
+type GrypeKnownExploit struct {
+	CVE                        string   `json:"cve"`
+	VendorProject              string   `json:"vendorProject"`
+	Product                    string   `json:"product"`
+	DateAdded                  string   `json:"dateAdded"`
+	RequiredAction             string   `json:"requiredAction"`
+	DueDate                    string   `json:"dueDate"`
+	KnownRansomwareCampaignUse string   `json:"knownRansomwareCampaignUse"`
+	URLs                       []string `json:"urls"`
+	CWEs                       []string `json:"cwes"`
 }
 
 // GrypeRelatedVuln represents related vulnerabilities
@@ -191,8 +214,9 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO vulnerabilities
 		(image_id, cve_id, package_name, package_version, package_type,
-		 severity, fix_status, fixed_version, known_exploits, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 severity, fix_status, fixed_version, known_exploits, count,
+		 risk, epss_score, epss_percentile, known_exploited)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -223,7 +247,22 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		}
 
 		// Count known exploits (related vulnerabilities with known exploits)
+		// NOTE: This is kept for backward compatibility but is now redundant with known_exploited
 		knownExploits := len(match.RelatedVulnerabilities)
+
+		// Extract risk score
+		risk := match.Vulnerability.Risk
+
+		// Extract EPSS data (use first entry if available)
+		epssScore := 0.0
+		epssPercentile := 0.0
+		if len(match.Vulnerability.EPSS) > 0 {
+			epssScore = match.Vulnerability.EPSS[0].Score
+			epssPercentile = match.Vulnerability.EPSS[0].Percentile
+		}
+
+		// Count known exploits from CISA KEV catalog
+		knownExploited := len(match.Vulnerability.KnownExploited)
 
 		_, err := stmt.Exec(
 			imageID,
@@ -236,6 +275,10 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			fixedVersion,
 			knownExploits,
 			count,
+			risk,
+			epssScore,
+			epssPercentile,
+			knownExploited,
 		)
 		if err != nil {
 			log.Printf("Warning: Failed to insert vulnerability %s: %v", key.cveID, err)

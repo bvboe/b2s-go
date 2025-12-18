@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 type migration struct {
 	version int
@@ -44,6 +44,11 @@ var migrations = []migration{
 		version: 6,
 		name:    "add_sbom_vulnerability_tables",
 		up:      migrateToV6,
+	},
+	{
+		version: 7,
+		name:    "add_vulnerability_risk_fields",
+		up:      migrateToV7,
 	},
 }
 
@@ -596,5 +601,33 @@ func migrateExistingData(conn *sql.DB) error {
 	}
 
 	log.Printf("Migration v6: Completed processing %d images", processed)
+	return nil
+}
+
+// migrateToV7 adds risk, EPSS, and knownExploited fields to vulnerabilities table
+func migrateToV7(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Add new columns to vulnerabilities table
+	_, err = tx.Exec(`
+		ALTER TABLE vulnerabilities ADD COLUMN risk REAL DEFAULT 0.0;
+		ALTER TABLE vulnerabilities ADD COLUMN epss_score REAL DEFAULT 0.0;
+		ALTER TABLE vulnerabilities ADD COLUMN epss_percentile REAL DEFAULT 0.0;
+		ALTER TABLE vulnerabilities ADD COLUMN known_exploited INTEGER DEFAULT 0;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add new columns: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v7: Added risk, EPSS, and known_exploited columns to vulnerabilities table")
 	return nil
 }
