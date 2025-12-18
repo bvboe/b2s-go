@@ -100,9 +100,16 @@ type GrypePackageInfo struct {
 	Type    string `json:"type"`
 }
 
+// GrypeDistro represents distribution information from Grype
+type GrypeDistro struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // GrypeDocument represents a Grype vulnerability scan document
 type GrypeDocument struct {
 	Matches []GrypeMatch `json:"matches"`
+	Distro  *GrypeDistro `json:"distro"`
 }
 
 // parseSBOMData parses SBOM JSON and populates packages and image_summary tables
@@ -285,6 +292,30 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			continue
 		}
 		totalVulns++
+	}
+
+	// Update image_summary with distro information if available
+	osName := ""
+	osVersion := ""
+	if doc.Distro != nil {
+		osName = doc.Distro.Name
+		osVersion = doc.Distro.Version
+		log.Printf("Extracted distro info for image_id=%d: %s %s", imageID, osName, osVersion)
+	}
+
+	// Use INSERT OR REPLACE to handle case where image_summary doesn't exist yet
+	_, err = tx.Exec(`
+		INSERT OR REPLACE INTO image_summary (image_id, package_count, os_name, os_version, updated_at)
+		VALUES (
+			?,
+			COALESCE((SELECT package_count FROM image_summary WHERE image_id = ?), 0),
+			?,
+			?,
+			CURRENT_TIMESTAMP
+		)
+	`, imageID, imageID, osName, osVersion)
+	if err != nil {
+		log.Printf("Warning: Failed to update image_summary with distro info: %v", err)
 	}
 
 	if err := tx.Commit(); err != nil {

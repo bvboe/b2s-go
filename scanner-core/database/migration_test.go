@@ -186,4 +186,24 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	} else {
 		t.Logf("No CVE without exploits found (might indicate data issue)")
 	}
+
+	// Verify distro information was extracted and stored
+	var osName, osVersion string
+	err = db.conn.QueryRow(`
+		SELECT os_name, os_version
+		FROM image_summary
+		WHERE image_id = ?
+	`, imageID).Scan(&osName, &osVersion)
+
+	if err == nil {
+		t.Logf("Distro info: os_name=%s, os_version=%s", osName, osVersion)
+		if osName == "" {
+			t.Error("os_name should not be empty")
+		}
+		if osVersion == "" {
+			t.Error("os_version should not be empty")
+		}
+	} else {
+		t.Errorf("Failed to query distro info: %v", err)
+	}
 }

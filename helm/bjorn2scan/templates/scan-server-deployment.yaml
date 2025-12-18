@@ -56,6 +56,8 @@ spec:
         volumeMounts:
         - name: data
           mountPath: {{ .Values.scanServer.persistence.mountPath }}
+        - name: tmp
+          mountPath: /tmp
         livenessProbe:
           {{- toYaml .Values.scanServer.livenessProbe | nindent 10 }}
         readinessProbe:
@@ -70,6 +72,8 @@ spec:
         {{- else }}
         emptyDir: {}
         {{- end }}
+      - name: tmp
+        emptyDir: {}
       {{- with .Values.scanServer.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
