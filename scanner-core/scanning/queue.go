@@ -24,9 +24,11 @@ type ScanJob struct {
 // Returns the SBOM as JSON bytes, or an error
 type SBOMRetriever func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error)
 
-// JobQueue manages a queue of scan jobs and processes them serially
+// JobQueue manages an unbounded queue of scan jobs and processes them serially with a single worker
 type JobQueue struct {
-	jobs          chan ScanJob
+	jobs          []ScanJob
+	jobsMu        sync.Mutex
+	jobsAvailable *sync.Cond
 	sbomRetriever SBOMRetriever
 	db            *database.DB
 	ctx           context.Context
@@ -41,19 +43,20 @@ func NewJobQueue(db *database.DB, sbomRetriever SBOMRetriever, grypeCfg grype.Co
 	ctx, cancel := context.WithCancel(context.Background())
 
 	queue := &JobQueue{
-		jobs:          make(chan ScanJob, 100), // Buffer up to 100 jobs
+		jobs:          make([]ScanJob, 0),
 		sbomRetriever: sbomRetriever,
 		db:            db,
 		ctx:           ctx,
 		cancel:        cancel,
 		grypeCfg:      grypeCfg,
 	}
+	queue.jobsAvailable = sync.NewCond(&queue.jobsMu)
 
 	// Start the worker goroutine
 	queue.wg.Add(1)
 	go queue.worker()
 
-	log.Println("Scan job queue initialized with SBOM and vulnerability scanning")
+	log.Println("Scan job queue initialized with unbounded queue and single worker")
 	return queue
 }
 
@@ -63,19 +66,25 @@ func NewJobQueueWithDefaults(db *database.DB, sbomRetriever SBOMRetriever) *JobQ
 	return NewJobQueue(db, sbomRetriever, grype.Config{})
 }
 
-// Enqueue adds a scan job to the queue
-// Returns immediately without blocking
+// Enqueue adds a scan job to the unbounded queue
+// Never blocks or drops jobs
 func (q *JobQueue) Enqueue(job ScanJob) {
+	q.jobsMu.Lock()
+	defer q.jobsMu.Unlock()
+
+	// Check if shutting down
 	select {
-	case q.jobs <- job:
-		log.Printf("Enqueued scan job: image=%s:%s (digest=%s), node=%s, runtime=%s",
-			job.Image.Repository, job.Image.Tag, job.Image.Digest, job.NodeName, job.ContainerRuntime)
 	case <-q.ctx.Done():
 		log.Println("Queue shutting down, cannot enqueue job")
+		return
 	default:
-		log.Printf("Warning: job queue is full, dropping scan job for %s:%s",
-			job.Image.Repository, job.Image.Tag)
 	}
+
+	q.jobs = append(q.jobs, job)
+	log.Printf("Enqueued scan job: image=%s:%s (digest=%s), node=%s, runtime=%s (queue depth: %d)",
+		job.Image.Repository, job.Image.Tag, job.Image.Digest, job.NodeName, job.ContainerRuntime, len(q.jobs))
+
+	q.jobsAvailable.Signal()
 }
 
 // EnqueueScan is a convenience method for enqueuing a scan with individual parameters
@@ -104,8 +113,9 @@ func (q *JobQueue) EnqueueForceScan(image containers.ImageID, nodeName string, c
 
 // GetQueueDepth returns the current number of jobs in the queue.
 // This is useful for monitoring and debug purposes.
-// The operation is thread-safe as len() on channels is atomic in Go.
 func (q *JobQueue) GetQueueDepth() int {
+	q.jobsMu.Lock()
+	defer q.jobsMu.Unlock()
 	return len(q.jobs)
 }
 
@@ -116,13 +126,39 @@ func (q *JobQueue) worker() {
 	log.Println("Scan worker started")
 
 	for {
-		select {
-		case job := <-q.jobs:
-			q.processJob(job)
-		case <-q.ctx.Done():
-			log.Println("Scan worker shutting down")
-			return
+		q.jobsMu.Lock()
+
+		// Wait for jobs to be available or shutdown signal
+		for len(q.jobs) == 0 {
+			select {
+			case <-q.ctx.Done():
+				q.jobsMu.Unlock()
+				log.Println("Scan worker shutting down")
+				return
+			default:
+			}
+
+			// Wait for a job to be enqueued
+			q.jobsAvailable.Wait()
+
+			// Check shutdown again after waking up
+			select {
+			case <-q.ctx.Done():
+				q.jobsMu.Unlock()
+				log.Println("Scan worker shutting down")
+				return
+			default:
+			}
 		}
+
+		// Dequeue the first job
+		job := q.jobs[0]
+		q.jobs = q.jobs[1:]
+
+		q.jobsMu.Unlock()
+
+		// Process the job outside the lock
+		q.processJob(job)
 	}
 }
 
@@ -241,7 +277,10 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 func (q *JobQueue) Shutdown() {
 	log.Println("Shutting down scan queue...")
 	q.cancel()
-	close(q.jobs)
+
+	// Wake up the worker so it can see the shutdown signal
+	q.jobsAvailable.Broadcast()
+
 	q.wg.Wait()
 	log.Println("Scan queue shut down")
 }
