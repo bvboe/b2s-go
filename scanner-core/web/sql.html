@@ -485,6 +485,7 @@
             const resultsContent = document.getElementById('resultsContent');
             const rows = data.rows || [];
             const rowCount = data.row_count || 0;
+            const columns = data.columns || [];
 
             if (rowCount === 0) {
                 resultsContent.innerHTML = `
@@ -500,8 +501,8 @@
                 return;
             }
 
-            // Get column names from first row
-            const columns = Object.keys(rows[0]);
+            // Use columns array from response to preserve database order
+            // (Object.keys would return alphabetically sorted keys)
 
             // Build table HTML
             let tableHtml = `

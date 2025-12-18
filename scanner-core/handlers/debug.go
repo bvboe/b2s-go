@@ -28,6 +28,7 @@ import (
 // Response format:
 //
 //	{
+//	  "columns": ["column1", "column2"],
 //	  "rows": [
 //	    {"column1": "value1", "column2": "value2"},
 //	    {"column1": "value3", "column2": "value4"}
@@ -86,17 +87,18 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		}
 
 		// Execute query
-		rows, err := db.ExecuteReadOnlyQuery(request.Query)
+		result, err := db.ExecuteReadOnlyQuery(request.Query)
 		if err != nil {
 			log.Printf("Error executing query: %v", err)
 			http.Error(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Build response
+		// Build response with columns array to preserve order
 		response := map[string]interface{}{
-			"rows":      rows,
-			"row_count": len(rows),
+			"columns":   result.Columns,
+			"rows":      result.Rows,
+			"row_count": len(result.Rows),
 		}
 
 		// Return JSON response

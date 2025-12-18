@@ -6,15 +6,21 @@ import (
 	"time"
 )
 
-// ExecuteReadOnlyQuery executes a read-only SQL query and returns results as a slice of maps.
-// Each map represents a row, with column names as keys and values as interface{}.
+// QueryResult represents the result of a SQL query with column order preserved.
+type QueryResult struct {
+	Columns []string                 `json:"columns"`
+	Rows    []map[string]interface{} `json:"rows"`
+}
+
+// ExecuteReadOnlyQuery executes a read-only SQL query and returns results with column order preserved.
+// The QueryResult includes both an ordered columns array and row data as maps.
 //
 // This method is intended for debug/diagnostic purposes only and should only be called
 // from the debug SQL handler after proper validation.
 //
 // WARNING: This method does NOT validate the SQL query. The caller MUST ensure the query
 // is safe before calling this method. Use debug.IsSelectQuery() to validate queries.
-func (db *DB) ExecuteReadOnlyQuery(query string) ([]map[string]interface{}, error) {
+func (db *DB) ExecuteReadOnlyQuery(query string) (*QueryResult, error) {
 	// Log the SQL query for tracking
 	log.Printf("[DEBUG SQL] Executing query: %s", query)
 	start := time.Now()
@@ -30,7 +36,7 @@ func (db *DB) ExecuteReadOnlyQuery(query string) ([]map[string]interface{}, erro
 		}
 	}()
 
-	// Get column names
+	// Get column names (preserves database order)
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
@@ -77,5 +83,8 @@ func (db *DB) ExecuteReadOnlyQuery(query string) ([]map[string]interface{}, erro
 	duration := time.Since(start)
 	log.Printf("[DEBUG SQL] Query completed: %d rows returned in %v", len(results), duration)
 
-	return results, nil
+	return &QueryResult{
+		Columns: columns,
+		Rows:    results,
+	}, nil
 }
