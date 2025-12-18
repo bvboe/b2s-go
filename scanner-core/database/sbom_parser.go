@@ -246,10 +246,6 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			fixedVersion = match.Vulnerability.Fix.Versions[0]
 		}
 
-		// Count known exploits (related vulnerabilities with known exploits)
-		// NOTE: This is kept for backward compatibility but is now redundant with known_exploited
-		knownExploits := len(match.RelatedVulnerabilities)
-
 		// Extract risk score
 		risk := match.Vulnerability.Risk
 
@@ -263,6 +259,10 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 
 		// Count known exploits from CISA KEV catalog
 		knownExploited := len(match.Vulnerability.KnownExploited)
+
+		// Set known_exploits to match known_exploited for backward compatibility
+		// (previously this was set to RelatedVulnerabilities count, which was incorrect)
+		knownExploits := knownExploited
 
 		_, err := stmt.Exec(
 			imageID,

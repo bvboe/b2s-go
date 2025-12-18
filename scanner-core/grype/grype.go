@@ -1,7 +1,6 @@
 package grype
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,9 +12,9 @@ import (
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
+	"github.com/anchore/grype/grype/matcher"
 	grypePkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/anchore/syft/syft/format/syftjson"
 )
 
 // Config holds configuration for the Grype scanner
@@ -35,21 +34,29 @@ func ScanVulnerabilities(ctx context.Context, sbomJSON []byte) ([]byte, error) {
 func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Config) ([]byte, error) {
 	log.Printf("Starting vulnerability scan on SBOM (%d bytes)", len(sbomJSON))
 
-	// Parse the SBOM from JSON
-	decoder := syftjson.NewFormatDecoder()
-	s, _, _, err := decoder.Decode(bytes.NewReader(sbomJSON))
+	// Write SBOM to temp file so we can use Grype's Provide function
+	// This ensures we get all the proper processing (distro, relationships, etc.)
+	tmpFile, err := os.CreateTemp("", "sbom-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode SBOM: %w", err)
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer func() {
+		_ = os.Remove(tmpFile.Name())
+	}()
+	defer func() {
+		_ = tmpFile.Close()
+	}()
+
+	if _, err := tmpFile.Write(sbomJSON); err != nil {
+		return nil, fmt.Errorf("failed to write SBOM to temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	if s == nil {
-		return nil, fmt.Errorf("decoded SBOM is nil")
-	}
-
-	log.Printf("Decoded SBOM with %d packages", s.Artifacts.Packages.PackageCount())
+	log.Printf("Using Grype's SBOM provider for complete processing")
 
 	// Configure the vulnerability database location
-	// Use DefaultConfig to get proper settings like LatestURL
 	identification := clio.Identification{
 		Name:    "bjorn2scan-grype",
 		Version: "1.0.0",
@@ -74,7 +81,6 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 	log.Printf("Database config: DBRootDir=%s, LatestURL=%s", installCfg.DBRootDir, distCfg.LatestURL)
 
 	// Load the database with auto-update enabled
-	// This will automatically download the database if it doesn't exist
 	log.Printf("Loading vulnerability database (will download if missing)...")
 	vulnProvider, dbStatus, err := grype.LoadVulnerabilityDB(distCfg, installCfg, true)
 	if err != nil {
@@ -92,22 +98,30 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 			dbStatus.Built, dbStatus.SchemaVersion, dbStatus.From)
 	}
 
-	// Convert SBOM packages to Grype packages
-	packages := grypePkg.FromCollection(s.Artifacts.Packages, grypePkg.SynthesisConfig{})
-	context := grypePkg.Context{
-		Source: &s.Source,
-		Distro: nil, // Distro conversion not needed for basic scanning
+	// Use Grype's Provide function to get packages and context with proper processing
+	// This handles distro extraction, relationship processing, and package filtering
+	providerConfig := grypePkg.ProviderConfig{}
+	packages, context, _, err := grypePkg.Provide("sbom:"+tmpFile.Name(), providerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to provide packages from SBOM: %w", err)
 	}
 
 	log.Printf("Scanning %d packages for vulnerabilities...", len(packages))
+	if len(packages) > 0 {
+		log.Printf("Sample package PURL: %s", packages[0].PURL)
+		if context.Distro != nil {
+			log.Printf("Context distro: %s", context.Distro.String())
+		}
+	}
 
-	// Create vulnerability matcher
-	matcher := grype.VulnerabilityMatcher{
+	// Create vulnerability matcher with all default matchers (dpkg, rpm, apk, etc.)
+	vulnerabilityMatcher := grype.VulnerabilityMatcher{
 		VulnerabilityProvider: vulnProvider,
+		Matchers:              matcher.NewDefaultMatchers(matcher.Config{}),
 	}
 
 	// Find vulnerability matches
-	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, context)
+	remainingMatches, ignoredMatches, err := vulnerabilityMatcher.FindMatches(packages, context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find vulnerabilities: %w", err)
 	}
