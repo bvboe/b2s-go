@@ -13,6 +13,9 @@ BINARY_NAME="bjorn2scan-agent"
 SERVICE_NAME="bjorn2scan-agent.service"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
+CONFIG_DIR="/etc/bjorn2scan"
+CONFIG_FILE="${CONFIG_DIR}/agent.conf"
+CONFIG_EXAMPLE="${CONFIG_DIR}/agent.conf.example"
 USER_NAME="bjorn2scan"
 GROUP_NAME="bjorn2scan"
 GITHUB_REPO="bvboe/b2s-go"
@@ -30,7 +33,7 @@ bjorn2scan-agent installer
 
 DESCRIPTION:
     Installs bjorn2scan-agent, a lightweight host-level security scanning agent
-    for the bjorn2scan v2 platform.
+    for the Bjorn2Scan v2 platform.
 
 USAGE:
     # Install
@@ -54,7 +57,8 @@ WHAT IT DOES:
 DIRECTORIES USED:
     ${INSTALL_DIR}             - Binary installation location
     /etc/systemd/system        - Systemd service file
-    /var/lib/bjorn2scan        - Data directory
+    /etc/bjorn2scan            - Configuration files
+    /var/lib/bjorn2scan        - Data directory (database)
     /var/log/bjorn2scan        - Log files
     /etc/logrotate.d           - Logrotate configuration
     /tmp/bjorn2scan-*          - Temporary download directory (auto-cleaned)
@@ -229,6 +233,61 @@ install_binary() {
     log_success "Binary installed"
 }
 
+# Install configuration file
+install_config() {
+    log_info "Installing configuration file..."
+
+    # Create config directory
+    mkdir -p "$CONFIG_DIR"
+
+    # Always install/update the example config
+    CONFIG_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/agent.conf.example"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSfL "$CONFIG_EXAMPLE_URL" -o "$CONFIG_EXAMPLE" 2>/dev/null || \
+            log_warning "Could not download example config (will use defaults)"
+    else
+        wget -q "$CONFIG_EXAMPLE_URL" -O "$CONFIG_EXAMPLE" 2>/dev/null || \
+            log_warning "Could not download example config (will use defaults)"
+    fi
+
+    # Check if user config already exists
+    if [ -f "$CONFIG_FILE" ]; then
+        log_warning "Configuration file exists at $CONFIG_FILE"
+        log_info "Preserving existing configuration"
+        log_info "See $CONFIG_EXAMPLE for new configuration options"
+
+        # Show what's different (if diff exists)
+        if command -v diff >/dev/null 2>&1 && [ -f "$CONFIG_EXAMPLE" ]; then
+            echo ""
+            log_info "Configuration changes in this version:"
+            if diff -u "$CONFIG_FILE" "$CONFIG_EXAMPLE" 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | head -20; then
+                :
+            else
+                log_info "No new configuration options detected"
+            fi
+            echo ""
+        fi
+    else
+        # Fresh install - copy example to active config
+        if [ -f "$CONFIG_EXAMPLE" ]; then
+            cp "$CONFIG_EXAMPLE" "$CONFIG_FILE"
+            log_success "Configuration file created at $CONFIG_FILE"
+            log_info "Edit this file to customize settings (port, paths, debug mode, etc.)"
+        else
+            log_warning "Using built-in defaults (no config file created)"
+        fi
+    fi
+
+    # Set permissions
+    if [ -f "$CONFIG_FILE" ]; then
+        chmod 644 "$CONFIG_FILE"
+    fi
+    if [ -f "$CONFIG_EXAMPLE" ]; then
+        chmod 644 "$CONFIG_EXAMPLE"
+    fi
+}
+
 # Get systemd version
 get_systemd_version() {
     systemctl --version | head -n 1 | awk '{print $2}'
@@ -314,6 +373,8 @@ show_summary() {
     echo ""
     echo "Installed files and directories:"
     echo "  Binary:    ${INSTALL_DIR}/${BINARY_NAME}"
+    echo "  Config:    ${CONFIG_FILE}"
+    echo "  Example:   ${CONFIG_EXAMPLE}"
     echo "  Data:      /var/lib/bjorn2scan"
     echo "  Logs:      /var/log/bjorn2scan"
 
@@ -343,6 +404,8 @@ show_summary() {
 show_directories() {
     log_info "Directories that will be used:"
     echo "  Binary:         ${INSTALL_DIR}/${BINARY_NAME}"
+    echo "  Config:         ${CONFIG_FILE}"
+    echo "  Config example: ${CONFIG_EXAMPLE}"
     echo "  Systemd:        ${SERVICE_DIR}/${SERVICE_NAME}"
     echo "  Data:           /var/lib/bjorn2scan"
     echo "  Logs:           /var/log/bjorn2scan"
@@ -368,6 +431,7 @@ main() {
     stop_service
     create_user
     install_binary
+    install_config
     install_service
     enable_service
 

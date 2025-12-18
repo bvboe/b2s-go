@@ -1,0 +1,17 @@
+# Bjorn2Scan Agent Configuration File
+# Copy this file to /etc/bjorn2scan/agent.conf or ./agent.conf
+# Environment variables override values in this file
+
+# Server port (default: 9999)
+# Environment variable: PORT
+port=9999
+
+# Database path (default: /var/lib/bjorn2scan/containers.db)
+# Environment variable: DB_PATH
+db_path=/var/lib/bjorn2scan/containers.db
+
+# Enable debug mode (default: false)
+# When enabled, adds /debug/sql and /debug/metrics endpoints
+# WARNING: Only enable in development/testing - NOT for production
+# Environment variable: DEBUG_ENABLED
+debug_enabled=false

@@ -51,6 +51,8 @@ spec:
           value: {{ .Values.scanServer.config.port | quote }}
         - name: DB_PATH
           value: "{{ .Values.scanServer.persistence.mountPath }}/containers.db"
+        - name: DEBUG_ENABLED
+          value: {{ .Values.scanServer.config.debugEnabled | quote }}
         volumeMounts:
         - name: data
           mountPath: {{ .Values.scanServer.persistence.mountPath }}

@@ -1,6 +1,6 @@
 # bjorn2scan-agent
 
-Host-level security scanning agent for the bjorn2scan v2 platform.
+Host-level security scanning agent for the Bjorn2Scan v2 platform.
 
 ## Overview
 

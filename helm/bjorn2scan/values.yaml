@@ -75,6 +75,7 @@ scanServer:
 
   config:
     port: "8080"
+    debugEnabled: false  # Set to true to enable debug endpoints (/debug/sql, /debug/metrics)
 
   # Data persistence
   persistence:

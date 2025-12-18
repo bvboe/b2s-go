@@ -102,6 +102,13 @@ func (q *JobQueue) EnqueueForceScan(image containers.ImageID, nodeName string, c
 	q.Enqueue(job)
 }
 
+// GetQueueDepth returns the current number of jobs in the queue.
+// This is useful for monitoring and debug purposes.
+// The operation is thread-safe as len() on channels is atomic in Go.
+func (q *JobQueue) GetQueueDepth() int {
+	return len(q.jobs)
+}
+
 // worker processes jobs from the queue serially (one at a time)
 func (q *JobQueue) worker() {
 	defer q.wg.Done()

@@ -14,8 +14,10 @@ import (
 
 	"github.com/bvboe/b2s-go/bjorn2scan-agent/docker"
 	"github.com/bvboe/b2s-go/bjorn2scan-agent/syft"
+	"github.com/bvboe/b2s-go/scanner-core/config"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/debug"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
@@ -74,21 +76,28 @@ func main() {
 		defer func() { _ = logFile.Close() }()
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "9999"
+	// Load configuration from file with environment variable overrides
+	cfg, err := config.LoadConfigWithDefaults()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	port := cfg.Port
+	dbPath := cfg.DBPath
+
+	// Initialize debug configuration
+	debugConfig := debug.NewDebugConfig(cfg.DebugEnabled)
+	if debugConfig.IsEnabled() {
+		log.Println("Debug mode ENABLED - /debug endpoints available")
 	}
 
 	log.Printf("bjorn2scan-agent v%s starting", version)
+	log.Printf("Configuration: port=%s, db_path=%s, debug=%v", port, dbPath, cfg.DebugEnabled)
 
 	// Create container manager
 	manager := containers.NewManager()
 
 	// Initialize database
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "/var/lib/bjorn2scan/containers.db"
-	}
 	db, err := database.New(dbPath)
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
@@ -140,9 +149,18 @@ func main() {
 	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
 	handlers.RegisterStaticHandlers(mux)
 
+	// Register debug handlers if debug mode is enabled
+	handlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
+
+	// Wrap with logging middleware if debug enabled
+	var handler http.Handler = mux
+	if debugConfig.IsEnabled() {
+		handler = debug.LoggingMiddleware(debugConfig, mux)
+	}
+
 	server := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	// Handle shutdown gracefully

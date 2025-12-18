@@ -15,6 +15,7 @@ import (
 	"github.com/bvboe/b2s-go/k8s-scan-server/podscanner"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/debug"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
@@ -70,6 +71,14 @@ func main() {
 	if dbPath == "" {
 		dbPath = "/var/lib/bjorn2scan/containers.db"
 	}
+
+	// Initialize debug configuration
+	debugEnabled := os.Getenv("DEBUG_ENABLED")
+	debugConfig := debug.NewDebugConfig(debugEnabled == "true")
+	if debugConfig.IsEnabled() {
+		log.Println("Debug mode ENABLED - /debug endpoints available")
+	}
+
 	db, err := database.New(dbPath)
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
@@ -131,9 +140,18 @@ func main() {
 	// Register static file handlers (web UI)
 	corehandlers.RegisterStaticHandlers(mux)
 
+	// Register debug handlers if debug mode is enabled
+	corehandlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
+
+	// Wrap with logging middleware if debug enabled
+	var handler http.Handler = mux
+	if debugConfig.IsEnabled() {
+		handler = debug.LoggingMiddleware(debugConfig, mux)
+	}
+
 	server := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	// Handle shutdown gracefully
