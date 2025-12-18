@@ -16,7 +16,9 @@ import (
 	"github.com/containerd/containerd/namespaces"
 	"github.com/opencontainers/go-digest"
 
-	// Note: SQLite driver is already imported transitively by syft for RPM database parsing
+	// Import SQLite driver for syft RPM database parsing
+	// Syft requires this for scanning images with RPM packages (RHEL, CentOS, Fedora, etc.)
+	_ "modernc.org/sqlite"
 )
 
 const (
