@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -77,7 +78,14 @@ func (db *DB) UpdateScanStatus(digest string, status string, errorMsg string) er
 
 // StoreSBOM stores the SBOM JSON for an image and marks it as scanned
 func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
-	_, err := db.conn.Exec(`
+	// Get image ID first
+	var imageID int64
+	err := db.conn.QueryRow(`SELECT id FROM container_images WHERE digest = ?`, digest).Scan(&imageID)
+	if err != nil {
+		return fmt.Errorf("failed to get image ID: %w", err)
+	}
+
+	_, err = db.conn.Exec(`
 		UPDATE container_images
 		SET sbom = ?,
 		    scan_status = 'scanned',
@@ -89,6 +97,12 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 
 	if err != nil {
 		return fmt.Errorf("failed to store SBOM: %w", err)
+	}
+
+	// Parse and store SBOM data in packages and image_summary tables
+	if err := parseSBOMData(db.conn, imageID, sbomJSON); err != nil {
+		log.Printf("Warning: Failed to parse SBOM data for digest %s: %v", digest, err)
+		// Don't fail the whole operation if parsing fails
 	}
 
 	return nil
@@ -224,7 +238,14 @@ func (db *DB) UpdateVulnerabilityStatus(digest string, status string, errorMsg s
 
 // StoreVulnerabilities stores the vulnerability scan JSON for an image and marks it as scanned
 func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte) error {
-	_, err := db.conn.Exec(`
+	// Get image ID first
+	var imageID int64
+	err := db.conn.QueryRow(`SELECT id FROM container_images WHERE digest = ?`, digest).Scan(&imageID)
+	if err != nil {
+		return fmt.Errorf("failed to get image ID: %w", err)
+	}
+
+	_, err = db.conn.Exec(`
 		UPDATE container_images
 		SET vulnerabilities = ?,
 		    vulnerability_status = 'scanned',
@@ -236,6 +257,12 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte) error {
 
 	if err != nil {
 		return fmt.Errorf("failed to store vulnerabilities: %w", err)
+	}
+
+	// Parse and store vulnerability data in vulnerabilities table
+	if err := parseVulnerabilityData(db.conn, imageID, vulnJSON); err != nil {
+		log.Printf("Warning: Failed to parse vulnerability data for digest %s: %v", digest, err)
+		// Don't fail the whole operation if parsing fails
 	}
 
 	return nil

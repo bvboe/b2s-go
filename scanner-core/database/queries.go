@@ -1,0 +1,329 @@
+package database
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+)
+
+// Package represents a package from the packages table
+type Package struct {
+	ID                int    `json:"id"`
+	ImageID           int64  `json:"image_id"`
+	Name              string `json:"name"`
+	Version           string `json:"version"`
+	Type              string `json:"type"`
+	NumberOfInstances int    `json:"number_of_instances"`
+	CreatedAt         string `json:"created_at"`
+}
+
+// Vulnerability represents a vulnerability from the vulnerabilities table
+type Vulnerability struct {
+	ID             int     `json:"id"`
+	ImageID        int64   `json:"image_id"`
+	CVEID          string  `json:"cve_id"`
+	PackageName    string  `json:"package_name"`
+	PackageVersion string  `json:"package_version"`
+	PackageType    string  `json:"package_type"`
+	Severity       string  `json:"severity"`
+	FixStatus      string  `json:"fix_status"`
+	FixedVersion   string  `json:"fixed_version"`
+	KnownExploits  int     `json:"known_exploits"`
+	Count          int     `json:"count"`
+	CreatedAt      string  `json:"created_at"`
+}
+
+// ImageSummary represents the summary information for an image
+type ImageSummary struct {
+	ImageID      int64  `json:"image_id"`
+	PackageCount int    `json:"package_count"`
+	OSName       string `json:"os_name"`
+	OSVersion    string `json:"os_version"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+// ImageDetails combines image metadata with summary statistics
+type ImageDetails struct {
+	ID                  int64  `json:"id"`
+	Digest              string `json:"digest"`
+	ScanStatus          string `json:"scan_status"`
+	VulnerabilityStatus string `json:"vulnerability_status"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
+	ScannedAt           string `json:"scanned_at,omitempty"`
+
+	// Summary data
+	PackageCount      int    `json:"package_count"`
+	VulnerabilityCount int   `json:"vulnerability_count"`
+	CriticalCount     int    `json:"critical_count"`
+	HighCount         int    `json:"high_count"`
+	MediumCount       int    `json:"medium_count"`
+	LowCount          int    `json:"low_count"`
+	OSName            string `json:"os_name,omitempty"`
+	OSVersion         string `json:"os_version,omitempty"`
+}
+
+// GetPackagesByImage returns all packages for a specific image
+func (db *DB) GetPackagesByImage(digest string) (interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT p.id, p.image_id, p.name, p.version, p.type, p.number_of_instances, p.created_at
+		FROM packages p
+		JOIN container_images img ON p.image_id = img.id
+		WHERE img.digest = ?
+		ORDER BY p.name, p.version
+	`, digest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query packages: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	var packages []Package
+	for rows.Next() {
+		var pkg Package
+		err := rows.Scan(&pkg.ID, &pkg.ImageID, &pkg.Name, &pkg.Version, &pkg.Type,
+			&pkg.NumberOfInstances, &pkg.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan package row: %w", err)
+		}
+		packages = append(packages, pkg)
+	}
+
+	return packages, nil
+}
+
+// GetVulnerabilitiesByImage returns all vulnerabilities for a specific image
+func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT v.id, v.image_id, v.cve_id, v.package_name, v.package_version, v.package_type,
+		       v.severity, v.fix_status, v.fixed_version, v.known_exploits, v.count, v.created_at
+		FROM vulnerabilities v
+		JOIN container_images img ON v.image_id = img.id
+		WHERE img.digest = ?
+		ORDER BY
+			CASE v.severity
+				WHEN 'Critical' THEN 1
+				WHEN 'High' THEN 2
+				WHEN 'Medium' THEN 3
+				WHEN 'Low' THEN 4
+				WHEN 'Negligible' THEN 5
+				ELSE 6
+			END,
+			v.cve_id
+	`, digest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query vulnerabilities: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	var vulns []Vulnerability
+	for rows.Next() {
+		var vuln Vulnerability
+		err := rows.Scan(&vuln.ID, &vuln.ImageID, &vuln.CVEID, &vuln.PackageName,
+			&vuln.PackageVersion, &vuln.PackageType, &vuln.Severity, &vuln.FixStatus,
+			&vuln.FixedVersion, &vuln.KnownExploits, &vuln.Count, &vuln.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan vulnerability row: %w", err)
+		}
+		vulns = append(vulns, vuln)
+	}
+
+	return vulns, nil
+}
+
+// GetImageSummary returns summary information for a specific image
+func (db *DB) GetImageSummary(digest string) (interface{}, error) {
+	var summary ImageSummary
+	err := db.conn.QueryRow(`
+		SELECT s.image_id, s.package_count, s.os_name, s.os_version, s.updated_at
+		FROM image_summary s
+		JOIN container_images img ON s.image_id = img.id
+		WHERE img.digest = ?
+	`, digest).Scan(&summary.ImageID, &summary.PackageCount, &summary.OSName,
+		&summary.OSVersion, &summary.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil // No summary yet
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get image summary: %w", err)
+	}
+
+	return &summary, nil
+}
+
+// GetImageDetails returns detailed information including vulnerability counts
+func (db *DB) GetImageDetails(digest string) (interface{}, error) {
+	log.Printf("DEBUG GetImageDetails: digest=%q len=%d", digest, len(digest))
+	var details ImageDetails
+	var scannedAt sql.NullString
+	var osName, osVersion sql.NullString
+
+	// Get basic image info and summary
+	err := db.conn.QueryRow(`
+		SELECT
+			img.id, img.digest, img.scan_status, img.vulnerability_status,
+			img.created_at, img.updated_at, img.scanned_at,
+			COALESCE(s.package_count, 0),
+			COALESCE(s.os_name, ''),
+			COALESCE(s.os_version, '')
+		FROM container_images img
+		LEFT JOIN image_summary s ON img.id = s.image_id
+		WHERE img.digest = ?
+	`, digest).Scan(&details.ID, &details.Digest, &details.ScanStatus, &details.VulnerabilityStatus,
+		&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
+		&osName, &osVersion)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("image not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get image details: %w", err)
+	}
+
+	if scannedAt.Valid {
+		details.ScannedAt = scannedAt.String
+	}
+	if osName.Valid {
+		details.OSName = osName.String
+	}
+	if osVersion.Valid {
+		details.OSVersion = osVersion.String
+	}
+
+	// Get vulnerability counts by severity
+	rows, err := db.conn.Query(`
+		SELECT
+			LOWER(severity),
+			SUM(count) as total
+		FROM vulnerabilities
+		WHERE image_id = ?
+		GROUP BY LOWER(severity)
+	`, details.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query vulnerability counts: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	totalVulns := 0
+	for rows.Next() {
+		var severity string
+		var count int
+		if err := rows.Scan(&severity, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan vulnerability count: %w", err)
+		}
+
+		totalVulns += count
+		switch severity {
+		case "critical":
+			details.CriticalCount = count
+		case "high":
+			details.HighCount = count
+		case "medium":
+			details.MediumCount = count
+		case "low", "negligible":
+			details.LowCount += count
+		}
+	}
+
+	details.VulnerabilityCount = totalVulns
+
+	return &details, nil
+}
+
+// GetAllImageDetails returns detailed information for all images
+func (db *DB) GetAllImageDetails() (interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT
+			img.id, img.digest, img.scan_status, img.vulnerability_status,
+			img.created_at, img.updated_at, img.scanned_at,
+			COALESCE(s.package_count, 0),
+			COALESCE(s.os_name, ''),
+			COALESCE(s.os_version, '')
+		FROM container_images img
+		LEFT JOIN image_summary s ON img.id = s.image_id
+		ORDER BY img.created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query images: %w", err)
+	}
+
+	// Read all images first to avoid deadlock
+	var images []ImageDetails
+	for rows.Next() {
+		var details ImageDetails
+		var scannedAt sql.NullString
+		var osName, osVersion sql.NullString
+
+		err := rows.Scan(&details.ID, &details.Digest, &details.ScanStatus, &details.VulnerabilityStatus,
+			&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
+			&osName, &osVersion)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan image row: %w", err)
+		}
+
+		if scannedAt.Valid {
+			details.ScannedAt = scannedAt.String
+		}
+		if osName.Valid {
+			details.OSName = osName.String
+		}
+		if osVersion.Valid {
+			details.OSVersion = osVersion.String
+		}
+
+		images = append(images, details)
+	}
+	if err := rows.Close(); err != nil {
+		log.Printf("Warning: Failed to close rows: %v", err)
+	}
+
+	// Now get vulnerability counts for each image
+	for i := range images {
+		vulnRows, err := db.conn.Query(`
+			SELECT
+				LOWER(severity),
+				SUM(count) as total
+			FROM vulnerabilities
+			WHERE image_id = ?
+			GROUP BY LOWER(severity)
+		`, images[i].ID)
+		if err == nil {
+			totalVulns := 0
+			for vulnRows.Next() {
+				var severity string
+				var count int
+				if err := vulnRows.Scan(&severity, &count); err == nil {
+					totalVulns += count
+					switch severity {
+					case "critical":
+						images[i].CriticalCount = count
+					case "high":
+						images[i].HighCount = count
+					case "medium":
+						images[i].MediumCount = count
+					case "low", "negligible":
+						images[i].LowCount += count
+					}
+				}
+			}
+			images[i].VulnerabilityCount = totalVulns
+			if err := vulnRows.Close(); err != nil {
+				log.Printf("Warning: Failed to close vulnerability rows: %v", err)
+			}
+		}
+	}
+
+	return images, nil
+}

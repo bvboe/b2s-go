@@ -137,7 +137,7 @@ func main() {
 	infoProvider := &AgentInfo{}
 	mux := http.NewServeMux()
 	handlers.RegisterHandlers(mux, infoProvider)
-	handlers.RegisterDatabaseHandlers(mux, db)
+	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
 	handlers.RegisterStaticHandlers(mux)
 
 	server := &http.Server{

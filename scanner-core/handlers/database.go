@@ -11,6 +11,11 @@ import (
 type DatabaseProvider interface {
 	GetAllInstances() (interface{}, error)
 	GetAllImages() (interface{}, error)
+	GetAllImageDetails() (interface{}, error)
+	GetImageDetails(digest string) (interface{}, error)
+	GetPackagesByImage(digest string) (interface{}, error)
+	GetVulnerabilitiesByImage(digest string) (interface{}, error)
+	GetImageSummary(digest string) (interface{}, error)
 	GetSBOM(digest string) ([]byte, error)
 	GetVulnerabilities(digest string) ([]byte, error)
 }
@@ -165,10 +170,186 @@ func VulnerabilitiesDownloadHandler(provider DatabaseProvider) http.HandlerFunc 
 	}
 }
 
+// ImageDetailsHandler creates an HTTP handler for /api/images endpoint
+// Returns detailed image information including vulnerability counts
+func ImageDetailsHandler(provider DatabaseProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		images, err := provider.GetAllImageDetails()
+		if err != nil {
+			log.Printf("Error querying image details: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{
+			"images": images,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding image details response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	}
+}
+
+// ImageDetailHandler creates an HTTP handler for /api/images/{digest} endpoint
+// Returns detailed information for a specific image
+func ImageDetailHandler(provider DatabaseProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		path := r.URL.Path
+		if len(path) <= 12 { // "/api/images/" is 12 characters
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		digest := path[12:] // Remove "/api/images/" prefix
+
+		if digest == "" {
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+
+		details, err := provider.GetImageDetails(digest)
+		if err != nil {
+			log.Printf("Error querying image details for %s: %v", digest, err)
+			http.Error(w, "Image not found", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(details); err != nil {
+			log.Printf("Error encoding image detail response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	}
+}
+
+// PackagesHandler creates an HTTP handler for /api/images/{digest}/packages endpoint
+// Returns all packages for a specific image
+func PackagesHandler(provider DatabaseProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		// Expected format: /api/images/{digest}/packages
+		path := r.URL.Path
+		if len(path) <= 12 { // "/api/images/" is 12 characters
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		// Remove "/api/images/" prefix and "/packages" suffix
+		pathWithoutPrefix := path[12:]
+		if len(pathWithoutPrefix) <= 9 || pathWithoutPrefix[len(pathWithoutPrefix)-9:] != "/packages" {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		digest := pathWithoutPrefix[:len(pathWithoutPrefix)-9]
+
+		packages, err := provider.GetPackagesByImage(digest)
+		if err != nil {
+			log.Printf("Error querying packages for %s: %v", digest, err)
+			http.Error(w, "Packages not found", http.StatusNotFound)
+			return
+		}
+
+		response := map[string]interface{}{
+			"packages": packages,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding packages response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	}
+}
+
+// VulnerabilitiesHandler creates an HTTP handler for /api/images/{digest}/vulnerabilities endpoint
+// Returns all vulnerabilities for a specific image
+func VulnerabilitiesHandler(provider DatabaseProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		// Expected format: /api/images/{digest}/vulnerabilities
+		path := r.URL.Path
+		if len(path) <= 12 { // "/api/images/" is 12 characters
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		// Remove "/api/images/" prefix and "/vulnerabilities" suffix
+		pathWithoutPrefix := path[12:]
+		// "/vulnerabilities" is 16 characters, not 17!
+		if len(pathWithoutPrefix) <= 16 || pathWithoutPrefix[len(pathWithoutPrefix)-16:] != "/vulnerabilities" {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		digest := pathWithoutPrefix[:len(pathWithoutPrefix)-16]
+
+		vulns, err := provider.GetVulnerabilitiesByImage(digest)
+		if err != nil {
+			log.Printf("Error querying vulnerabilities for %s: %v", digest, err)
+			http.Error(w, "Vulnerabilities not found", http.StatusNotFound)
+			return
+		}
+
+		response := map[string]interface{}{
+			"vulnerabilities": vulns,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding vulnerabilities response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	}
+}
+
+// HandlerOverrides allows customization of specific handlers during registration
+type HandlerOverrides struct {
+	// SBOMHandler optionally overrides the default SBOM download handler
+	// Used by k8s-scan-server to route SBOM requests to pod-scanner
+	SBOMHandler http.HandlerFunc
+	// VulnerabilitiesHandler optionally overrides the default vulnerabilities download handler
+	VulnerabilitiesHandler http.HandlerFunc
+}
+
 // RegisterDatabaseHandlers registers database query endpoints on the provided mux
-func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider) {
+// Pass nil for overrides to use all default handlers
+func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, overrides *HandlerOverrides) {
+	// Register legacy endpoints
 	mux.HandleFunc("/containers/instances", DatabaseInstancesHandler(provider))
 	mux.HandleFunc("/containers/images", DatabaseImagesHandler(provider))
-	mux.HandleFunc("/sbom/", SBOMDownloadHandler(provider))
-	mux.HandleFunc("/vulnerabilities/", VulnerabilitiesDownloadHandler(provider))
+
+	// Register download endpoints with optional overrides
+	if overrides != nil && overrides.SBOMHandler != nil {
+		mux.HandleFunc("/sbom/", overrides.SBOMHandler)
+	} else {
+		mux.HandleFunc("/sbom/", SBOMDownloadHandler(provider))
+	}
+
+	if overrides != nil && overrides.VulnerabilitiesHandler != nil {
+		mux.HandleFunc("/vulnerabilities/", overrides.VulnerabilitiesHandler)
+	} else {
+		mux.HandleFunc("/vulnerabilities/", VulnerabilitiesDownloadHandler(provider))
+	}
+
+	// Register new API endpoints for aggregated data
+	mux.HandleFunc("/api/images", ImageDetailsHandler(provider))
+	mux.HandleFunc("/api/images/", func(w http.ResponseWriter, r *http.Request) {
+		// Route to appropriate handler based on path suffix
+		path := r.URL.Path
+		// "/api/images/" is 12 characters, not 13!
+		if len(path) > 12 {
+			pathWithoutPrefix := path[12:]
+			if len(pathWithoutPrefix) > 9 && pathWithoutPrefix[len(pathWithoutPrefix)-9:] == "/packages" {
+				PackagesHandler(provider)(w, r)
+				return
+			}
+			// "/vulnerabilities" is 16 characters, not 17!
+			if len(pathWithoutPrefix) > 16 && pathWithoutPrefix[len(pathWithoutPrefix)-16:] == "/vulnerabilities" {
+				VulnerabilitiesHandler(provider)(w, r)
+				return
+			}
+			// Single image detail
+			ImageDetailHandler(provider)(w, r)
+		}
+	})
 }

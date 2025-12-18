@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 type migration struct {
 	version int
@@ -39,6 +39,11 @@ var migrations = []migration{
 		version: 5,
 		name:    "remove_redundant_sbom_fields",
 		up:      migrateToV5,
+	},
+	{
+		version: 6,
+		name:    "add_sbom_vulnerability_tables",
+		up:      migrateToV6,
 	},
 }
 
@@ -417,5 +422,179 @@ func migrateToV5(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	return nil
+}
+
+// migrateToV6 adds tables for parsed SBOM and vulnerability data
+func migrateToV6(conn *sql.DB) error {
+	// Start a transaction for the migration
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Step 1: Create packages table
+	_, err = tx.Exec(`
+		CREATE TABLE packages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			image_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			version TEXT,
+			type TEXT,
+			number_of_instances INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (image_id) REFERENCES container_images(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create packages table: %w", err)
+	}
+
+	// Step 2: Create indexes for packages table
+	_, err = tx.Exec(`
+		CREATE INDEX idx_packages_image ON packages(image_id);
+		CREATE INDEX idx_packages_type ON packages(type);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create packages indexes: %w", err)
+	}
+
+	// Step 3: Create vulnerabilities table
+	_, err = tx.Exec(`
+		CREATE TABLE vulnerabilities (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			image_id INTEGER NOT NULL,
+			cve_id TEXT NOT NULL,
+			package_name TEXT,
+			package_version TEXT,
+			package_type TEXT,
+			severity TEXT,
+			fix_status TEXT,
+			fixed_version TEXT,
+			known_exploits INTEGER DEFAULT 0,
+			count INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (image_id) REFERENCES container_images(id),
+			UNIQUE(image_id, cve_id, package_name, package_version, package_type)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerabilities table: %w", err)
+	}
+
+	// Step 4: Create indexes for vulnerabilities table
+	_, err = tx.Exec(`
+		CREATE INDEX idx_vulnerabilities_image ON vulnerabilities(image_id);
+		CREATE INDEX idx_vulnerabilities_severity ON vulnerabilities(severity);
+		CREATE INDEX idx_vulnerabilities_cve ON vulnerabilities(cve_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerabilities indexes: %w", err)
+	}
+
+	// Step 5: Create image_summary table
+	_, err = tx.Exec(`
+		CREATE TABLE image_summary (
+			image_id INTEGER PRIMARY KEY,
+			package_count INTEGER DEFAULT 0,
+			os_name TEXT,
+			os_version TEXT,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (image_id) REFERENCES container_images(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create image_summary table: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Step 6: Parse existing SBOM and vulnerability data
+	log.Println("Migration v6: Processing existing SBOM and vulnerability data...")
+	if err := migrateExistingData(conn); err != nil {
+		log.Printf("Warning: Failed to migrate existing data: %v", err)
+		// Don't fail the migration if data processing fails
+	}
+
+	return nil
+}
+
+// migrateExistingData processes existing SBOM and vulnerability JSON blobs
+func migrateExistingData(conn *sql.DB) error {
+	// Query all images that have SBOM or vulnerability data
+	rows, err := conn.Query(`
+		SELECT id, digest, sbom, vulnerabilities
+		FROM container_images
+		WHERE (sbom IS NOT NULL AND sbom != '')
+		   OR (vulnerabilities IS NOT NULL AND vulnerabilities != '')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+
+	// Read all data first before closing the rows to avoid deadlock
+	type imageData struct {
+		imageID  int64
+		digest   string
+		sbomJSON string
+		vulnJSON string
+	}
+
+	var imagesToProcess []imageData
+	for rows.Next() {
+		var imageID int64
+		var digest string
+		var sbomJSON, vulnJSON sql.NullString
+
+		if err := rows.Scan(&imageID, &digest, &sbomJSON, &vulnJSON); err != nil {
+			log.Printf("Warning: Failed to scan row: %v", err)
+			continue
+		}
+
+		data := imageData{
+			imageID: imageID,
+			digest:  digest,
+		}
+		if sbomJSON.Valid {
+			data.sbomJSON = sbomJSON.String
+		}
+		if vulnJSON.Valid {
+			data.vulnJSON = vulnJSON.String
+		}
+
+		imagesToProcess = append(imagesToProcess, data)
+	}
+	if err := rows.Close(); err != nil {
+		log.Printf("Warning: Failed to close rows: %v", err)
+	}
+
+	// Now process the data
+	processed := 0
+	for _, data := range imagesToProcess {
+		// Process SBOM if available
+		if data.sbomJSON != "" {
+			if err := parseSBOMData(conn, data.imageID, []byte(data.sbomJSON)); err != nil {
+				log.Printf("Warning: Failed to parse SBOM for image %d (%s): %v", data.imageID, data.digest, err)
+			}
+		}
+
+		// Process vulnerabilities if available
+		if data.vulnJSON != "" {
+			if err := parseVulnerabilityData(conn, data.imageID, []byte(data.vulnJSON)); err != nil {
+				log.Printf("Warning: Failed to parse vulnerabilities for image %d (%s): %v", data.imageID, data.digest, err)
+			}
+		}
+
+		processed++
+		if processed%10 == 0 {
+			log.Printf("Migration v6: Processed %d images...", processed)
+		}
+	}
+
+	log.Printf("Migration v6: Completed processing %d images", processed)
 	return nil
 }

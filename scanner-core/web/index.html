@@ -274,6 +274,201 @@
         footer a:hover {
             text-decoration: underline;
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5);
+            animation: fadeIn 0.2s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            animation: slideDown 0.3s;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            padding: 20px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            line-height: 28px;
+            text-align: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .modal-close:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .modal-body {
+            padding: 30px;
+            overflow-y: auto;
+            max-height: calc(90vh - 140px);
+        }
+
+        .modal-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .modal-summary-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .modal-summary-item .label {
+            font-size: 0.875rem;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .modal-summary-item .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .vuln-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .vuln-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+            font-size: 0.875rem;
+        }
+
+        .vuln-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 0.875rem;
+        }
+
+        .vuln-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .severity-critical {
+            background: #dc3545;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        .severity-high {
+            background: #fd7e14;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        .severity-medium {
+            background: #17a2b8;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        .severity-low {
+            background: #6c757d;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        .view-btn {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-right: 4px;
+            transition: all 0.2s;
+        }
+
+        .view-btn:hover {
+            background: #138496;
+        }
+
+        tr.clickable-row {
+            cursor: pointer;
+        }
+
+        tr.clickable-row:hover {
+            background: #f0f0f0;
+        }
     </style>
 </head>
 <body>
@@ -293,12 +488,20 @@
                 <div class="value" id="images-count">-</div>
             </div>
             <div class="stat-card">
-                <div class="label">SBOM Scanned</div>
-                <div class="value" id="sbom-scanned">-</div>
+                <div class="label">Total Packages</div>
+                <div class="value" id="total-packages">-</div>
             </div>
             <div class="stat-card">
-                <div class="label">Vuln Scanned</div>
-                <div class="value" id="vuln-scanned">-</div>
+                <div class="label">Total Vulnerabilities</div>
+                <div class="value" id="total-vulns">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Critical Vulns</div>
+                <div class="value" id="critical-vulns" style="color: #dc3545;">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">High Vulns</div>
+                <div class="value" id="high-vulns" style="color: #fd7e14;">-</div>
             </div>
         </div>
 
@@ -355,11 +558,14 @@
                     <thead>
                         <tr>
                             <th>Digest</th>
-                            <th>SBOM Status</th>
-                            <th>Vuln Status</th>
+                            <th>Packages</th>
+                            <th>Vulnerabilities</th>
+                            <th>Critical</th>
+                            <th>High</th>
+                            <th>Medium</th>
+                            <th>Low</th>
+                            <th>OS</th>
                             <th>Actions</th>
-                            <th>Created</th>
-                            <th>Updated</th>
                         </tr>
                     </thead>
                     <tbody id="images-tbody"></tbody>
@@ -369,6 +575,20 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     <div>No container images found</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vulnerability Details Modal -->
+        <div id="vulnModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Vulnerability Details</h2>
+                    <button class="modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-summary" id="modalSummary"></div>
+                    <div id="modalContent"></div>
                 </div>
             </div>
         </div>
@@ -437,15 +657,29 @@
             empty.style.display = 'none';
 
             try {
-                const response = await fetch('/containers/images');
+                const response = await fetch('/api/images');
                 const data = await response.json();
 
-                const sbomScanned = data.images?.filter(img => img.scan_status === 'scanned').length || 0;
-                const vulnScanned = data.images?.filter(img => img.vulnerability_status === 'scanned').length || 0;
+                // Calculate totals
+                let totalPackages = 0;
+                let totalVulns = 0;
+                let totalCritical = 0;
+                let totalHigh = 0;
+
+                if (data.images) {
+                    data.images.forEach(img => {
+                        totalPackages += img.package_count || 0;
+                        totalVulns += img.vulnerability_count || 0;
+                        totalCritical += img.critical_count || 0;
+                        totalHigh += img.high_count || 0;
+                    });
+                }
 
                 document.getElementById('images-count').textContent = data.images?.length || 0;
-                document.getElementById('sbom-scanned').textContent = sbomScanned;
-                document.getElementById('vuln-scanned').textContent = vulnScanned;
+                document.getElementById('total-packages').textContent = totalPackages;
+                document.getElementById('total-vulns').textContent = totalVulns;
+                document.getElementById('critical-vulns').textContent = totalCritical;
+                document.getElementById('high-vulns').textContent = totalHigh;
                 document.getElementById('images-updated').textContent = `Last updated: ${new Date().toLocaleString()}`;
 
                 if (!data.images || data.images.length === 0) {
@@ -456,12 +690,15 @@
 
                 tbody.innerHTML = data.images.map(image => `
                     <tr>
-                        <td><span class="code" style="font-size: 0.75rem;">${truncateDigest(image.digest)}</span></td>
-                        <td>${getScanStatusBadge(image.scan_status)}</td>
-                        <td>${getVulnStatusBadge(image.vulnerability_status)}</td>
-                        <td>${getDownloadButtons(image.digest, image.scan_status, image.vulnerability_status)}</td>
-                        <td>${formatDate(image.created_at)}</td>
-                        <td>${formatDate(image.updated_at)}</td>
+                        <td><span class="code" style="font-size: 0.75rem;" title="${escapeHtml(image.digest)}">${truncateDigest(image.digest)}</span></td>
+                        <td>${image.package_count > 0 ? '<strong>' + image.package_count + '</strong>' : '-'}</td>
+                        <td>${image.vulnerability_count > 0 ? '<strong>' + image.vulnerability_count + '</strong>' : '-'}</td>
+                        <td>${getCountBadge(image.critical_count, 'critical')}</td>
+                        <td>${getCountBadge(image.high_count, 'high')}</td>
+                        <td>${getCountBadge(image.medium_count, 'medium')}</td>
+                        <td>${getCountBadge(image.low_count, 'low')}</td>
+                        <td>${getOSInfo(image.os_name, image.os_version)}</td>
+                        <td>${getActionButtons(image)}</td>
                     </tr>
                 `).join('');
 
@@ -518,6 +755,56 @@
                 return '<span class="badge badge-danger">✗ Failed</span>';
             }
             return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
+        }
+
+        function getCountBadge(count, severity) {
+            if (!count || count === 0) {
+                return '<span style="color: #999;">-</span>';
+            }
+
+            let colorClass = 'badge-secondary';
+            if (severity === 'critical') {
+                colorClass = 'badge-danger';
+            } else if (severity === 'high') {
+                colorClass = 'badge-warning';
+            } else if (severity === 'medium') {
+                colorClass = 'badge-info';
+            }
+
+            return `<span class="badge ${colorClass}">${count}</span>`;
+        }
+
+        function getOSInfo(osName, osVersion) {
+            if (!osName && !osVersion) {
+                return '<span style="color: #999;">-</span>';
+            }
+            const name = osName || 'Unknown';
+            const version = osVersion ? ` ${osVersion}` : '';
+            return `<span class="code" style="font-size: 0.75rem;">${escapeHtml(name + version)}</span>`;
+        }
+
+        function getActionButtons(image) {
+            let buttons = [];
+
+            // Add View button if vulnerabilities are available
+            if (image.vulnerability_status === 'scanned') {
+                buttons.push(`<button class="view-btn" onclick="viewDetails('${escapeHtml(image.digest)}', event)" title="View Details">👁 View</button>`);
+            }
+
+            // Add download buttons
+            if (image.scan_status === 'scanned') {
+                buttons.push(`<a href="/sbom/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download SBOM">↓ SBOM</a>`);
+            }
+
+            if (image.vulnerability_status === 'scanned') {
+                buttons.push(`<a href="/vulnerabilities/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download Vulnerabilities" style="margin-left: 4px;">↓ Vulns</a>`);
+            }
+
+            if (buttons.length === 0) {
+                return '<span style="color: #999; font-size: 0.75rem;">-</span>';
+            }
+
+            return buttons.join('');
         }
 
         function getDownloadButtons(digest, scanStatus, vulnStatus) {
@@ -579,6 +866,127 @@
                 loadInstances();
                 loadImages();
                 startAutoRefresh();
+            }
+        });
+
+        // Modal functions
+        async function viewDetails(digest, event) {
+            if (event) {
+                event.stopPropagation();
+            }
+
+            const modal = document.getElementById('vulnModal');
+            const modalSummary = document.getElementById('modalSummary');
+            const modalContent = document.getElementById('modalContent');
+
+            // Show modal with loading state
+            modal.style.display = 'block';
+            modalSummary.innerHTML = '<div class="loading">Loading...</div>';
+            modalContent.innerHTML = '';
+
+            try {
+                // Fetch image details and vulnerabilities in parallel
+                const [detailsResponse, vulnsResponse] = await Promise.all([
+                    fetch(`/api/images/${encodeURIComponent(digest)}`),
+                    fetch(`/api/images/${encodeURIComponent(digest)}/vulnerabilities`)
+                ]);
+
+                if (!detailsResponse.ok || !vulnsResponse.ok) {
+                    throw new Error('Failed to fetch data');
+                }
+
+                const imageDetails = await detailsResponse.json();
+                const vulnsData = await vulnsResponse.json();
+                const vulnerabilities = vulnsData.vulnerabilities || [];
+
+                // Display summary
+                modalSummary.innerHTML = `
+                    <div class="modal-summary-item">
+                        <div class="label">Image Digest</div>
+                        <div class="value" style="font-size: 1rem; word-break: break-all;">${truncateDigest(digest)}</div>
+                    </div>
+                    <div class="modal-summary-item">
+                        <div class="label">Total Packages</div>
+                        <div class="value">${imageDetails.package_count || 0}</div>
+                    </div>
+                    <div class="modal-summary-item">
+                        <div class="label">Total Vulnerabilities</div>
+                        <div class="value">${imageDetails.vulnerability_count || 0}</div>
+                    </div>
+                    <div class="modal-summary-item">
+                        <div class="label">Critical</div>
+                        <div class="value" style="color: #dc3545;">${imageDetails.critical_count || 0}</div>
+                    </div>
+                    <div class="modal-summary-item">
+                        <div class="label">High</div>
+                        <div class="value" style="color: #fd7e14;">${imageDetails.high_count || 0}</div>
+                    </div>
+                    <div class="modal-summary-item">
+                        <div class="label">Medium</div>
+                        <div class="value" style="color: #17a2b8;">${imageDetails.medium_count || 0}</div>
+                    </div>
+                    <div class="modal-summary-item">
+                        <div class="label">Low</div>
+                        <div class="value" style="color: #6c757d;">${imageDetails.low_count || 0}</div>
+                    </div>
+                `;
+
+                // Display vulnerabilities table
+                if (vulnerabilities.length === 0) {
+                    modalContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #28a745; font-size: 1.2rem;">✓ No vulnerabilities found!</div>';
+                } else {
+                    modalContent.innerHTML = `
+                        <h3 style="margin-top: 20px; margin-bottom: 15px;">Vulnerabilities (${vulnerabilities.length})</h3>
+                        <table class="vuln-table">
+                            <thead>
+                                <tr>
+                                    <th>CVE ID</th>
+                                    <th>Severity</th>
+                                    <th>Package</th>
+                                    <th>Version</th>
+                                    <th>Fix Status</th>
+                                    <th>Fixed In</th>
+                                    <th>Exploits</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${vulnerabilities.map(v => `
+                                    <tr>
+                                        <td><a href="https://nvd.nist.gov/vuln/detail/${escapeHtml(v.cve_id)}" target="_blank" style="color: #667eea; text-decoration: none;">${escapeHtml(v.cve_id)}</a></td>
+                                        <td><span class="severity-${escapeHtml(v.severity.toLowerCase())}">${escapeHtml(v.severity)}</span></td>
+                                        <td><code>${escapeHtml(v.package_name)}</code></td>
+                                        <td><code>${escapeHtml(v.package_version)}</code></td>
+                                        <td>${escapeHtml(v.fix_status || 'unknown')}</td>
+                                        <td>${v.fixed_version ? '<code>' + escapeHtml(v.fixed_version) + '</code>' : '-'}</td>
+                                        <td>${v.known_exploits ? '<span style="color: #dc3545; font-weight: 600;">⚠ Yes</span>' : '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading vulnerability details:', error);
+                modalContent.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 40px;">Error loading vulnerability details. Please try again.</div>';
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('vulnModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('vulnModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeModal();
             }
         });
     </script>

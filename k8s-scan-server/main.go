@@ -121,15 +121,12 @@ func main() {
 	// Register standard handlers
 	corehandlers.RegisterHandlers(mux, infoProvider)
 
-	// Register database handlers (instances, images)
-	mux.HandleFunc("/containers/instances", corehandlers.DatabaseInstancesHandler(db))
-	mux.HandleFunc("/containers/images", corehandlers.DatabaseImagesHandler(db))
-
-	// Register SBOM handler with pod-scanner routing
-	mux.HandleFunc("/sbom/", handlers.SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient))
-
-	// Register vulnerabilities handler (vulnerabilities are scanned locally, no routing needed)
-	mux.HandleFunc("/vulnerabilities/", corehandlers.VulnerabilitiesDownloadHandler(db))
+	// Register database handlers with SBOM routing override
+	// The k8s-scan-server routes SBOM requests to pod-scanner on the appropriate node
+	dbHandlerOverrides := &corehandlers.HandlerOverrides{
+		SBOMHandler: handlers.SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient),
+	}
+	corehandlers.RegisterDatabaseHandlers(mux, db, dbHandlerOverrides)
 
 	// Register static file handlers (web UI)
 	corehandlers.RegisterStaticHandlers(mux)
