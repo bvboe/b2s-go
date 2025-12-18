@@ -220,35 +220,20 @@ jobs:
         cache-to: type=gha,mode=max,scope=${{ inputs.component-name }}-${{ hashFiles(format('{0}/go.sum', inputs.component-path), 'scanner-core/go.sum') }}
         load: ${{ !inputs.docker-push }}
 
-    - name: Install Grype
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-
     - name: Scan image with Grype
-      run: |
-        if [ "${{ inputs.docker-push }}" = "true" ]; then
-          VERSION=${GITHUB_REF_NAME#v}
-          IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ inputs.image-name }}:${VERSION}"
-        else
-          IMAGE="${{ inputs.image-name }}:${{ inputs.image-tag }}"
-        fi
-        grype "${IMAGE}" --fail-on critical --only-fixed
-      continue-on-error: true
-
-    - name: Generate Grype SARIF report
-      run: |
-        if [ "${{ inputs.docker-push }}" = "true" ]; then
-          VERSION=${GITHUB_REF_NAME#v}
-          IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ inputs.image-name }}:${VERSION}"
-        else
-          IMAGE="${{ inputs.image-name }}:${{ inputs.image-tag }}"
-        fi
-        grype "${IMAGE}" -o sarif > ${{ inputs.component-path }}/grype-results.sarif
+      id: scan
+      uses: anchore/scan-action@v6
+      with:
+        image: ${{ inputs.docker-push && format('{0}/{1}/{2}:{3}', env.REGISTRY, github.repository, inputs.image-name, github.ref_name) || format('{0}:{1}', inputs.image-name, inputs.image-tag) }}
+        fail-build: false
+        severity-cutoff: critical
+        only-fixed: true
+        cache-db: true
 
     - name: Upload Grype results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4
       with:
-        sarif_file: ${{ inputs.component-path }}/grype-results.sarif
+        sarif_file: ${{ steps.scan.outputs.sarif }}
         category: ${{ inputs.component-name }}
       continue-on-error: true
 
@@ -256,7 +241,9 @@ jobs:
       if: inputs.docker-push
       uses: anchore/sbom-action@v0
       with:
-        path: ./${{ inputs.component-path }}
+        image: ${{ steps.meta-push.outputs.tags }}
+        format: spdx-json
+        dependency-snapshot: true
         output-file: ${{ inputs.component-path }}/sbom-${{ inputs.component-name }}.spdx.json
         artifact-name: sbom-${{ inputs.component-name }}
 
@@ -409,32 +396,24 @@ jobs:
         # Get digest from primary tag
         DIGEST=$(docker buildx imagetools inspect "${BASE_IMAGE}:${VERSION}" --format '{{json .}}' | jq -r '.manifest.digest')
         echo "digest=$DIGEST" >> $GITHUB_OUTPUT
-    
-    - name: Install Grype
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-    
-    - name: Scan merged image with Grype
-      run: |
-        VERSION="${{ needs.docker-prep-parallel.outputs.version }}"
-        IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ inputs.image-name }}:${VERSION}"
-        grype "${IMAGE}" --fail-on critical --only-fixed
-      continue-on-error: true
-    
+
     - name: Checkout code (for SARIF upload)
       uses: actions/checkout@v6
-    
-    - name: Generate Grype SARIF report
-      run: |
-        VERSION="${{ needs.docker-prep-parallel.outputs.version }}"
-        IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ inputs.image-name }}:${VERSION}"
-        mkdir -p ${{ inputs.component-path }}
-        grype "${IMAGE}" -o sarif > ${{ inputs.component-path }}/grype-results.sarif
-    
+
+    - name: Scan merged image with Grype
+      id: scan
+      uses: anchore/scan-action@v6
+      with:
+        image: ${{ env.REGISTRY }}/${{ github.repository }}/${{ inputs.image-name }}:${{ needs.docker-prep-parallel.outputs.version }}
+        fail-build: false
+        severity-cutoff: critical
+        only-fixed: true
+        cache-db: true
+
     - name: Upload Grype results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4
       with:
-        sarif_file: ${{ inputs.component-path }}/grype-results.sarif
+        sarif_file: ${{ steps.scan.outputs.sarif }}
         category: ${{ inputs.component-name }}
       continue-on-error: true
     
@@ -442,6 +421,8 @@ jobs:
       uses: anchore/sbom-action@v0
       with:
         image: ${{ env.REGISTRY }}/${{ github.repository }}/${{ inputs.image-name }}:${{ needs.docker-prep-parallel.outputs.version }}
+        format: spdx-json
+        dependency-snapshot: true
         output-file: ${{ inputs.component-path }}/sbom-${{ inputs.component-name }}.spdx.json
         artifact-name: sbom-${{ inputs.component-name }}
     
