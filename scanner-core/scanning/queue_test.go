@@ -17,6 +17,10 @@ import (
 
 // TestJobQueueIntegration tests the complete scanning workflow
 func TestJobQueueIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (requires Grype database download)")
+	}
+
 	// Create temporary database
 	dbPath := "/tmp/test_queue_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
