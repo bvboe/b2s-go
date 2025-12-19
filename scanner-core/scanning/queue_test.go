@@ -355,6 +355,10 @@ func TestJobQueueForceScan(t *testing.T) {
 
 // TestJobQueueMaxDepthDrop tests that jobs are dropped when queue is full with QueueFullDrop behavior
 func TestJobQueueMaxDepthDrop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping queue test in short mode (requires Grype database download)")
+	}
+
 	// Create temporary database
 	dbPath := "/tmp/test_queue_maxdepth_drop_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -443,6 +447,10 @@ func TestJobQueueMaxDepthDrop(t *testing.T) {
 
 // TestJobQueueMaxDepthDropOldest tests that oldest jobs are evicted when queue is full
 func TestJobQueueMaxDepthDropOldest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping queue test in short mode (requires Grype database download)")
+	}
+
 	// Create temporary database
 	dbPath := "/tmp/test_queue_drop_oldest_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -521,6 +529,10 @@ func TestJobQueueMaxDepthDropOldest(t *testing.T) {
 
 // TestJobQueueMetricsTracking tests that metrics are correctly tracked
 func TestJobQueueMetricsTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping queue test in short mode (requires Grype database download)")
+	}
+
 	// Create temporary database
 	dbPath := "/tmp/test_queue_metrics_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
