@@ -36,8 +36,8 @@ fi
 
 log_info "Current release tag: ${CURRENT_TAG}"
 
-# Get the previous release tag
-PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+# Get the previous release tag (most recent tag from HEAD, since new tag doesn't exist yet)
+PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
 
 if [ -z "$PREVIOUS_TAG" ]; then
     log_warning "No previous tag found, using all commits"
