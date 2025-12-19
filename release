@@ -226,18 +226,55 @@ check_gh_cli() {
     return 0
 }
 
+# Generate release notes using Claude
+generate_release_notes() {
+    local version=$1
+    local tag="v$version"
+
+    log_info "Generating intelligent release notes using Claude..."
+
+    # Check if generate script exists
+    if [ ! -f "scripts/generate-release-notes.sh" ]; then
+        log_warning "Release notes generator not found"
+        log_info "Skipping AI-generated release notes"
+        echo "Release $tag"
+        return 0
+    fi
+
+    # Call the generate script
+    local notes=$(scripts/generate-release-notes.sh "$tag" 2>&1)
+
+    if [ $? -eq 0 ] && [ -n "$notes" ]; then
+        log_success "Release notes generated successfully"
+        echo "$notes"
+        return 0
+    else
+        log_warning "Failed to generate AI release notes: $notes"
+        log_info "Falling back to simple release message"
+        echo "Release $tag"
+        return 1
+    fi
+}
+
 # Create and push tag
 create_and_push_tag() {
     local version=$1
     local tag="v$version"
+    local notes="$2"
 
     log_info "Creating GPG-signed tag: $tag"
 
-    if git tag -s "$tag" -m "Release $tag"; then
+    # Create a temporary file for the tag message
+    local tmpfile=$(mktemp)
+    echo "$notes" > "$tmpfile"
+
+    if git tag -s "$tag" -F "$tmpfile"; then
         log_success "Tag $tag created"
+        rm -f "$tmpfile"
     else
         log_error "Failed to create tag"
         log_info "Make sure GPG is configured: git config --get user.signingkey"
+        rm -f "$tmpfile"
         exit 1
     fi
 
@@ -364,12 +401,24 @@ main() {
     check_git_status
     check_existing_tag "$version"
 
+    # Generate release notes early so user can review them
+    echo ""
+    local release_notes=$(generate_release_notes "$version")
+
     # Show what will happen
     echo ""
     echo "======================================"
     log_warning "RELEASE CONFIRMATION"
     echo "======================================"
     log_info "This will create release: v$version"
+    echo ""
+    log_info "Release notes preview:"
+    echo "--------------------------------------"
+    echo "$release_notes" | head -20
+    if [ $(echo "$release_notes" | wc -l) -gt 20 ]; then
+        echo "... (truncated, full notes will be in tag)"
+    fi
+    echo "--------------------------------------"
     echo ""
     log_info "The release workflow will:"
     log_info "  1. Run integration tests on kind and minikube (~10 min)"
@@ -388,7 +437,7 @@ main() {
     fi
 
     # Create release
-    create_and_push_tag "$version"
+    create_and_push_tag "$version" "$release_notes"
 
     # Monitor workflow (optional if gh CLI is available)
     if monitor_workflow "$version"; then
