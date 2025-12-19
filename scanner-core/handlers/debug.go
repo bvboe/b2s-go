@@ -188,16 +188,16 @@ func DebugMetricsHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.Job
 // If debug mode is not enabled, handlers are not registered (zero overhead).
 //
 // Endpoints:
-//   - POST /debug/sql - Execute read-only SQL queries
-//   - GET /debug/metrics - Retrieve performance metrics
+//   - POST /api/debug/sql - Execute read-only SQL queries
+//   - GET /api/debug/metrics - Retrieve performance metrics
 func RegisterDebugHandlers(mux *http.ServeMux, db *database.DB, debugConfig *debug.DebugConfig, scanQueue *scanning.JobQueue) {
 	if debugConfig == nil || !debugConfig.IsEnabled() {
 		// Don't register handlers if debug not enabled
 		return
 	}
 
-	mux.HandleFunc("/debug/sql", DebugSQLHandler(db, debugConfig))
-	mux.HandleFunc("/debug/metrics", DebugMetricsHandler(debugConfig, scanQueue))
+	mux.HandleFunc("/api/debug/sql", DebugSQLHandler(db, debugConfig))
+	mux.HandleFunc("/api/debug/metrics", DebugMetricsHandler(debugConfig, scanQueue))
 
-	log.Println("Debug handlers registered at /debug/sql and /debug/metrics")
+	log.Println("Debug handlers registered at /api/debug/sql and /api/debug/metrics")
 }

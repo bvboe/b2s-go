@@ -614,7 +614,7 @@
             empty.style.display = 'none';
 
             try {
-                const response = await fetch('/containers/instances');
+                const response = await fetch('/api/containers/instances');
                 const data = await response.json();
 
                 document.getElementById('instances-count').textContent = data.instances?.length || 0;
@@ -793,11 +793,11 @@
 
             // Add download buttons
             if (image.scan_status === 'scanned') {
-                buttons.push(`<a href="/sbom/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download SBOM">↓ SBOM</a>`);
+                buttons.push(`<a href="/api/sbom/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download SBOM">↓ SBOM</a>`);
             }
 
             if (image.vulnerability_status === 'scanned') {
-                buttons.push(`<a href="/vulnerabilities/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download Vulnerabilities" style="margin-left: 4px;">↓ Vulns</a>`);
+                buttons.push(`<a href="/api/vulnerabilities/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download Vulnerabilities" style="margin-left: 4px;">↓ Vulns</a>`);
             }
 
             if (buttons.length === 0) {
@@ -811,11 +811,11 @@
             let buttons = [];
 
             if (scanStatus === 'scanned') {
-                buttons.push(`<a href="/sbom/${encodeURIComponent(digest)}" class="download-btn" download>↓ SBOM</a>`);
+                buttons.push(`<a href="/api/sbom/${encodeURIComponent(digest)}" class="download-btn" download>↓ SBOM</a>`);
             }
 
             if (vulnStatus === 'scanned') {
-                buttons.push(`<a href="/vulnerabilities/${encodeURIComponent(digest)}" class="download-btn" download style="margin-left: 4px;">↓ Vulns</a>`);
+                buttons.push(`<a href="/api/vulnerabilities/${encodeURIComponent(digest)}" class="download-btn" download style="margin-left: 4px;">↓ Vulns</a>`);
             }
 
             if (buttons.length === 0) {

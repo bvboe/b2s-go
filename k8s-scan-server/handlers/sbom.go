@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// SBOMDownloadWithRoutingHandler creates an HTTP handler for /sbom/{digest} endpoint
+// SBOMDownloadWithRoutingHandler creates an HTTP handler for /api/sbom/{digest} endpoint
 // This handler first tries to get SBOM from database, then falls back to routing
 // the request to a pod-scanner instance on the node that has the image.
 //
@@ -26,11 +26,11 @@ func SBOMDownloadWithRoutingHandler(db *database.DB, clientset kubernetes.Interf
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract digest from URL path
 		path := r.URL.Path
-		if len(path) <= 6 { // "/sbom/" is 6 characters
+		if len(path) <= 10 { // "/api/sbom/" is 10 characters
 			http.Error(w, "Digest required", http.StatusBadRequest)
 			return
 		}
-		digest := path[6:] // Remove "/sbom/" prefix
+		digest := path[10:] // Remove "/api/sbom/" prefix
 
 		if digest == "" {
 			http.Error(w, "Digest required", http.StatusBadRequest)

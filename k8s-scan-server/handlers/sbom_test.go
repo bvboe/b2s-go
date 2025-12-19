@@ -44,7 +44,7 @@ func TestSBOMHandler_EmptyDigest(t *testing.T) {
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
 
 	// Test with path that's too short
-	req := httptest.NewRequest("GET", "/sbom/", nil)
+	req := httptest.NewRequest("GET", "/api/sbom/", nil)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -99,7 +99,7 @@ func TestSBOMHandler_DigestNormalization(t *testing.T) {
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
 
 	// Test with digest WITHOUT sha256: prefix (should be normalized to match database)
-	req := httptest.NewRequest("GET", "/sbom/abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890", nil)
+	req := httptest.NewRequest("GET", "/api/sbom/abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890", nil)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -154,7 +154,7 @@ func TestSBOMHandler_DatabaseCacheHit(t *testing.T) {
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
 
 	// Request SBOM
-	req := httptest.NewRequest("GET", "/sbom/"+testDigest, nil)
+	req := httptest.NewRequest("GET", "/api/sbom/"+testDigest, nil)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -197,7 +197,7 @@ func TestSBOMHandler_ImageNotFound(t *testing.T) {
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
 
 	// Request SBOM for non-existent image
-	req := httptest.NewRequest("GET", "/sbom/sha256:nonexistent", nil)
+	req := httptest.NewRequest("GET", "/api/sbom/sha256:nonexistent", nil)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -245,7 +245,7 @@ func TestSBOMHandler_ImageWithoutNodeName(t *testing.T) {
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
 
 	// Request SBOM
-	req := httptest.NewRequest("GET", "/sbom/"+testDigest, nil)
+	req := httptest.NewRequest("GET", "/api/sbom/"+testDigest, nil)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -296,7 +296,7 @@ func TestSBOMHandler_ContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	req := httptest.NewRequest("GET", "/sbom/"+testDigest, nil).WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/sbom/"+testDigest, nil).WithContext(ctx)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)

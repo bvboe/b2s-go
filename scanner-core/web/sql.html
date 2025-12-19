@@ -397,7 +397,7 @@
 
         <footer>
             <div>bjorn2scan v2 - SQL Debug Console</div>
-            <div><a href="/">Dashboard</a> | <a href="/health">Health</a> | <a href="/debug/metrics">Metrics</a></div>
+            <div><a href="/">Dashboard</a> | <a href="/health">Health</a> | <a href="/api/debug/metrics">Metrics</a></div>
         </footer>
     </div>
 
@@ -456,7 +456,7 @@
             const startTime = performance.now();
 
             try {
-                const response = await fetch('/debug/sql', {
+                const response = await fetch('/api/debug/sql', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

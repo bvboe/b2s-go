@@ -78,18 +78,18 @@ func DatabaseImagesHandler(provider DatabaseProvider) http.HandlerFunc {
 	}
 }
 
-// SBOMDownloadHandler creates an HTTP handler for /sbom/{digest} endpoint
+// SBOMDownloadHandler creates an HTTP handler for /api/sbom/{digest} endpoint
 // Downloads SBOM as a JSON file
 func SBOMDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract digest from URL path
-		// Expected format: /sbom/sha256:abc123...
+		// Expected format: /api/sbom/sha256:abc123...
 		path := r.URL.Path
-		if len(path) <= 6 { // "/sbom/" is 6 characters
+		if len(path) <= 10 { // "/api/sbom/" is 10 characters
 			http.Error(w, "Digest required", http.StatusBadRequest)
 			return
 		}
-		digest := path[6:] // Remove "/sbom/" prefix
+		digest := path[10:] // Remove "/api/sbom/" prefix
 
 		if digest == "" {
 			http.Error(w, "Digest required", http.StatusBadRequest)
@@ -124,18 +124,18 @@ func SBOMDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
 	}
 }
 
-// VulnerabilitiesDownloadHandler creates an HTTP handler for /vulnerabilities/{digest} endpoint
+// VulnerabilitiesDownloadHandler creates an HTTP handler for /api/vulnerabilities/{digest} endpoint
 // Downloads vulnerability report as a JSON file
 func VulnerabilitiesDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract digest from URL path
-		// Expected format: /vulnerabilities/sha256:abc123...
+		// Expected format: /api/vulnerabilities/sha256:abc123...
 		path := r.URL.Path
-		if len(path) <= 17 { // "/vulnerabilities/" is 17 characters
+		if len(path) <= 21 { // "/api/vulnerabilities/" is 21 characters
 			http.Error(w, "Digest required", http.StatusBadRequest)
 			return
 		}
-		digest := path[17:] // Remove "/vulnerabilities/" prefix
+		digest := path[21:] // Remove "/api/vulnerabilities/" prefix
 
 		if digest == "" {
 			http.Error(w, "Digest required", http.StatusBadRequest)
@@ -314,21 +314,21 @@ type HandlerOverrides struct {
 // RegisterDatabaseHandlers registers database query endpoints on the provided mux
 // Pass nil for overrides to use all default handlers
 func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, overrides *HandlerOverrides) {
-	// Register legacy endpoints
-	mux.HandleFunc("/containers/instances", DatabaseInstancesHandler(provider))
-	mux.HandleFunc("/containers/images", DatabaseImagesHandler(provider))
+	// Register legacy endpoints under /api/
+	mux.HandleFunc("/api/containers/instances", DatabaseInstancesHandler(provider))
+	mux.HandleFunc("/api/containers/images", DatabaseImagesHandler(provider))
 
-	// Register download endpoints with optional overrides
+	// Register download endpoints under /api/ with optional overrides
 	if overrides != nil && overrides.SBOMHandler != nil {
-		mux.HandleFunc("/sbom/", overrides.SBOMHandler)
+		mux.HandleFunc("/api/sbom/", overrides.SBOMHandler)
 	} else {
-		mux.HandleFunc("/sbom/", SBOMDownloadHandler(provider))
+		mux.HandleFunc("/api/sbom/", SBOMDownloadHandler(provider))
 	}
 
 	if overrides != nil && overrides.VulnerabilitiesHandler != nil {
-		mux.HandleFunc("/vulnerabilities/", overrides.VulnerabilitiesHandler)
+		mux.HandleFunc("/api/vulnerabilities/", overrides.VulnerabilitiesHandler)
 	} else {
-		mux.HandleFunc("/vulnerabilities/", VulnerabilitiesDownloadHandler(provider))
+		mux.HandleFunc("/api/vulnerabilities/", VulnerabilitiesDownloadHandler(provider))
 	}
 
 	// Register new API endpoints for aggregated data
