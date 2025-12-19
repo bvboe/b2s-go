@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bjorn2scan - Container Images</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            margin: -20px -20px 30px -20px;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+
+        .nav {
+            margin-top: 15px;
+        }
+
+        .nav a {
+            color: white;
+            text-decoration: none;
+            margin-right: 20px;
+            opacity: 0.9;
+            transition: opacity 0.2s;
+        }
+
+        .nav a:hover {
+            opacity: 1;
+            text-decoration: underline;
+        }
+
+        .controls {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+
+        .control-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .control-group input,
+        .control-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+
+        .control-group select[multiple] {
+            height: 80px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #e9ecef;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+
+        th:hover {
+            background: #e9ecef;
+        }
+
+        th.sortable::after {
+            content: ' ⇅';
+            opacity: 0.3;
+            font-size: 0.875rem;
+        }
+
+        th.sorted-asc::after {
+            content: ' ▲';
+            opacity: 1;
+        }
+
+        th.sorted-desc::after {
+            content: ' ▼';
+            opacity: 1;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .severity {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .severity-critical {
+            background: #dc3545;
+            color: white;
+        }
+
+        .severity-high {
+            background: #fd7e14;
+            color: white;
+        }
+
+        .severity-medium {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .severity-low {
+            background: #28a745;
+            color: white;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 0.875rem;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .hint {
+            font-size: 0.75rem;
+            color: #666;
+            font-style: italic;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🐳 bjorn2scan - Container Images</h1>
+            <div class="subtitle">View and analyze container images with vulnerability data</div>
+            <div class="nav">
+                <a href="/">← Back to Dashboard</a>
+                <a href="/sql.html">SQL Query Tool</a>
+            </div>
+        </header>
+
+        <div id="error-message" class="error" style="display: none;"></div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group" style="flex: 2;">
+                    <label for="search">Search Images</label>
+                    <input type="text" id="search" placeholder="Search by image name (e.g., nginx, ubuntu:22.04)">
+                    <div class="hint">Press Enter to search</div>
+                </div>
+                <div class="control-group">
+                    <label for="page-size">Results per page</label>
+                    <select id="page-size">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="250">250</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <button id="export-csv" class="btn-secondary">📥 Export CSV</button>
+                </div>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="filter-namespace">Namespace</label>
+                    <select id="filter-namespace" multiple>
+                        <option value="">Loading...</option>
+                    </select>
+                    <div class="hint">Hold Ctrl/Cmd for multiple</div>
+                </div>
+                <div class="control-group">
+                    <label for="filter-vuln-status">Fix Status</label>
+                    <select id="filter-vuln-status" multiple>
+                        <option value="">Loading...</option>
+                    </select>
+                    <div class="hint">Hold Ctrl/Cmd for multiple</div>
+                </div>
+                <div class="control-group">
+                    <label for="filter-package-type">Package Type</label>
+                    <select id="filter-package-type" multiple>
+                        <option value="deb">deb</option>
+                        <option value="rpm">rpm</option>
+                        <option value="apk">apk</option>
+                        <option value="npm">npm</option>
+                        <option value="gem">gem</option>
+                        <option value="python">python</option>
+                        <option value="java">java</option>
+                    </select>
+                    <div class="hint">Hold Ctrl/Cmd for multiple</div>
+                </div>
+                <div class="control-group">
+                    <label for="filter-os">OS Name</label>
+                    <select id="filter-os" multiple>
+                        <option value="">Loading...</option>
+                    </select>
+                    <div class="hint">Hold Ctrl/Cmd for multiple</div>
+                </div>
+                <div class="control-group">
+                    <button id="apply-filters">Apply Filters</button>
+                    <button id="clear-filters" class="btn-secondary">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table id="images-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-column="image">Image</th>
+                        <th class="sortable" data-column="instance_count">Instances</th>
+                        <th class="sortable" data-column="critical_count">Critical</th>
+                        <th class="sortable" data-column="high_count">High</th>
+                        <th class="sortable" data-column="medium_count">Medium</th>
+                        <th class="sortable" data-column="low_count">Low</th>
+                        <th class="sortable" data-column="negligible_count">Negligible</th>
+                        <th class="sortable" data-column="total_risk">Risk Score</th>
+                        <th class="sortable" data-column="exploit_count">Exploits</th>
+                        <th class="sortable" data-column="package_count">Packages</th>
+                        <th class="sortable" data-column="os_name">OS</th>
+                    </tr>
+                </thead>
+                <tbody id="images-tbody">
+                    <tr>
+                        <td colspan="11" class="loading">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="pagination">
+                <div class="pagination-info" id="pagination-info">
+                    Loading...
+                </div>
+                <div class="pagination-controls">
+                    <button id="prev-page" disabled>← Previous</button>
+                    <button id="next-page" disabled>Next →</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let totalPages = 1;
+        let sortBy = 'image';
+        let sortOrder = 'ASC';
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFilterOptions();
+            loadImages();
+
+            // Event listeners
+            document.getElementById('apply-filters').addEventListener('click', () => {
+                currentPage = 1;
+                loadImages();
+            });
+
+            document.getElementById('clear-filters').addEventListener('click', () => {
+                document.getElementById('search').value = '';
+                document.getElementById('filter-namespace').selectedIndex = -1;
+                document.getElementById('filter-vuln-status').selectedIndex = -1;
+                document.getElementById('filter-package-type').selectedIndex = -1;
+                document.getElementById('filter-os').selectedIndex = -1;
+                currentPage = 1;
+                loadImages();
+            });
+
+            document.getElementById('search').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    currentPage = 1;
+                    loadImages();
+                }
+            });
+
+            document.getElementById('page-size').addEventListener('change', () => {
+                currentPage = 1;
+                loadImages();
+            });
+
+            document.getElementById('prev-page').addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadImages();
+                }
+            });
+
+            document.getElementById('next-page').addEventListener('click', () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    loadImages();
+                }
+            });
+
+            document.getElementById('export-csv').addEventListener('click', exportCSV);
+
+            // Sortable column headers
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.addEventListener('click', () => {
+                    const column = th.dataset.column;
+                    if (sortBy === column) {
+                        sortOrder = sortOrder === 'ASC' ? 'DESC' : 'ASC';
+                    } else {
+                        sortBy = column;
+                        sortOrder = 'ASC';
+                    }
+                    updateSortIndicators();
+                    loadImages();
+                });
+            });
+
+            updateSortIndicators();
+        });
+
+        function getSelectedValues(selectId) {
+            const select = document.getElementById(selectId);
+            return Array.from(select.selectedOptions).map(opt => opt.value).filter(v => v);
+        }
+
+        function buildQueryParams() {
+            const params = new URLSearchParams();
+            params.append('page', currentPage);
+            params.append('pageSize', document.getElementById('page-size').value);
+            params.append('sortBy', sortBy);
+            params.append('sortOrder', sortOrder);
+
+            const search = document.getElementById('search').value.trim();
+            if (search) params.append('search', search);
+
+            const namespaces = getSelectedValues('filter-namespace');
+            if (namespaces.length) params.append('namespaces', namespaces.join(','));
+
+            const vulnStatuses = getSelectedValues('filter-vuln-status');
+            if (vulnStatuses.length) params.append('vulnStatuses', vulnStatuses.join(','));
+
+            const packageTypes = getSelectedValues('filter-package-type');
+            if (packageTypes.length) params.append('packageTypes', packageTypes.join(','));
+
+            const osNames = getSelectedValues('filter-os');
+            if (osNames.length) params.append('osNames', osNames.join(','));
+
+            return params;
+        }
+
+        async function loadImages() {
+            const tbody = document.getElementById('images-tbody');
+            tbody.innerHTML = '<tr><td colspan="11" class="loading">Loading...</td></tr>';
+            hideError();
+
+            try {
+                const params = buildQueryParams();
+                const response = await fetch(`/api/images?${params}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayImages(data.images);
+                updatePagination(data);
+            } catch (error) {
+                showError('Failed to load images: ' + error.message);
+                tbody.innerHTML = '<tr><td colspan="11" class="loading">Failed to load data</td></tr>';
+            }
+        }
+
+        function displayImages(images) {
+            const tbody = document.getElementById('images-tbody');
+
+            if (!images || images.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="11" class="loading">No images found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = images.map(img => `
+                <tr>
+                    <td><strong>${escapeHtml(img.image || '')}</strong></td>
+                    <td>${img.instance_count || 0}</td>
+                    <td>${img.critical_count ? `<span class="severity severity-critical">${img.critical_count}</span>` : '0'}</td>
+                    <td>${img.high_count ? `<span class="severity severity-high">${img.high_count}</span>` : '0'}</td>
+                    <td>${img.medium_count ? `<span class="severity severity-medium">${img.medium_count}</span>` : '0'}</td>
+                    <td>${img.low_count ? `<span class="severity severity-low">${img.low_count}</span>` : '0'}</td>
+                    <td>${img.negligible_count || 0}</td>
+                    <td>${Math.round(img.total_risk || 0)}</td>
+                    <td>${img.exploit_count || 0}</td>
+                    <td>${img.package_count || 0}</td>
+                    <td>${escapeHtml(img.os_name || '')}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updatePagination(data) {
+            totalPages = data.totalPages || 1;
+            const info = document.getElementById('pagination-info');
+            const start = (data.page - 1) * data.pageSize + 1;
+            const end = Math.min(data.page * data.pageSize, data.totalCount);
+            info.textContent = `Showing ${start}-${end} of ${data.totalCount} images`;
+
+            document.getElementById('prev-page').disabled = currentPage <= 1;
+            document.getElementById('next-page').disabled = currentPage >= totalPages;
+        }
+
+        function updateSortIndicators() {
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+                if (th.dataset.column === sortBy) {
+                    th.classList.add(sortOrder === 'ASC' ? 'sorted-asc' : 'sorted-desc');
+                }
+            });
+        }
+
+        async function loadFilterOptions() {
+            try {
+                const response = await fetch('/api/filter-options');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                // Populate namespace filter
+                const nsSelect = document.getElementById('filter-namespace');
+                if (data.namespaces && data.namespaces.length > 0) {
+                    nsSelect.innerHTML = data.namespaces.map(ns =>
+                        `<option value="${escapeHtml(ns)}">${escapeHtml(ns)}</option>`
+                    ).join('');
+                } else {
+                    nsSelect.innerHTML = '<option value="">No namespaces found</option>';
+                }
+
+                // Populate OS filter
+                const osSelect = document.getElementById('filter-os');
+                if (data.osNames && data.osNames.length > 0) {
+                    osSelect.innerHTML = data.osNames.map(os =>
+                        `<option value="${escapeHtml(os)}">${escapeHtml(os)}</option>`
+                    ).join('');
+                } else {
+                    osSelect.innerHTML = '<option value="">No OS names found</option>';
+                }
+
+                // Optionally populate vulnerability status filter with dynamic data
+                if (data.vulnStatuses && data.vulnStatuses.length > 0) {
+                    const vulnSelect = document.getElementById('filter-vuln-status');
+                    vulnSelect.innerHTML = data.vulnStatuses.map(status =>
+                        `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
+                    ).join('');
+                }
+
+                // Optionally populate package type filter with dynamic data
+                if (data.packageTypes && data.packageTypes.length > 0) {
+                    const pkgSelect = document.getElementById('filter-package-type');
+                    pkgSelect.innerHTML = data.packageTypes.map(type =>
+                        `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
+                    ).join('');
+                }
+
+            } catch (error) {
+                console.error('Failed to load filter options:', error);
+                // Set error messages in dropdowns
+                const nsSelect = document.getElementById('filter-namespace');
+                nsSelect.innerHTML = '<option value="">Error loading namespaces</option>';
+                const osSelect = document.getElementById('filter-os');
+                osSelect.innerHTML = '<option value="">Error loading OS names</option>';
+            }
+        }
+
+        async function exportCSV() {
+            try {
+                const params = buildQueryParams();
+                params.set('format', 'csv');
+                params.delete('page');
+                params.delete('pageSize');
+
+                window.location.href = `/api/images?${params}`;
+            } catch (error) {
+                showError('Failed to export CSV: ' + error.message);
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
