@@ -175,7 +175,7 @@ Integration tests verify the application works correctly when deployed to Kubern
 **Run all tests locally (Recommended):**
 ```bash
 # From repository root
-./test_local
+./scripts/test_local
 ```
 This comprehensive script runs:
 - Unit tests

@@ -241,7 +241,7 @@ install_config() {
     mkdir -p "$CONFIG_DIR"
 
     # Always install/update the example config
-    CONFIG_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/agent.conf.example"
+    CONFIG_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/agent.conf.example"
 
     if command -v curl >/dev/null 2>&1; then
         curl -sSfL "$CONFIG_EXAMPLE_URL" -o "$CONFIG_EXAMPLE" 2>/dev/null || \

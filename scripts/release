@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# Determine repository root (works from any directory in the repo)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -234,7 +238,7 @@ generate_release_notes() {
     log_info "Generating intelligent release notes using Claude..."
 
     # Check if generate script exists
-    if [ ! -f "scripts/generate-release-notes.sh" ]; then
+    if [ ! -f "scripts/generate-release-notes" ]; then
         log_warning "Release notes generator not found"
         log_info "Skipping AI-generated release notes"
         echo "Release $tag"
@@ -242,7 +246,7 @@ generate_release_notes() {
     fi
 
     # Call the generate script
-    local notes=$(scripts/generate-release-notes.sh "$tag" 2>&1)
+    local notes=$(scripts/generate-release-notes "$tag" 2>&1)
 
     if [ $? -eq 0 ] && [ -n "$notes" ]; then
         log_success "Release notes generated successfully"

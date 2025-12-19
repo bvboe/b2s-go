@@ -9,7 +9,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Determine repository root (works from any directory in the repo)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_NAMESPACE="test-$(date +%s)"
 SCAN_SERVER_IMAGE="k8s-scan-server"
 POD_SCANNER_IMAGE="pod-scanner"
