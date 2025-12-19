@@ -44,7 +44,7 @@ if [ -z "$PREVIOUS_TAG" ]; then
     COMMIT_RANGE="HEAD"
 else
     log_info "Previous release tag: ${PREVIOUS_TAG}"
-    COMMIT_RANGE="${PREVIOUS_TAG}..${CURRENT_TAG}"
+    COMMIT_RANGE="${PREVIOUS_TAG}..HEAD"
 fi
 
 # Get commits since last release
@@ -61,7 +61,11 @@ COMMIT_COUNT=$(echo "$COMMITS" | wc -l | tr -d ' ')
 log_info "Found ${COMMIT_COUNT} commits to analyze"
 
 # Get file statistics
-FILES_CHANGED=$(git diff --stat "${PREVIOUS_TAG}..${CURRENT_TAG}" 2>/dev/null | tail -1 || echo "")
+if [ -n "$PREVIOUS_TAG" ]; then
+    FILES_CHANGED=$(git diff --stat "${PREVIOUS_TAG}..HEAD" 2>/dev/null | tail -1 || echo "")
+else
+    FILES_CHANGED=$(git diff --stat HEAD 2>/dev/null | tail -1 || echo "")
+fi
 log_info "Changes: ${FILES_CHANGED}"
 
 # Create prompt for Claude
