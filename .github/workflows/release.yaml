@@ -148,6 +148,14 @@ jobs:
         pattern: sbom-*
         path: sboms
 
+    - name: Extract tag message
+      id: tag-message
+      run: |
+        TAG_MESSAGE=$(git tag -l --format='%(contents)' ${GITHUB_REF_NAME})
+        echo "message<<EOF" >> $GITHUB_OUTPUT
+        echo "$TAG_MESSAGE" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
@@ -155,6 +163,10 @@ jobs:
           bjorn2scan-*.tgz
           sboms/**/*.spdx.json
         body: |
+          ${{ steps.tag-message.outputs.message }}
+
+          ---
+
           ## 🖥️ Agent Binaries
 
           **One-liner installation (Linux):**
