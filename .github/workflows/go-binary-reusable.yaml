@@ -148,6 +148,23 @@ jobs:
           fi
         done
 
+    - name: Install cosign
+      if: github.ref_type == 'tag'
+      uses: sigstore/cosign-installer@v3
+
+    - name: Sign binaries with cosign
+      if: github.ref_type == 'tag'
+      working-directory: ${{ inputs.component-path }}/dist
+      run: |
+        echo "Signing binaries with cosign..."
+        for file in *.tar.gz; do
+          if [ -f "$file" ]; then
+            echo "Signing $file..."
+            cosign sign-blob --yes "$file" --output-signature "${file}.sig" --output-certificate "${file}.cert"
+            echo "✓ Signed: $file"
+          fi
+        done
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v6
       with:

@@ -167,7 +167,30 @@ jobs:
 
           ---
 
-          ## 🖥️ Agent Binaries
+          ## ⎈ Helm Chart Installation (Recommended)
+
+          **Install from OCI registry:**
+
+          ```bash
+          helm install bjorn2scan oci://ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan \
+            --version ${GITHUB_REF_NAME#v} \
+            --namespace bjorn2scan \
+            --create-namespace
+          ```
+
+          **Or install from downloaded chart:**
+
+          Download `bjorn2scan-*.tgz` from the assets below, then:
+
+          ```bash
+          helm install bjorn2scan ./bjorn2scan-*.tgz \
+            --namespace bjorn2scan \
+            --create-namespace
+          ```
+
+          ## 🖥️ Agent Binaries (Standalone)
+
+          For standalone deployments outside Kubernetes:
 
           **One-liner installation (Linux):**
 
@@ -193,65 +216,9 @@ jobs:
           curl http://localhost:9999/info
           ```
 
-          ## 🐳 Container Images
-
-          Multi-architecture images (amd64, arm64) available at GitHub Container Registry:
-
-          ### Scan Server
-          ```bash
-          docker pull ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${{ github.ref_name }}
-          ```
-
-          ### Pod Scanner
-          ```bash
-          docker pull ghcr.io/${{ github.repository_owner }}/b2s-go/pod-scanner:${{ github.ref_name }}
-          ```
-
-          **Available tags for both images:**
-          - Version tag (e.g., `${{ github.ref_name }}`)
-          - Semantic version tags (e.g., major.minor, major)
-          - Commit SHA
-
-          ## ⎈ Helm Chart (OCI)
-
-          **Install from OCI registry (Recommended):**
-
-          ```bash
-          helm install bjorn2scan oci://ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan \
-            --version ${GITHUB_REF_NAME#v} \
-            --namespace b2sv2 \
-            --create-namespace
-          ```
-
-          **Or install from downloaded chart:**
-
-          Download `bjorn2scan-*.tgz` from the assets below, then:
-
-          ```bash
-          helm install bjorn2scan ./bjorn2scan-*.tgz \
-            --namespace b2sv2 \
-            --create-namespace
-          ```
-
           ## 🔐 Signature Verification
 
-          All artifacts are signed with [cosign](https://github.com/sigstore/cosign):
-
-          **Verify scan-server image:**
-          ```bash
-          cosign verify \
-            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
-            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${GITHUB_REF_NAME#v}
-          ```
-
-          **Verify pod-scanner image:**
-          ```bash
-          cosign verify \
-            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
-            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            ghcr.io/${{ github.repository_owner }}/b2s-go/pod-scanner:${GITHUB_REF_NAME#v}
-          ```
+          All artifacts are signed with [cosign](https://github.com/sigstore/cosign).
 
           **Verify Helm chart:**
           ```bash
@@ -261,11 +228,40 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/b2s-go/bjorn2scan:${GITHUB_REF_NAME#v}
           ```
 
+          **Verify agent binaries:**
+          ```bash
+          # Download the binary, signature, and certificate from the release
+          # Then verify:
+          cosign verify-blob bjorn2scan-agent-linux-amd64.tar.gz \
+            --certificate bjorn2scan-agent-linux-amd64.tar.gz.cert \
+            --signature bjorn2scan-agent-linux-amd64.tar.gz.sig \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+          ```
+
+          **Verify container images:**
+          ```bash
+          # Scan server
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-scan-server:${GITHUB_REF_NAME#v}
+
+          # Pod scanner
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ghcr.io/${{ github.repository_owner }}/b2s-go/pod-scanner:${GITHUB_REF_NAME#v}
+          ```
+
           ## 📦 Release Assets
 
           - **bjorn2scan-*.tgz** - Helm chart package for offline installation
-          - **sbom-k8s-scan-server.spdx.json** - Software Bill of Materials for scan server
-          - **sbom-pod-scanner.spdx.json** - Software Bill of Materials for pod scanner
+          - **bjorn2scan-agent-linux-*.tar.gz** - Agent binaries for standalone deployment
+          - **bjorn2scan-agent-linux-*.tar.gz.sig** - Cosign signatures for agent binaries
+          - **bjorn2scan-agent-linux-*.tar.gz.cert** - Cosign certificates for agent binaries
+          - **bjorn2scan-agent-linux-*.tar.gz.sha256** - SHA256 checksums for agent binaries
+          - **sbom-*.spdx.json** - Software Bill of Materials
 
           ---
         generate_release_notes: true
