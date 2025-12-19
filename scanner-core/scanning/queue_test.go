@@ -193,6 +193,10 @@ func TestJobQueueErrorHandling(t *testing.T) {
 
 // TestJobQueueSkipAlreadyScanned tests that already-scanned images are skipped
 func TestJobQueueSkipAlreadyScanned(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (requires Grype database download)")
+	}
+
 	// Create temporary database
 	dbPath := "/tmp/test_queue_skip_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -269,6 +273,10 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 
 // TestJobQueueForceScan tests that ForceScan bypasses the already-scanned check
 func TestJobQueueForceScan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (requires Grype database download)")
+	}
+
 	// Create temporary database
 	dbPath := "/tmp/test_queue_force_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
