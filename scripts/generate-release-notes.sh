@@ -129,7 +129,7 @@ EOM
 log_info "Calling Claude CLI to analyze commits..."
 
 # Call Claude CLI
-SUMMARY=$(echo "$PROMPT" | claude --no-stream 2>&1)
+SUMMARY=$(echo "$PROMPT" | claude 2>&1)
 
 # Check for errors
 if [ $? -ne 0 ]; then
