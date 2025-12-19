@@ -1,7 +1,15 @@
 package k8s
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/containers"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestParseImageName(t *testing.T) {
@@ -228,5 +236,280 @@ func TestParseImageNameAndExtractDigest(t *testing.T) {
 				t.Errorf("digest = %v, want %v", gotDigest, tt.wantDigest)
 			}
 		})
+	}
+}
+
+// TestWatchPodsInformerIntegration tests the informer-based pod watcher with add/update/delete events
+func TestWatchPodsInformerIntegration(t *testing.T) {
+	// Create fake clientset
+	clientset := fake.NewSimpleClientset()
+
+	// Create a manager to track container instances
+	manager := containers.NewManager()
+
+	// Create a test pod with running status
+	testPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{
+					Name:  "nginx",
+					Image: "nginx:1.21",
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:        "nginx",
+					ImageID:     "docker.io/library/nginx@sha256:abc123",
+					ContainerID: "containerd://xyz789",
+				},
+			},
+		},
+	}
+
+	// Add the pod to the fake clientset
+	_, err := clientset.CoreV1().Pods("default").Create(context.Background(), testPod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test pod: %v", err)
+	}
+
+	// Start the watcher in a goroutine
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go WatchPods(ctx, clientset, manager)
+
+	// Wait for informer to sync
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify pod was added to manager
+	count := manager.GetInstanceCount()
+	if count != 1 {
+		t.Errorf("Expected 1 container instance, got %d", count)
+	}
+
+	// Verify instance details
+	instance, exists := manager.GetInstance("default", "test-pod", "nginx")
+	if !exists {
+		t.Fatal("Container instance not found in manager")
+	}
+
+	if instance.Image.Repository != "nginx" {
+		t.Errorf("Expected repository 'nginx', got '%s'", instance.Image.Repository)
+	}
+	if instance.Image.Tag != "1.21" {
+		t.Errorf("Expected tag '1.21', got '%s'", instance.Image.Tag)
+	}
+	if instance.Image.Digest != "sha256:abc123" {
+		t.Errorf("Expected digest 'sha256:abc123', got '%s'", instance.Image.Digest)
+	}
+	if instance.NodeName != "node-1" {
+		t.Errorf("Expected node 'node-1', got '%s'", instance.NodeName)
+	}
+	if instance.ContainerRuntime != "containerd" {
+		t.Errorf("Expected runtime 'containerd', got '%s'", instance.ContainerRuntime)
+	}
+}
+
+// TestWatchPodsInformerDeletion tests that pod deletions are properly handled
+func TestWatchPodsInformerDeletion(t *testing.T) {
+	// Create fake clientset with a test pod
+	testPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{
+					Name:  "nginx",
+					Image: "nginx:1.21",
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:        "nginx",
+					ImageID:     "docker.io/library/nginx@sha256:abc123",
+					ContainerID: "containerd://xyz789",
+				},
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(testPod)
+	manager := containers.NewManager()
+
+	// Start the watcher
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go WatchPods(ctx, clientset, manager)
+
+	// Wait for informer to sync and add pod
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify pod was added
+	if manager.GetInstanceCount() != 1 {
+		t.Fatalf("Expected 1 container instance after add, got %d", manager.GetInstanceCount())
+	}
+
+	// Delete the pod
+	err := clientset.CoreV1().Pods("default").Delete(context.Background(), "test-pod", metav1.DeleteOptions{})
+	if err != nil {
+		t.Fatalf("Failed to delete test pod: %v", err)
+	}
+
+	// Wait for informer to process deletion
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify pod was removed from manager
+	count := manager.GetInstanceCount()
+	if count != 0 {
+		t.Errorf("Expected 0 container instances after deletion, got %d", count)
+	}
+
+	// Verify instance no longer exists
+	_, exists := manager.GetInstance("default", "test-pod", "nginx")
+	if exists {
+		t.Error("Container instance still exists in manager after pod deletion")
+	}
+}
+
+// TestWatchPodsInformerUpdate tests that pod status changes (Running -> NotRunning) remove containers
+func TestWatchPodsInformerUpdate(t *testing.T) {
+	// Create fake clientset with a running test pod
+	testPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-1",
+			Containers: []corev1.Container{
+				{
+					Name:  "nginx",
+					Image: "nginx:1.21",
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:        "nginx",
+					ImageID:     "docker.io/library/nginx@sha256:abc123",
+					ContainerID: "containerd://xyz789",
+				},
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(testPod)
+	manager := containers.NewManager()
+
+	// Start the watcher
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go WatchPods(ctx, clientset, manager)
+
+	// Wait for informer to sync and add pod
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify pod was added
+	if manager.GetInstanceCount() != 1 {
+		t.Fatalf("Expected 1 container instance after add, got %d", manager.GetInstanceCount())
+	}
+
+	// Update pod status to Failed (not running)
+	testPod.Status.Phase = corev1.PodFailed
+	_, err := clientset.CoreV1().Pods("default").Update(context.Background(), testPod, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to update test pod: %v", err)
+	}
+
+	// Wait for informer to process update
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify pod was removed from manager (since it's no longer running)
+	count := manager.GetInstanceCount()
+	if count != 0 {
+		t.Errorf("Expected 0 container instances after pod failed, got %d", count)
+	}
+
+	// Verify instance no longer exists
+	_, exists := manager.GetInstance("default", "test-pod", "nginx")
+	if exists {
+		t.Error("Container instance still exists in manager after pod failed")
+	}
+}
+
+// TestWatchPodsInformerMultiplePods tests handling multiple pods simultaneously
+func TestWatchPodsInformerMultiplePods(t *testing.T) {
+	// Create fake clientset with multiple running pods
+	clientset := fake.NewSimpleClientset()
+	manager := containers.NewManager()
+
+	// Start the watcher
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go WatchPods(ctx, clientset, manager)
+
+	// Wait for informer to start
+	time.Sleep(300 * time.Millisecond)
+
+	// Create multiple pods
+	for i := 1; i <= 3; i++ {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-" + string(rune('a'+i-1)),
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				NodeName: "node-1",
+				Containers: []corev1.Container{
+					{
+						Name:  "nginx",
+						Image: "nginx:1.21",
+					},
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{
+						Name:        "nginx",
+						ImageID:     "docker.io/library/nginx@sha256:abc123",
+						ContainerID: "containerd://xyz" + string(rune('0'+i)),
+					},
+				},
+			},
+		}
+
+		_, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Failed to create test pod %d: %v", i, err)
+		}
+	}
+
+	// Wait for informer to process all pods
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify all pods were added
+	count := manager.GetInstanceCount()
+	if count != 3 {
+		t.Errorf("Expected 3 container instances, got %d", count)
 	}
 }

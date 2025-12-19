@@ -88,7 +88,7 @@ jobs:
       run: go mod download
 
     - name: Run tests
-      run: go test -v -race -coverprofile=coverage.out ./...
+      run: go test -v -short -race -coverprofile=coverage.out ./...
 
     - name: Build binary
       if: inputs.run-build

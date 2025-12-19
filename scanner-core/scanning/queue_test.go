@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestJobQueueIntegration(t *testing.T) {
 	}
 
 	// Create job queue (with default grype config for this test)
-	queue := NewJobQueue(db, mockRetriever, grype.Config{})
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, QueueConfig{MaxDepth: 0})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -131,7 +132,7 @@ func TestJobQueueErrorHandling(t *testing.T) {
 	}
 
 	// Create job queue (with default grype config for this test)
-	queue := NewJobQueue(db, mockRetriever, grype.Config{})
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, QueueConfig{MaxDepth: 0})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -216,7 +217,7 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 	}
 
 	// Create job queue (with default grype config for this test)
-	queue := NewJobQueue(db, mockRetriever, grype.Config{})
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, QueueConfig{MaxDepth: 0})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -296,7 +297,7 @@ func TestJobQueueForceScan(t *testing.T) {
 	}
 
 	// Create job queue (with default grype config for this test)
-	queue := NewJobQueue(db, mockRetriever, grype.Config{})
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, QueueConfig{MaxDepth: 0})
 	defer queue.Shutdown()
 
 	// Create a test image
@@ -349,5 +350,250 @@ func TestJobQueueForceScan(t *testing.T) {
 
 	if retrieverCallCount.Load() != 2 {
 		t.Errorf("Expected retriever to be called twice (force scan), got %d", retrieverCallCount.Load())
+	}
+}
+
+// TestJobQueueMaxDepthDrop tests that jobs are dropped when queue is full with QueueFullDrop behavior
+func TestJobQueueMaxDepthDrop(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_queue_maxdepth_drop_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	var enqueueCount atomic.Int32
+
+	// Mock SBOM retriever that counts calls
+	mockRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
+		enqueueCount.Add(1)
+		// Slow down processing to fill the queue
+		time.Sleep(100 * time.Millisecond)
+		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
+	}
+
+	// Create job queue with max depth of 2 and drop behavior
+	config := QueueConfig{
+		MaxDepth:     2,
+		FullBehavior: QueueFullDrop,
+	}
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, config)
+	defer queue.Shutdown()
+
+	// Create test images
+	for i := 1; i <= 5; i++ {
+		image := containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:test" + string(rune('0'+i)),
+		}
+
+		instance := containers.ContainerInstance{
+			ID: containers.ContainerInstanceID{
+				Namespace: "default",
+				Pod:       "test-pod-" + string(rune('a'+i-1)),
+				Container: "nginx",
+			},
+			Image:            image,
+			NodeName:         "test-node",
+			ContainerRuntime: "containerd",
+		}
+
+		// Add instance to DB first
+		_, err := db.AddInstance(instance)
+		if err != nil {
+			t.Fatalf("Failed to add instance: %v", err)
+		}
+
+		// Enqueue scan job
+		queue.Enqueue(ScanJob{
+			Image:            image,
+			NodeName:         "test-node",
+			ContainerRuntime: "containerd",
+		})
+	}
+
+	// Wait for processing
+	time.Sleep(1 * time.Second)
+
+	// Check metrics
+	currentDepth, peakDepth, totalEnqueued, totalDropped, totalProcessed := queue.GetMetrics()
+
+	t.Logf("Metrics: currentDepth=%d, peakDepth=%d, enqueued=%d, dropped=%d, processed=%d",
+		currentDepth, peakDepth, totalEnqueued, totalDropped, totalProcessed)
+
+	// Should have dropped some jobs
+	if totalDropped == 0 {
+		t.Error("Expected some jobs to be dropped, got 0")
+	}
+
+	// Total enqueued should be less than 5 (some were dropped)
+	if totalEnqueued >= 5 {
+		t.Errorf("Expected fewer than 5 jobs enqueued (some dropped), got %d", totalEnqueued)
+	}
+
+	// Peak depth should not exceed max depth
+	if peakDepth > 2 {
+		t.Errorf("Peak depth %d exceeded max depth 2", peakDepth)
+	}
+}
+
+// TestJobQueueMaxDepthDropOldest tests that oldest jobs are evicted when queue is full
+func TestJobQueueMaxDepthDropOldest(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_queue_drop_oldest_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	var processedJobs []string
+	var mu sync.Mutex
+
+	// Mock SBOM retriever that tracks which jobs were processed
+	mockRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
+		mu.Lock()
+		processedJobs = append(processedJobs, image.Digest)
+		mu.Unlock()
+		time.Sleep(200 * time.Millisecond) // Slow processing
+		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
+	}
+
+	// Create job queue with max depth of 2 and drop oldest behavior
+	config := QueueConfig{
+		MaxDepth:     2,
+		FullBehavior: QueueFullDropOldest,
+	}
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, config)
+	defer queue.Shutdown()
+
+	// Enqueue 4 jobs quickly
+	for i := 1; i <= 4; i++ {
+		image := containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:job" + string(rune('0'+i)),
+		}
+
+		instance := containers.ContainerInstance{
+			ID: containers.ContainerInstanceID{
+				Namespace: "default",
+				Pod:       "test-pod-" + string(rune('a'+i-1)),
+				Container: "nginx",
+			},
+			Image:            image,
+			NodeName:         "test-node",
+			ContainerRuntime: "containerd",
+		}
+
+		_, err := db.AddInstance(instance)
+		if err != nil {
+			t.Fatalf("Failed to add instance: %v", err)
+		}
+
+		queue.Enqueue(ScanJob{
+			Image:            image,
+			NodeName:         "test-node",
+			ContainerRuntime: "containerd",
+		})
+		time.Sleep(10 * time.Millisecond) // Small delay between enqueues
+	}
+
+	// Wait for processing
+	time.Sleep(2 * time.Second)
+
+	// Check metrics
+	_, _, totalEnqueued, totalDropped, _ := queue.GetMetrics()
+
+	t.Logf("Enqueued: %d, Dropped: %d", totalEnqueued, totalDropped)
+
+	// Should have dropped some jobs (oldest ones)
+	if totalDropped == 0 {
+		t.Error("Expected some jobs to be dropped (oldest), got 0")
+	}
+}
+
+// TestJobQueueMetricsTracking tests that metrics are correctly tracked
+func TestJobQueueMetricsTracking(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_queue_metrics_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	// Mock SBOM retriever
+	mockRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
+		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
+	}
+
+	// Create job queue with unbounded config
+	config := QueueConfig{MaxDepth: 0}
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, config)
+	defer queue.Shutdown()
+
+	// Enqueue 3 jobs
+	for i := 1; i <= 3; i++ {
+		image := containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:metric" + string(rune('0'+i)),
+		}
+
+		instance := containers.ContainerInstance{
+			ID: containers.ContainerInstanceID{
+				Namespace: "default",
+				Pod:       "test-pod-" + string(rune('a'+i-1)),
+				Container: "nginx",
+			},
+			Image:            image,
+			NodeName:         "test-node",
+			ContainerRuntime: "containerd",
+		}
+
+		_, err := db.AddInstance(instance)
+		if err != nil {
+			t.Fatalf("Failed to add instance: %v", err)
+		}
+
+		queue.Enqueue(ScanJob{
+			Image:            image,
+			NodeName:         "test-node",
+			ContainerRuntime: "containerd",
+		})
+	}
+
+	// Wait for processing
+	time.Sleep(1 * time.Second)
+
+	// Check metrics
+	_, peakDepth, totalEnqueued, totalDropped, totalProcessed := queue.GetMetrics()
+
+	t.Logf("Metrics: peakDepth=%d, enqueued=%d, dropped=%d, processed=%d",
+		peakDepth, totalEnqueued, totalDropped, totalProcessed)
+
+	if totalEnqueued != 3 {
+		t.Errorf("Expected 3 jobs enqueued, got %d", totalEnqueued)
+	}
+
+	if totalDropped != 0 {
+		t.Errorf("Expected 0 jobs dropped (unbounded queue), got %d", totalDropped)
+	}
+
+	if peakDepth < 1 {
+		t.Errorf("Expected peak depth >= 1, got %d", peakDepth)
+	}
+
+	if totalProcessed == 0 {
+		t.Error("Expected at least some jobs to be processed")
 	}
 }

@@ -115,11 +115,37 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 		m.instances[key] = instance
 	}
 
-	log.Printf("Set container instances: received %d instances", len(instances))
-	for i, instance := range instances {
-		log.Printf("  [%d] namespace=%s, pod=%s, container=%s, image=%s:%s (digest=%s)",
-			i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+	// Log summary instead of every instance (to reduce noise in large clusters)
+	uniqueImages := make(map[string]bool)
+	uniqueNodes := make(map[string]bool)
+	for _, instance := range instances {
+		if instance.Image.Digest != "" {
+			uniqueImages[instance.Image.Digest] = true
+		}
+		if instance.NodeName != "" {
+			uniqueNodes[instance.NodeName] = true
+		}
+	}
+
+	log.Printf("Set container instances: %d instances, %d unique images, %d nodes",
+		len(instances), len(uniqueImages), len(uniqueNodes))
+
+	// Log first 3 instances as samples for debugging (only if we have instances)
+	if len(instances) > 0 {
+		sampleCount := 3
+		if len(instances) < sampleCount {
+			sampleCount = len(instances)
+		}
+		log.Printf("Sample instances:")
+		for i := 0; i < sampleCount; i++ {
+			instance := instances[i]
+			log.Printf("  [%d] ns=%s, pod=%s, container=%s, image=%s:%s, node=%s",
+				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
+				instance.Image.Repository, instance.Image.Tag, instance.NodeName)
+		}
+		if len(instances) > sampleCount {
+			log.Printf("  ... and %d more instances", len(instances)-sampleCount)
+		}
 	}
 
 	// Update database if configured

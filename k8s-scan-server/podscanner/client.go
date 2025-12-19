@@ -32,7 +32,7 @@ func NewClient() *Client {
 
 // GetSBOMFromNode requests SBOM generation from pod-scanner on a specific node
 // Waits for pod-scanner to become available if it's scheduled but not yet ready
-func (c *Client) GetSBOMFromNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, digest string) ([]byte, error) {
+func (c *Client) GetSBOMFromNode(ctx context.Context, clientset kubernetes.Interface, nodeName string, digest string) ([]byte, error) {
 	// Try to find running pod-scanner
 	pod, err := c.findPodScannerPod(ctx, clientset, nodeName)
 	if err != nil {
@@ -103,7 +103,7 @@ func (c *Client) GetSBOMFromNode(ctx context.Context, clientset *kubernetes.Clie
 }
 
 // findPodScannerPod finds the pod-scanner pod running on a specific node
-func (c *Client) findPodScannerPod(ctx context.Context, clientset *kubernetes.Clientset, nodeName string) (*corev1.Pod, error) {
+func (c *Client) findPodScannerPod(ctx context.Context, clientset kubernetes.Interface, nodeName string) (*corev1.Pod, error) {
 	namespace := c.namespace
 	if namespace == "" {
 		namespace = "default" // Fallback to default if NAMESPACE env var not set
@@ -129,7 +129,7 @@ func (c *Client) findPodScannerPod(ctx context.Context, clientset *kubernetes.Cl
 }
 
 // IsPodScannerScheduledOnNode checks if a pod-scanner is scheduled (but not yet running) on a node
-func (c *Client) IsPodScannerScheduledOnNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string) (bool, error) {
+func (c *Client) IsPodScannerScheduledOnNode(ctx context.Context, clientset kubernetes.Interface, nodeName string) (bool, error) {
 	namespace := c.namespace
 	if namespace == "" {
 		namespace = "default"
@@ -161,7 +161,7 @@ func (c *Client) IsPodScannerScheduledOnNode(ctx context.Context, clientset *kub
 
 // WaitForPodScannerReady waits for a pod-scanner to become ready on a node
 // Returns error if timeout is reached
-func (c *Client) WaitForPodScannerReady(ctx context.Context, clientset *kubernetes.Clientset, nodeName string, timeout time.Duration) error {
+func (c *Client) WaitForPodScannerReady(ctx context.Context, clientset kubernetes.Interface, nodeName string, timeout time.Duration) error {
 	log.Printf("Waiting for pod-scanner on node %s to become ready (timeout: %v)...", nodeName, timeout)
 
 	// Wait for pod-scanner to become ready

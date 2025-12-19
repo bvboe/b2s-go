@@ -10,8 +10,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 // parseImageName parses a container image string into repository, tag, and imageID
@@ -154,62 +155,114 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 	return instances
 }
 
-// WatchPods watches for pod changes and updates the container manager
-func WatchPods(ctx context.Context, clientset *kubernetes.Clientset, manager *containers.Manager) {
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Pod watcher shutting down")
-			return
-		default:
-			watcher, err := clientset.CoreV1().Pods("").Watch(ctx, metav1.ListOptions{})
-			if err != nil {
-				log.Printf("Error creating pod watcher: %v", err)
-				time.Sleep(5 * time.Second)
-				continue
+// WatchPods watches for pod changes using a SharedIndexInformer and updates the container manager.
+// This implementation provides:
+// - Automatic watch resumption with resourceVersion tracking (no missed events on reconnect)
+// - Periodic resync to ensure eventual consistency (every 5 minutes)
+// - Built-in exponential backoff on errors
+// - Local cache to reduce API server load
+// - Proper deletion handling even if watch connection drops
+func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *containers.Manager) {
+	// Create informer factory with 5-minute resync period
+	// Resync ensures we eventually catch up even if watch events are missed
+	resyncPeriod := 5 * time.Minute
+	factory := informers.NewSharedInformerFactory(clientset, resyncPeriod)
+
+	// Get the pod informer
+	podInformer := factory.Core().V1().Pods().Informer()
+
+	// Add event handlers
+	_, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			pod, ok := obj.(*corev1.Pod)
+			if !ok {
+				log.Printf("Unexpected object type in AddFunc: %T", obj)
+				return
 			}
-
-			log.Println("Pod watcher started")
-
-			for event := range watcher.ResultChan() {
-				pod, ok := event.Object.(*corev1.Pod)
+			handlePodAddOrUpdate(pod, manager)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			pod, ok := newObj.(*corev1.Pod)
+			if !ok {
+				log.Printf("Unexpected object type in UpdateFunc: %T", newObj)
+				return
+			}
+			handlePodAddOrUpdate(pod, manager)
+		},
+		DeleteFunc: func(obj interface{}) {
+			pod, ok := obj.(*corev1.Pod)
+			if !ok {
+				// Handle tombstone (object deleted from cache but we got notification late)
+				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					continue
+					log.Printf("Unexpected object type in DeleteFunc: %T", obj)
+					return
 				}
-
-				switch event.Type {
-				case watch.Added, watch.Modified:
-					// Only process running pods
-					if pod.Status.Phase == corev1.PodRunning {
-						instances := extractContainerInstances(pod)
-						for _, instance := range instances {
-							manager.AddContainerInstance(instance)
-						}
-					} else if pod.Status.Phase != corev1.PodRunning {
-						// If pod is no longer running, remove its containers
-						instances := extractContainerInstances(pod)
-						for _, instance := range instances {
-							manager.RemoveContainerInstance(instance.ID)
-						}
-					}
-
-				case watch.Deleted:
-					// Remove all containers from this pod
-					instances := extractContainerInstances(pod)
-					for _, instance := range instances {
-						manager.RemoveContainerInstance(instance.ID)
-					}
+				pod, ok = tombstone.Obj.(*corev1.Pod)
+				if !ok {
+					log.Printf("Tombstone contained unexpected object: %T", tombstone.Obj)
+					return
 				}
 			}
+			handlePodDelete(pod, manager)
+		},
+	})
+	if err != nil {
+		log.Printf("Error adding event handler: %v", err)
+		return
+	}
 
-			log.Println("Pod watcher connection closed, reconnecting...")
-			time.Sleep(1 * time.Second)
+	log.Println("Starting pod informer...")
+
+	// Start the informer (runs in background goroutine)
+	go factory.Start(ctx.Done())
+
+	// Wait for cache to sync before considering the informer ready
+	log.Println("Waiting for pod informer cache to sync...")
+	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+		log.Println("Failed to sync pod informer cache")
+		return
+	}
+
+	log.Println("Pod informer cache synced and ready")
+
+	// Block until context is cancelled
+	<-ctx.Done()
+	log.Println("Pod watcher shutting down")
+}
+
+// handlePodAddOrUpdate processes pod additions and updates
+func handlePodAddOrUpdate(pod *corev1.Pod, manager *containers.Manager) {
+	// Only process running pods
+	if pod.Status.Phase == corev1.PodRunning {
+		instances := extractContainerInstances(pod)
+		for _, instance := range instances {
+			manager.AddContainerInstance(instance)
+		}
+	} else {
+		// If pod is no longer running, remove its containers
+		instances := extractContainerInstances(pod)
+		for _, instance := range instances {
+			manager.RemoveContainerInstance(instance.ID)
 		}
 	}
 }
 
-// SyncInitialPods performs an initial sync of all existing pods
-func SyncInitialPods(ctx context.Context, clientset *kubernetes.Clientset, manager *containers.Manager) error {
+// handlePodDelete processes pod deletions
+func handlePodDelete(pod *corev1.Pod, manager *containers.Manager) {
+	// Remove all containers from this deleted pod
+	instances := extractContainerInstances(pod)
+	for _, instance := range instances {
+		manager.RemoveContainerInstance(instance.ID)
+	}
+	log.Printf("Removed containers from deleted pod: namespace=%s, pod=%s", pod.Namespace, pod.Name)
+}
+
+// SyncInitialPods performs an initial sync of all existing pods.
+// Note: With the informer-based WatchPods implementation, this function is less critical
+// since the informer automatically performs an initial list and sync (via cache.WaitForCacheSync).
+// This function is kept for explicit synchronization use cases or testing.
+func SyncInitialPods(ctx context.Context, clientset kubernetes.Interface, manager *containers.Manager) error {
 	log.Println("Performing initial pod sync...")
 
 	podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})

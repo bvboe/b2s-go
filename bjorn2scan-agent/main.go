@@ -120,7 +120,12 @@ func main() {
 	}
 
 	// Initialize scan queue with SBOM and vulnerability scanning
-	scanQueue := scanning.NewJobQueue(db, sbomRetriever, grypeCfg)
+	// Using default queue config (unbounded queue with single worker)
+	queueConfig := scanning.QueueConfig{
+		MaxDepth:     0, // Unbounded
+		FullBehavior: scanning.QueueFullDrop,
+	}
+	scanQueue := scanning.NewJobQueue(db, sbomRetriever, grypeCfg, queueConfig)
 	defer scanQueue.Shutdown()
 
 	// Connect scan queue to manager
