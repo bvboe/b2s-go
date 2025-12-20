@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 type migration struct {
 	version int
@@ -49,6 +49,11 @@ var migrations = []migration{
 		version: 7,
 		name:    "add_vulnerability_risk_fields",
 		up:      migrateToV7,
+	},
+	{
+		version: 8,
+		name:    "unified_status_field",
+		up:      migrateToV8,
 	},
 }
 
@@ -629,5 +634,74 @@ func migrateToV7(conn *sql.DB) error {
 	}
 
 	log.Println("Migration v7: Added risk, EPSS, and known_exploited columns to vulnerabilities table")
+	return nil
+}
+
+// migrateToV8 adds unified status field replacing scan_status and vulnerability_status
+func migrateToV8(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v8: Adding unified status field...")
+
+	// Add new status columns
+	_, err = tx.Exec(`
+		ALTER TABLE container_images ADD COLUMN status TEXT DEFAULT 'pending';
+		ALTER TABLE container_images ADD COLUMN status_error TEXT;
+		ALTER TABLE container_images ADD COLUMN sbom_scanned_at DATETIME;
+		ALTER TABLE container_images ADD COLUMN vulns_scanned_at DATETIME;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add new status columns: %w", err)
+	}
+
+	// Migrate data from old columns to unified status
+	log.Println("Migration v8: Migrating status data...")
+	_, err = tx.Exec(`
+		UPDATE container_images
+		SET
+			status = CASE
+				-- Both complete
+				WHEN vulnerability_status = 'scanned' THEN 'completed'
+
+				-- Vulnerability scanning stage
+				WHEN vulnerability_status = 'scanning' THEN 'scanning_vulnerabilities'
+				WHEN vulnerability_status = 'failed' THEN 'vuln_scan_failed'
+
+				-- SBOM generation stage
+				WHEN scan_status = 'scanned' THEN 'scanning_vulnerabilities'  -- SBOM done, vulns pending
+				WHEN scan_status = 'scanning' THEN 'generating_sbom'
+				WHEN scan_status = 'failed' THEN 'sbom_failed'
+
+				-- Default
+				ELSE 'pending'
+			END,
+			status_error = COALESCE(vulnerability_error, scan_error),
+			sbom_scanned_at = scanned_at,
+			vulns_scanned_at = vulnerabilities_scanned_at
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate status data: %w", err)
+	}
+
+	// Create index on new status field
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_status ON container_images(status);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create status index: %w", err)
+	}
+
+	// Note: We keep the old columns (scan_status, vulnerability_status) for now
+	// They can be dropped in a future migration after confirming everything works
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v8: Successfully migrated to unified status field")
 	return nil
 }

@@ -44,23 +44,26 @@ type ImageSummary struct {
 
 // ImageDetails combines image metadata with summary statistics
 type ImageDetails struct {
-	ID                  int64  `json:"id"`
-	Digest              string `json:"digest"`
-	ScanStatus          string `json:"scan_status"`
-	VulnerabilityStatus string `json:"vulnerability_status"`
-	CreatedAt           string `json:"created_at"`
-	UpdatedAt           string `json:"updated_at"`
+	ID        int64  `json:"id"`
+	Digest    string `json:"digest"`
+	Status    string `json:"status"` // Unified status field
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+
+	// Deprecated: Use Status instead
+	ScanStatus          string `json:"scan_status,omitempty"`
+	VulnerabilityStatus string `json:"vulnerability_status,omitempty"`
 	ScannedAt           string `json:"scanned_at,omitempty"`
 
 	// Summary data
-	PackageCount      int    `json:"package_count"`
-	VulnerabilityCount int   `json:"vulnerability_count"`
-	CriticalCount     int    `json:"critical_count"`
-	HighCount         int    `json:"high_count"`
-	MediumCount       int    `json:"medium_count"`
-	LowCount          int    `json:"low_count"`
-	OSName            string `json:"os_name,omitempty"`
-	OSVersion         string `json:"os_version,omitempty"`
+	PackageCount       int    `json:"package_count"`
+	VulnerabilityCount int    `json:"vulnerability_count"`
+	CriticalCount      int    `json:"critical_count"`
+	HighCount          int    `json:"high_count"`
+	MediumCount        int    `json:"medium_count"`
+	LowCount           int    `json:"low_count"`
+	OSName             string `json:"os_name,omitempty"`
+	OSVersion          string `json:"os_version,omitempty"`
 }
 
 // GetPackagesByImage returns all packages for a specific image
@@ -169,15 +172,15 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 	// Get basic image info and summary
 	err := db.conn.QueryRow(`
 		SELECT
-			img.id, img.digest, img.scan_status, img.vulnerability_status,
-			img.created_at, img.updated_at, img.scanned_at,
+			img.id, img.digest, img.status,
+			img.created_at, img.updated_at, img.sbom_scanned_at,
 			COALESCE(s.package_count, 0),
 			COALESCE(s.os_name, ''),
 			COALESCE(s.os_version, '')
 		FROM container_images img
 		LEFT JOIN image_summary s ON img.id = s.image_id
 		WHERE img.digest = ?
-	`, digest).Scan(&details.ID, &details.Digest, &details.ScanStatus, &details.VulnerabilityStatus,
+	`, digest).Scan(&details.ID, &details.Digest, &details.Status,
 		&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
 		&osName, &osVersion)
 
@@ -246,8 +249,8 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 func (db *DB) GetAllImageDetails() (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT
-			img.id, img.digest, img.scan_status, img.vulnerability_status,
-			img.created_at, img.updated_at, img.scanned_at,
+			img.id, img.digest, img.status,
+			img.created_at, img.updated_at, img.sbom_scanned_at,
 			COALESCE(s.package_count, 0),
 			COALESCE(s.os_name, ''),
 			COALESCE(s.os_version, '')
@@ -266,7 +269,7 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 		var scannedAt sql.NullString
 		var osName, osVersion sql.NullString
 
-		err := rows.Scan(&details.ID, &details.Digest, &details.ScanStatus, &details.VulnerabilityStatus,
+		err := rows.Scan(&details.ID, &details.Digest, &details.Status,
 			&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
 			&osName, &osVersion)
 		if err != nil {

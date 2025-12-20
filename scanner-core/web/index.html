@@ -725,36 +725,44 @@
             return '<span class="badge badge-warning">✗ No</span>';
         }
 
+        // Unified status badge for new status field
+        function getStatusBadge(status) {
+            if (!status) status = 'pending';
+
+            switch(status) {
+                case 'pending':
+                    return '<span class="badge badge-secondary">⏳ Pending</span>';
+                case 'generating_sbom':
+                    return '<span class="badge badge-info">📦 Generating SBOM...</span>';
+                case 'scanning_vulnerabilities':
+                    return '<span class="badge badge-info">🔍 Scanning Vulnerabilities...</span>';
+                case 'completed':
+                    return '<span class="badge badge-success">✓ Complete</span>';
+                case 'sbom_failed':
+                    return '<span class="badge badge-danger">✗ SBOM Failed</span>';
+                case 'sbom_unavailable':
+                    return '<span class="badge badge-warning">⊘ No Scanner Available</span>';
+                case 'vuln_scan_failed':
+                    return '<span class="badge badge-warning">⚠ Vuln Scan Failed</span>';
+                // Backward compatibility with old status values
+                case 'scanning':
+                    return '<span class="badge badge-info">Scanning...</span>';
+                case 'scanned':
+                    return '<span class="badge badge-success">✓ Scanned</span>';
+                case 'failed':
+                    return '<span class="badge badge-danger">✗ Failed</span>';
+                default:
+                    return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
+            }
+        }
+
+        // Legacy functions for backward compatibility
         function getScanStatusBadge(status) {
-            if (!status || status === 'pending') {
-                return '<span class="badge badge-secondary">Pending</span>';
-            }
-            if (status === 'scanning') {
-                return '<span class="badge badge-info">Scanning...</span>';
-            }
-            if (status === 'scanned') {
-                return '<span class="badge badge-success">✓ Scanned</span>';
-            }
-            if (status === 'failed') {
-                return '<span class="badge badge-danger">✗ Failed</span>';
-            }
-            return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
+            return getStatusBadge(status);
         }
 
         function getVulnStatusBadge(status) {
-            if (!status || status === 'pending') {
-                return '<span class="badge badge-secondary">Pending</span>';
-            }
-            if (status === 'scanning') {
-                return '<span class="badge badge-info">Scanning...</span>';
-            }
-            if (status === 'scanned') {
-                return '<span class="badge badge-success">✓ Scanned</span>';
-            }
-            if (status === 'failed') {
-                return '<span class="badge badge-danger">✗ Failed</span>';
-            }
-            return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
+            return getStatusBadge(status);
         }
 
         function getCountBadge(count, severity) {
@@ -786,17 +794,23 @@
         function getActionButtons(image) {
             let buttons = [];
 
+            // Check status - support both old and new status fields
+            const status = image.status || '';
+            const hasSBOM = status === 'scanning_vulnerabilities' || status === 'vuln_scan_failed' || status === 'completed' ||
+                           image.scan_status === 'scanned'; // backward compat
+            const hasVulns = status === 'completed' || image.vulnerability_status === 'scanned'; // backward compat
+
             // Add View button if vulnerabilities are available
-            if (image.vulnerability_status === 'scanned') {
+            if (hasVulns) {
                 buttons.push(`<button class="view-btn" onclick="viewDetails('${escapeHtml(image.digest)}', event)" title="View Details">👁 View</button>`);
             }
 
             // Add download buttons
-            if (image.scan_status === 'scanned') {
+            if (hasSBOM) {
                 buttons.push(`<a href="/api/sbom/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download SBOM">↓ SBOM</a>`);
             }
 
-            if (image.vulnerability_status === 'scanned') {
+            if (hasVulns) {
                 buttons.push(`<a href="/api/vulnerabilities/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download Vulnerabilities" style="margin-left: 4px;">↓ Vulns</a>`);
             }
 

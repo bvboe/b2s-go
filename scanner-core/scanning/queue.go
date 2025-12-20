@@ -289,18 +289,22 @@ func (q *JobQueue) processJob(job ScanJob) {
 
 	// Check if we already have scan results (unless force scan is requested)
 	if !job.ForceScan {
-		scanStatus, err := q.db.GetImageScanStatus(job.Image.Digest)
+		status, err := q.db.GetImageStatus(job.Image.Digest)
 		if err != nil {
-			log.Printf("Error checking scan status for %s: %v", job.Image.Digest, err)
-		} else if scanStatus == "scanned" {
-			log.Printf("Image %s already scanned, skipping", job.Image.Digest)
+			log.Printf("Error checking status for %s: %v", job.Image.Digest, err)
+		} else if status.HasSBOM() {
+			log.Printf("Image %s already has SBOM (status=%s), skipping SBOM generation", job.Image.Digest, status)
+			// If SBOM exists but vulnerabilities don't, continue to vulnerability scan
+			if !status.HasVulnerabilities() {
+				q.processVulnerabilityScan(job, nil)
+			}
 			return
 		}
 	}
 
-	// Mark image as scanning
-	if err := q.db.UpdateScanStatus(job.Image.Digest, "scanning", ""); err != nil {
-		log.Printf("Error updating scan status for %s: %v", job.Image.Digest, err)
+	// Mark image as generating SBOM
+	if err := q.db.UpdateStatus(job.Image.Digest, database.StatusGeneratingSBOM, ""); err != nil {
+		log.Printf("Error updating status for %s: %v", job.Image.Digest, err)
 		return
 	}
 
@@ -313,9 +317,16 @@ func (q *JobQueue) processJob(job ScanJob) {
 		log.Printf("Error retrieving SBOM for %s:%s: %v",
 			job.Image.Repository, job.Image.Tag, err)
 
-		// Mark as failed
-		if updateErr := q.db.UpdateScanStatus(job.Image.Digest, "failed", err.Error()); updateErr != nil {
-			log.Printf("Error updating scan status to failed: %v", updateErr)
+		// Determine if this is a failure or unavailability
+		// If no node scanner is available, mark as unavailable; otherwise failed
+		errorStatus := database.StatusSBOMFailed
+		if job.NodeName == "" {
+			// Could check error message for specific unavailability indicators
+			// For now, assume all errors are failures
+		}
+
+		if updateErr := q.db.UpdateStatus(job.Image.Digest, errorStatus, err.Error()); updateErr != nil {
+			log.Printf("Error updating status to %s: %v", errorStatus, updateErr)
 		}
 		return
 	}
@@ -323,13 +334,13 @@ func (q *JobQueue) processJob(job ScanJob) {
 	// Store the SBOM in the database for caching (enables fast API access and offline serving)
 	// Note: This is the primary SBOM caching path. Direct API requests to k8s-scan-server
 	// that fetch SBOMs on-demand from pod-scanner do NOT cache (see handlers/sbom.go).
+	// StoreSBOM will automatically update status to StatusScanningVulnerabilities
 	if err := q.db.StoreSBOM(job.Image.Digest, sbomJSON); err != nil {
 		log.Printf("Error storing SBOM for %s:%s: %v",
 			job.Image.Repository, job.Image.Tag, err)
 
-		// Mark as failed
-		if updateErr := q.db.UpdateScanStatus(job.Image.Digest, "failed", err.Error()); updateErr != nil {
-			log.Printf("Error updating scan status to failed: %v", updateErr)
+		if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusSBOMFailed, err.Error()); updateErr != nil {
+			log.Printf("Error updating status to failed: %v", updateErr)
 		}
 		return
 	}
@@ -348,19 +359,26 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 
 	// Check if we already have vulnerability results (unless force scan is requested)
 	if !job.ForceScan {
-		vulnStatus, err := q.db.GetImageVulnerabilityStatus(job.Image.Digest)
+		status, err := q.db.GetImageStatus(job.Image.Digest)
 		if err != nil {
-			log.Printf("Error checking vulnerability status for %s: %v", job.Image.Digest, err)
-		} else if vulnStatus == "scanned" {
-			log.Printf("Image %s already scanned for vulnerabilities, skipping", job.Image.Digest)
+			log.Printf("Error checking status for %s: %v", job.Image.Digest, err)
+		} else if status.HasVulnerabilities() {
+			log.Printf("Image %s already has vulnerabilities (status=%s), skipping", job.Image.Digest, status)
 			return
 		}
 	}
 
-	// Mark image as scanning for vulnerabilities
-	if err := q.db.UpdateVulnerabilityStatus(job.Image.Digest, "scanning", ""); err != nil {
-		log.Printf("Error updating vulnerability status for %s: %v", job.Image.Digest, err)
-		return
+	// If sbomJSON is nil, retrieve it from the database
+	if sbomJSON == nil {
+		var err error
+		sbomJSON, err = q.db.GetSBOM(job.Image.Digest)
+		if err != nil {
+			log.Printf("Error retrieving SBOM from database for %s: %v", job.Image.Digest, err)
+			if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusVulnScanFailed, "SBOM not available: "+err.Error()); updateErr != nil {
+				log.Printf("Error updating status to failed: %v", updateErr)
+			}
+			return
+		}
 	}
 
 	// Scan for vulnerabilities using Grype
@@ -372,21 +390,20 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 		log.Printf("Error scanning vulnerabilities for %s:%s: %v",
 			job.Image.Repository, job.Image.Tag, err)
 
-		// Mark as failed
-		if updateErr := q.db.UpdateVulnerabilityStatus(job.Image.Digest, "failed", err.Error()); updateErr != nil {
-			log.Printf("Error updating vulnerability status to failed: %v", updateErr)
+		if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusVulnScanFailed, err.Error()); updateErr != nil {
+			log.Printf("Error updating status to failed: %v", updateErr)
 		}
 		return
 	}
 
 	// Store the vulnerability report
+	// StoreVulnerabilities will automatically update status to StatusCompleted
 	if err := q.db.StoreVulnerabilities(job.Image.Digest, vulnJSON); err != nil {
 		log.Printf("Error storing vulnerabilities for %s:%s: %v",
 			job.Image.Repository, job.Image.Tag, err)
 
-		// Mark as failed
-		if updateErr := q.db.UpdateVulnerabilityStatus(job.Image.Digest, "failed", err.Error()); updateErr != nil {
-			log.Printf("Error updating vulnerability status to failed: %v", updateErr)
+		if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusVulnScanFailed, err.Error()); updateErr != nil {
+			log.Printf("Error updating status to failed: %v", updateErr)
 		}
 		return
 	}

@@ -7,27 +7,49 @@ import (
 	"time"
 )
 
-// GetImageScanStatus returns the scan status for an image by digest
-// Returns: "pending", "scanning", "scanned", or "failed"
-func (db *DB) GetImageScanStatus(digest string) (string, error) {
+// GetImageStatus returns the unified status for an image by digest
+// Returns: Status constant (pending, generating_sbom, sbom_failed, sbom_unavailable,
+//          scanning_vulnerabilities, vuln_scan_failed, completed)
+func (db *DB) GetImageStatus(digest string) (Status, error) {
 	var status string
 	err := db.conn.QueryRow(`
-		SELECT scan_status FROM container_images
+		SELECT status FROM container_images
 		WHERE digest = ?
 	`, digest).Scan(&status)
 
 	if err == sql.ErrNoRows {
-		return "pending", nil // Image not found means not scanned
+		return StatusPending, nil // Image not found means pending
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to get scan status: %w", err)
+		return "", fmt.Errorf("failed to get status: %w", err)
 	}
 
-	return status, nil
+	return Status(status), nil
+}
+
+// GetImageScanStatus is deprecated, use GetImageStatus instead
+// Provided for backward compatibility during migration
+func (db *DB) GetImageScanStatus(digest string) (string, error) {
+	status, err := db.GetImageStatus(digest)
+	if err != nil {
+		return "", err
+	}
+
+	// Map new status to old scan_status
+	switch status {
+	case StatusCompleted, StatusScanningVulnerabilities, StatusVulnScanFailed:
+		return "scanned", nil
+	case StatusGeneratingSBOM:
+		return "scanning", nil
+	case StatusSBOMFailed, StatusSBOMUnavailable:
+		return "failed", nil
+	default:
+		return "pending", nil
+	}
 }
 
 // IsScanDataComplete checks if an image has complete scan data (SBOM and vulnerabilities)
-// Returns true only if status is "scanned" AND both SBOM and vulnerability data exist
+// Returns true only if status is "completed" AND both SBOM and vulnerability data exist
 func (db *DB) IsScanDataComplete(digest string) (bool, error) {
 	var status string
 	var hasSBOM bool
@@ -35,7 +57,7 @@ func (db *DB) IsScanDataComplete(digest string) (bool, error) {
 
 	err := db.conn.QueryRow(`
 		SELECT
-			scan_status,
+			status,
 			sbom IS NOT NULL AND LENGTH(sbom) > 0,
 			vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0
 		FROM container_images
@@ -49,31 +71,59 @@ func (db *DB) IsScanDataComplete(digest string) (bool, error) {
 		return false, fmt.Errorf("failed to check scan data completeness: %w", err)
 	}
 
-	// Data is complete only if status is scanned AND we have both SBOM and vulnerabilities
-	return status == "scanned" && hasSBOM && hasVulns, nil
+	// Data is complete only if status is completed AND we have both SBOM and vulnerabilities
+	return status == string(StatusCompleted) && hasSBOM && hasVulns, nil
 }
 
-// UpdateScanStatus updates the scan status and error message for an image
-func (db *DB) UpdateScanStatus(digest string, status string, errorMsg string) error {
-	var scannedAt interface{}
-	if status == "scanned" {
-		scannedAt = time.Now().UTC().Format(time.RFC3339)
+// UpdateStatus updates the unified status for an image
+func (db *DB) UpdateStatus(digest string, status Status, errorMsg string) error {
+	var sbomScannedAt, vulnsScannedAt interface{}
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	// Set timestamps based on status
+	switch status {
+	case StatusScanningVulnerabilities, StatusSBOMFailed, StatusSBOMUnavailable:
+		// SBOM stage just completed (success or failure)
+		sbomScannedAt = timestamp
+	case StatusCompleted, StatusVulnScanFailed:
+		// Vulnerability scan just completed (success or failure)
+		vulnsScannedAt = timestamp
 	}
 
 	_, err := db.conn.Exec(`
 		UPDATE container_images
-		SET scan_status = ?,
-		    scan_error = ?,
-		    scanned_at = ?,
+		SET status = ?,
+		    status_error = ?,
+		    sbom_scanned_at = COALESCE(sbom_scanned_at, ?),
+		    vulns_scanned_at = COALESCE(vulns_scanned_at, ?),
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
-	`, status, errorMsg, scannedAt, digest)
+	`, status.String(), errorMsg, sbomScannedAt, vulnsScannedAt, digest)
 
 	if err != nil {
-		return fmt.Errorf("failed to update scan status: %w", err)
+		return fmt.Errorf("failed to update status: %w", err)
 	}
 
 	return nil
+}
+
+// UpdateScanStatus is deprecated, use UpdateStatus instead
+// Provided for backward compatibility during migration
+func (db *DB) UpdateScanStatus(digest string, status string, errorMsg string) error {
+	// Map old status to new unified status
+	var newStatus Status
+	switch status {
+	case "scanning":
+		newStatus = StatusGeneratingSBOM
+	case "scanned":
+		newStatus = StatusScanningVulnerabilities
+	case "failed":
+		newStatus = StatusSBOMFailed
+	default:
+		newStatus = StatusPending
+	}
+
+	return db.UpdateStatus(digest, newStatus, errorMsg)
 }
 
 // StoreSBOM stores the SBOM JSON for an image and marks it as scanned
@@ -88,12 +138,12 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 	_, err = db.conn.Exec(`
 		UPDATE container_images
 		SET sbom = ?,
-		    scan_status = 'scanned',
-		    scan_error = NULL,
-		    scanned_at = ?,
+		    status = ?,
+		    status_error = NULL,
+		    sbom_scanned_at = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
-	`, string(sbomJSON), time.Now().UTC().Format(time.RFC3339), digest)
+	`, string(sbomJSON), StatusScanningVulnerabilities.String(), time.Now().UTC().Format(time.RFC3339), digest)
 
 	if err != nil {
 		return fmt.Errorf("failed to store SBOM: %w", err)
@@ -130,15 +180,33 @@ func (db *DB) GetSBOM(digest string) ([]byte, error) {
 	return []byte(sbom.String), nil
 }
 
-// GetImagesByS canStatus returns all images with a specific scan status
+// GetImagesByScanStatus is deprecated, use GetImagesByStatus instead
+// Returns all images with a specific scan status (maps old status to new unified status)
 func (db *DB) GetImagesByScanStatus(status string) ([]ContainerImage, error) {
+	// Map old status values to new unified status values
+	var statusFilter string
+	switch status {
+	case "pending":
+		// Include pending and generating_sbom
+		statusFilter = "status IN ('pending', 'generating_sbom')"
+	case "scanning":
+		statusFilter = "status = 'generating_sbom'"
+	case "scanned":
+		// Include all statuses that indicate SBOM is complete
+		statusFilter = "status IN ('scanning_vulnerabilities', 'vuln_scan_failed', 'completed')"
+	case "failed":
+		// Include all failure statuses
+		statusFilter = "status IN ('sbom_failed', 'sbom_unavailable', 'vuln_scan_failed')"
+	default:
+		return nil, fmt.Errorf("unknown scan status: %s", status)
+	}
+
 	rows, err := db.conn.Query(`
-		SELECT id, digest, created_at, updated_at,
-		       scan_status, scan_error, scanned_at
+		SELECT id, digest, created_at, updated_at
 		FROM container_images
-		WHERE scan_status = ?
+		WHERE `+statusFilter+`
 		ORDER BY created_at DESC
-	`, status)
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query images by scan status: %w", err)
 	}
@@ -147,18 +215,35 @@ func (db *DB) GetImagesByScanStatus(status string) ([]ContainerImage, error) {
 	var images []ContainerImage
 	for rows.Next() {
 		var img ContainerImage
-		var scanStatus, scanError sql.NullString
-		var scannedAt sql.NullString
-
-		err := rows.Scan(&img.ID, &img.Digest,
-			&img.CreatedAt, &img.UpdatedAt,
-			&scanStatus, &scanError, &scannedAt)
+		err := rows.Scan(&img.ID, &img.Digest, &img.CreatedAt, &img.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan image row: %w", err)
 		}
+		images = append(images, img)
+	}
 
-		if scanStatus.Valid {
-			img.ScanStatus = scanStatus.String
+	return images, nil
+}
+
+// GetImagesByStatus returns all images with a specific unified status
+func (db *DB) GetImagesByStatus(status Status) ([]ContainerImage, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, digest, created_at, updated_at
+		FROM container_images
+		WHERE status = ?
+		ORDER BY created_at DESC
+	`, status.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to query images by status: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var images []ContainerImage
+	for rows.Next() {
+		var img ContainerImage
+		err := rows.Scan(&img.ID, &img.Digest, &img.CreatedAt, &img.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan image row: %w", err)
 		}
 		images = append(images, img)
 	}
@@ -194,46 +279,50 @@ func (db *DB) GetFirstInstanceForImage(digest string) (*ContainerInstanceRow, er
 	return &inst, nil
 }
 
-// GetImageVulnerabilityStatus returns the vulnerability scan status for an image by digest
-// Returns: "pending", "scanning", "scanned", or "failed"
+// GetImageVulnerabilityStatus is deprecated, use GetImageStatus instead
+// Provided for backward compatibility during migration
 func (db *DB) GetImageVulnerabilityStatus(digest string) (string, error) {
-	var status string
-	err := db.conn.QueryRow(`
-		SELECT vulnerability_status FROM container_images
-		WHERE digest = ?
-	`, digest).Scan(&status)
-
-	if err == sql.ErrNoRows {
-		return "pending", nil // Image not found means not scanned
-	}
+	status, err := db.GetImageStatus(digest)
 	if err != nil {
-		return "", fmt.Errorf("failed to get vulnerability status: %w", err)
+		return "", err
 	}
 
-	return status, nil
+	// Map new status to old vulnerability_status
+	switch status {
+	case StatusCompleted:
+		return "scanned", nil
+	case StatusScanningVulnerabilities:
+		return "scanning", nil
+	case StatusVulnScanFailed:
+		return "failed", nil
+	default:
+		return "pending", nil
+	}
 }
 
-// UpdateVulnerabilityStatus updates the vulnerability scan status and error message for an image
+// UpdateVulnerabilityStatus is deprecated, use UpdateStatus instead
+// Provided for backward compatibility during migration
 func (db *DB) UpdateVulnerabilityStatus(digest string, status string, errorMsg string) error {
-	var scannedAt interface{}
-	if status == "scanned" {
-		scannedAt = time.Now().UTC().Format(time.RFC3339)
+	// Map old vulnerability status to new unified status
+	var newStatus Status
+	switch status {
+	case "scanning":
+		newStatus = StatusScanningVulnerabilities
+	case "scanned":
+		newStatus = StatusCompleted
+	case "failed":
+		newStatus = StatusVulnScanFailed
+	default:
+		// If called with pending, check if SBOM is ready
+		imgStatus, _ := db.GetImageStatus(digest)
+		if imgStatus.HasSBOM() {
+			newStatus = StatusScanningVulnerabilities
+		} else {
+			newStatus = StatusPending
+		}
 	}
 
-	_, err := db.conn.Exec(`
-		UPDATE container_images
-		SET vulnerability_status = ?,
-		    vulnerability_error = ?,
-		    vulnerabilities_scanned_at = ?,
-		    updated_at = CURRENT_TIMESTAMP
-		WHERE digest = ?
-	`, status, errorMsg, scannedAt, digest)
-
-	if err != nil {
-		return fmt.Errorf("failed to update vulnerability status: %w", err)
-	}
-
-	return nil
+	return db.UpdateStatus(digest, newStatus, errorMsg)
 }
 
 // StoreVulnerabilities stores the vulnerability scan JSON for an image and marks it as scanned
@@ -248,12 +337,12 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte) error {
 	_, err = db.conn.Exec(`
 		UPDATE container_images
 		SET vulnerabilities = ?,
-		    vulnerability_status = 'scanned',
-		    vulnerability_error = NULL,
-		    vulnerabilities_scanned_at = ?,
+		    status = ?,
+		    status_error = NULL,
+		    vulns_scanned_at = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
-	`, string(vulnJSON), time.Now().UTC().Format(time.RFC3339), digest)
+	`, string(vulnJSON), StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), digest)
 
 	if err != nil {
 		return fmt.Errorf("failed to store vulnerabilities: %w", err)
