@@ -51,11 +51,19 @@ func parseImageName(imageName string) (repository, tag string) {
 
 // extractDigestFromImageID extracts just the digest from a Kubernetes ImageID
 // Example: "docker.io/library/nginx@sha256:abc123..." -> "sha256:abc123..."
+// Example: "docker://sha256:abc123..." -> "sha256:abc123..."
+// Example: "containerd://sha256:abc123..." -> "sha256:abc123..."
 // Example: "sha256:abc123..." -> "sha256:abc123..."
 func extractDigestFromImageID(imageID string) string {
 	if imageID == "" {
 		return ""
 	}
+
+	// Strip runtime prefix (docker://, containerd://, etc.) if present
+	if idx := strings.Index(imageID, "://"); idx != -1 {
+		imageID = imageID[idx+3:]
+	}
+
 	// ImageID from Kubernetes can be in format:
 	// - "docker.io/library/nginx@sha256:abc123..."
 	// - "sha256:abc123..."

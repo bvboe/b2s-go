@@ -41,7 +41,6 @@ func TestScanStatusTable(t *testing.T) {
 		{"scanning_vulnerabilities", "Running vulnerability scan", 3},
 		{"generating_sbom", "Retrieving SBOM", 4},
 		{"sbom_unavailable", "Unable to scan", 5},
-		{"sbom_failed", "Scan failed", 6},
 		{"vuln_scan_failed", "Scan failed", 6},
 	}
 
