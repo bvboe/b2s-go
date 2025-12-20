@@ -271,7 +271,8 @@ create_and_push_tag() {
     # Create a temporary file for the tag message
     local tmpfile=$(mktemp)
     echo "$notes" > "$tmpfile"
-
+    echo Written notes to $tmpfile
+    exit 1
     if git tag -s "$tag" -F "$tmpfile"; then
         log_success "Tag $tag created"
         rm -f "$tmpfile"
