@@ -245,8 +245,8 @@ generate_release_notes() {
         return 0
     fi
 
-    # Call the generate script
-    local notes=$(scripts/generate-release-notes "$tag" 2>&1)
+    # Call the generate script (stderr goes to terminal for user feedback)
+    local notes=$(scripts/generate-release-notes "$tag")
 
     if [ $? -eq 0 ] && [ -n "$notes" ]; then
         log_success "Release notes generated successfully"

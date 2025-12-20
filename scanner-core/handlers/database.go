@@ -316,7 +316,7 @@ type HandlerOverrides struct {
 func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, overrides *HandlerOverrides) {
 	// Register legacy endpoints under /api/
 	mux.HandleFunc("/api/containers/instances", DatabaseInstancesHandler(provider))
-	mux.HandleFunc("/api/containers/images", DatabaseImagesHandler(provider))
+	mux.HandleFunc("/api/containers/images", ImageDetailsHandler(provider))
 
 	// Register download endpoints under /api/ with optional overrides
 	if overrides != nil && overrides.SBOMHandler != nil {

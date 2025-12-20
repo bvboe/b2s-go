@@ -657,7 +657,7 @@
             empty.style.display = 'none';
 
             try {
-                const response = await fetch('/api/images');
+                const response = await fetch('/api/containers/images');
                 const data = await response.json();
 
                 // Calculate totals
