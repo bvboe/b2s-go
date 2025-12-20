@@ -73,6 +73,15 @@ jobs:
       uses: actions/checkout@v6
       with:
         fetch-depth: 0
+        fetch-tags: true
+
+    - name: Fetch tag annotations
+      run: |
+        # Ensure we have the complete tag with its annotation
+        git fetch --tags --force
+        echo "Current tag: ${GITHUB_REF_NAME}"
+        echo "Tag annotation preview:"
+        git tag -l --format='%(contents:subject)' ${GITHUB_REF_NAME}
 
     - name: Set up Helm
       uses: azure/setup-helm@v4
@@ -151,10 +160,31 @@ jobs:
     - name: Extract tag message
       id: tag-message
       run: |
-        TAG_MESSAGE=$(git tag -l --format='%(contents)' ${GITHUB_REF_NAME})
-        echo "message<<EOF" >> $GITHUB_OUTPUT
-        echo "$TAG_MESSAGE" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        echo "Extracting annotation for tag: ${GITHUB_REF_NAME}"
+
+        # Extract the tag annotation (full contents)
+        TAG_MESSAGE=$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}")
+
+        # Debug: Show first 200 chars of tag message
+        echo "Tag message preview (first 200 chars):"
+        echo "$TAG_MESSAGE" | head -c 200
+        echo ""
+        echo "..."
+
+        # Verify we got content
+        if [ -z "$TAG_MESSAGE" ]; then
+          echo "ERROR: Failed to extract tag annotation!"
+          echo "Tag info:"
+          git show "${GITHUB_REF_NAME}" --no-patch
+          exit 1
+        fi
+
+        # Output to GitHub Actions
+        {
+          echo "message<<EOF"
+          echo "$TAG_MESSAGE"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
