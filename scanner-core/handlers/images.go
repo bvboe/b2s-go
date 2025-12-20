@@ -23,7 +23,7 @@ func FilterOptionsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		queries := map[string]string{
 			"namespaces": "SELECT DISTINCT namespace FROM container_instances WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace",
-			"osNames":    "SELECT DISTINCT os_name FROM image_summary WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
+			"osNames":    "SELECT DISTINCT os_name FROM container_images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
 			"vulnStatuses": "SELECT DISTINCT fix_status FROM vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status",
 			"packageTypes": "SELECT DISTINCT type FROM packages WHERE type IS NOT NULL AND type != '' ORDER BY type",
 		}
@@ -163,7 +163,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	baseQuery := `
   FROM container_instances instances
   JOIN container_images images ON instances.image_id = images.id
-  LEFT JOIN image_summary s ON images.id = s.image_id
+  JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
       SELECT image_id, COUNT(*) as package_count
       FROM packages
@@ -250,7 +250,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 		for i, os := range osNames {
 			escaped[i] = "'" + strings.ReplaceAll(os, "'", "''") + "'"
 		}
-		conditions = append(conditions, "s.os_name IN ("+strings.Join(escaped, ",")+")")
+		conditions = append(conditions, "images.os_name IN ("+strings.Join(escaped, ",")+")")
 	}
 
 	// Add conditions to base query
@@ -260,7 +260,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	}
 
 	// Group by
-	groupBy := " GROUP BY instances.repository || ':' || instances.tag, s.os_name"
+	groupBy := " GROUP BY instances.repository || ':' || instances.tag, images.os_name, status.status"
 
 	// Build count query
 	countQuery := "SELECT COUNT(*) FROM (" +
@@ -282,11 +282,13 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
       COALESCE(vuln_counts.total_risk, 0) as total_risk,
       COALESCE(vuln_counts.exploit_count, 0) as exploit_count,
       COALESCE(pkg_counts.package_count, 0) as package_count,
-      s.os_name`
+      status.description as status_description,
+      images.os_name`
 
 	mainQuery := selectClause + whereClause + groupBy
 
 	// Add sorting
+	// IMPORTANT: Always sort by status.sort_order first to ensure completed scans appear at top
 	validSortColumns := map[string]bool{
 		"image": true, "instance_count": true, "critical_count": true,
 		"high_count": true, "medium_count": true, "low_count": true,
@@ -295,9 +297,9 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	}
 
 	if sortBy != "" && validSortColumns[sortBy] {
-		mainQuery += fmt.Sprintf(" ORDER BY %s %s", sortBy, sortOrder)
+		mainQuery += fmt.Sprintf(" ORDER BY status.sort_order ASC, %s %s", sortBy, sortOrder)
 	} else {
-		mainQuery += " ORDER BY image ASC"
+		mainQuery += " ORDER BY status.sort_order ASC, image ASC"
 	}
 
 	// Add pagination

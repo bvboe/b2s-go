@@ -34,6 +34,7 @@ type Vulnerability struct {
 }
 
 // ImageSummary represents the summary information for an image
+// Deprecated: This struct is kept for backward compatibility but image_summary table no longer exists
 type ImageSummary struct {
 	ImageID      int64  `json:"image_id"`
 	PackageCount int    `json:"package_count"`
@@ -142,18 +143,23 @@ func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
 }
 
 // GetImageSummary returns summary information for a specific image
+// Package count is calculated dynamically from the packages table
 func (db *DB) GetImageSummary(digest string) (interface{}, error) {
 	var summary ImageSummary
 	err := db.conn.QueryRow(`
-		SELECT s.image_id, s.package_count, s.os_name, s.os_version, s.updated_at
-		FROM image_summary s
-		JOIN container_images img ON s.image_id = img.id
+		SELECT
+			img.id,
+			(SELECT COUNT(*) FROM packages WHERE image_id = img.id) as package_count,
+			img.os_name,
+			img.os_version,
+			img.updated_at
+		FROM container_images img
 		WHERE img.digest = ?
 	`, digest).Scan(&summary.ImageID, &summary.PackageCount, &summary.OSName,
 		&summary.OSVersion, &summary.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, nil // No summary yet
+		return nil, nil // No image found
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image summary: %w", err)
@@ -169,16 +175,15 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 	var scannedAt sql.NullString
 	var osName, osVersion sql.NullString
 
-	// Get basic image info and summary
+	// Get basic image info and calculate package count dynamically
 	err := db.conn.QueryRow(`
 		SELECT
 			img.id, img.digest, img.status,
 			img.created_at, img.updated_at, img.sbom_scanned_at,
-			COALESCE(s.package_count, 0),
-			COALESCE(s.os_name, ''),
-			COALESCE(s.os_version, '')
+			(SELECT COUNT(*) FROM packages WHERE image_id = img.id),
+			COALESCE(img.os_name, ''),
+			COALESCE(img.os_version, '')
 		FROM container_images img
-		LEFT JOIN image_summary s ON img.id = s.image_id
 		WHERE img.digest = ?
 	`, digest).Scan(&details.ID, &details.Digest, &details.Status,
 		&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
@@ -251,11 +256,10 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 		SELECT
 			img.id, img.digest, img.status,
 			img.created_at, img.updated_at, img.sbom_scanned_at,
-			COALESCE(s.package_count, 0),
-			COALESCE(s.os_name, ''),
-			COALESCE(s.os_version, '')
+			(SELECT COUNT(*) FROM packages WHERE image_id = img.id),
+			COALESCE(img.os_name, ''),
+			COALESCE(img.os_version, '')
 		FROM container_images img
-		LEFT JOIN image_summary s ON img.id = s.image_id
 		ORDER BY img.created_at DESC
 	`)
 	if err != nil {

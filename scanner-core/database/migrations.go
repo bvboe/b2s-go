@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 8
+const currentSchemaVersion = 11
 
 type migration struct {
 	version int
@@ -54,6 +54,21 @@ var migrations = []migration{
 		version: 8,
 		name:    "unified_status_field",
 		up:      migrateToV8,
+	},
+	{
+		version: 9,
+		name:    "move_os_name_to_images",
+		up:      migrateToV9,
+	},
+	{
+		version: 10,
+		name:    "drop_image_summary",
+		up:      migrateToV10,
+	},
+	{
+		version: 11,
+		name:    "add_scan_status_table",
+		up:      migrateToV11,
 	},
 }
 
@@ -151,6 +166,23 @@ func migrateToV1(conn *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_instances_namespace ON container_instances(namespace);
 		CREATE INDEX IF NOT EXISTS idx_instances_image ON container_instances(image_id);
+
+		-- Scan status lookup table
+		CREATE TABLE IF NOT EXISTS scan_status (
+			status TEXT PRIMARY KEY,
+			description TEXT NOT NULL,
+			sort_order INTEGER NOT NULL
+		);
+
+		-- Populate scan status lookup table
+		INSERT INTO scan_status (status, description, sort_order) VALUES
+			('completed', 'Scan complete', 1),
+			('pending', 'Pending scan', 2),
+			('scanning_vulnerabilities', 'Running vulnerability scan', 3),
+			('generating_sbom', 'Retrieving SBOM', 4),
+			('sbom_unavailable', 'Unable to scan', 5),
+			('vuln_scan_failed', 'Scan failed', 6),
+			('sbom_failed', 'Scan failed', 6);
 	`)
 	return err
 }
@@ -695,13 +727,167 @@ func migrateToV8(conn *sql.DB) error {
 		return fmt.Errorf("failed to create status index: %w", err)
 	}
 
-	// Note: We keep the old columns (scan_status, vulnerability_status) for now
-	// They can be dropped in a future migration after confirming everything works
+	// Drop old status columns by recreating the table without them
+	log.Println("Migration v8: Removing old status columns...")
+	_, err = tx.Exec(`
+		-- Create new table without old status columns
+		CREATE TABLE container_images_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			digest TEXT UNIQUE NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			status_error TEXT,
+			sbom TEXT,
+			vulnerabilities TEXT,
+			sbom_scanned_at DATETIME,
+			vulns_scanned_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		-- Copy data from old table to new table
+		INSERT INTO container_images_new (
+			id, digest, status, status_error, sbom, vulnerabilities,
+			sbom_scanned_at, vulns_scanned_at, created_at, updated_at
+		)
+		SELECT
+			id, digest, status, status_error, sbom, vulnerabilities,
+			sbom_scanned_at, vulns_scanned_at, created_at, updated_at
+		FROM container_images;
+
+		-- Drop old table
+		DROP TABLE container_images;
+
+		-- Rename new table
+		ALTER TABLE container_images_new RENAME TO container_images;
+
+		-- Recreate indexes
+		CREATE INDEX idx_images_digest ON container_images(digest);
+		CREATE INDEX idx_images_status ON container_images(status);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old status columns: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	log.Println("Migration v8: Successfully migrated to unified status field")
+	return nil
+}
+
+// migrateToV9 moves os_name and os_version from image_summary to container_images
+func migrateToV9(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v9: Moving os_name and os_version to container_images...")
+
+	// Add os_name and os_version columns to container_images
+	_, err = tx.Exec(`
+		ALTER TABLE container_images ADD COLUMN os_name TEXT;
+		ALTER TABLE container_images ADD COLUMN os_version TEXT;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add OS columns: %w", err)
+	}
+
+	// Migrate data from image_summary to container_images
+	_, err = tx.Exec(`
+		UPDATE container_images
+		SET os_name = (
+			SELECT os_name
+			FROM image_summary
+			WHERE image_summary.image_id = container_images.id
+		),
+		os_version = (
+			SELECT os_version
+			FROM image_summary
+			WHERE image_summary.image_id = container_images.id
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate OS data: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v9: Successfully moved os_name and os_version to container_images")
+	log.Println("Note: image_summary table is deprecated and will be removed in a future migration")
+	return nil
+}
+
+// migrateToV10 drops the image_summary table (package_count is now calculated dynamically)
+func migrateToV10(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v10: Dropping image_summary table...")
+
+	// Drop the image_summary table
+	_, err = tx.Exec(`DROP TABLE IF EXISTS image_summary`)
+	if err != nil {
+		return fmt.Errorf("failed to drop image_summary table: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v10: Successfully dropped image_summary table")
+	log.Println("Note: package_count is now calculated dynamically from packages table")
+	return nil
+}
+
+// migrateToV11 adds the scan_status lookup table for existing databases
+func migrateToV11(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v11: Creating scan_status lookup table...")
+
+	// Create scan_status table
+	_, err = tx.Exec(`
+		CREATE TABLE IF NOT EXISTS scan_status (
+			status TEXT PRIMARY KEY,
+			description TEXT NOT NULL,
+			sort_order INTEGER NOT NULL
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create scan_status table: %w", err)
+	}
+
+	// Populate scan status lookup table (INSERT OR IGNORE in case rows already exist)
+	_, err = tx.Exec(`
+		INSERT OR IGNORE INTO scan_status (status, description, sort_order) VALUES
+			('completed', 'Scan complete', 1),
+			('pending', 'Pending scan', 2),
+			('scanning_vulnerabilities', 'Running vulnerability scan', 3),
+			('generating_sbom', 'Retrieving SBOM', 4),
+			('sbom_unavailable', 'Unable to scan', 5),
+			('sbom_failed', 'Scan failed', 6),
+			('vuln_scan_failed', 'Scan failed', 6);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to populate scan_status table: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v11: Successfully created scan_status table")
 	return nil
 }

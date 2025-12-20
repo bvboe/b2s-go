@@ -319,11 +319,8 @@ func (q *JobQueue) processJob(job ScanJob) {
 
 		// Determine if this is a failure or unavailability
 		// If no node scanner is available, mark as unavailable; otherwise failed
+		// For now, assume all errors are failures
 		errorStatus := database.StatusSBOMFailed
-		if job.NodeName == "" {
-			// Could check error message for specific unavailability indicators
-			// For now, assume all errors are failures
-		}
 
 		if updateErr := q.db.UpdateStatus(job.Image.Digest, errorStatus, err.Error()); updateErr != nil {
 			log.Printf("Error updating status to %s: %v", errorStatus, updateErr)

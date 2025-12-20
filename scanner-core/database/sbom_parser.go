@@ -112,7 +112,7 @@ type GrypeDocument struct {
 	Distro  *GrypeDistro `json:"distro"`
 }
 
-// parseSBOMData parses SBOM JSON and populates packages and image_summary tables
+// parseSBOMData parses SBOM JSON and populates packages table
 func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	var sbom SyftSBOM
 	if err := json.Unmarshal(sbomJSON, &sbom); err != nil {
@@ -159,15 +159,6 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 			continue
 		}
 		totalPackages++
-	}
-
-	// Update image_summary (OS info can be extracted from distro field in vulnerability scan or left empty)
-	_, err = tx.Exec(`
-		INSERT OR REPLACE INTO image_summary (image_id, package_count, os_name, os_version, updated_at)
-		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-	`, imageID, totalPackages, "", "")
-	if err != nil {
-		return fmt.Errorf("failed to update image_summary: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -294,28 +285,20 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		totalVulns++
 	}
 
-	// Update image_summary with distro information if available
-	osName := ""
-	osVersion := ""
+	// Update container_images with distro information if available
 	if doc.Distro != nil {
-		osName = doc.Distro.Name
-		osVersion = doc.Distro.Version
+		osName := doc.Distro.Name
+		osVersion := doc.Distro.Version
 		log.Printf("Extracted distro info for image_id=%d: %s %s", imageID, osName, osVersion)
-	}
 
-	// Use INSERT OR REPLACE to handle case where image_summary doesn't exist yet
-	_, err = tx.Exec(`
-		INSERT OR REPLACE INTO image_summary (image_id, package_count, os_name, os_version, updated_at)
-		VALUES (
-			?,
-			COALESCE((SELECT package_count FROM image_summary WHERE image_id = ?), 0),
-			?,
-			?,
-			CURRENT_TIMESTAMP
-		)
-	`, imageID, imageID, osName, osVersion)
-	if err != nil {
-		log.Printf("Warning: Failed to update image_summary with distro info: %v", err)
+		_, err = tx.Exec(`
+			UPDATE container_images
+			SET os_name = ?, os_version = ?
+			WHERE id = ?
+		`, osName, osVersion, imageID)
+		if err != nil {
+			log.Printf("Warning: Failed to update container_images with distro info: %v", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -332,6 +332,7 @@
             <table id="images-table">
                 <thead>
                     <tr>
+                        <th>Status</th>
                         <th class="sortable" data-column="image">Image</th>
                         <th class="sortable" data-column="instance_count">Instances</th>
                         <th class="sortable" data-column="critical_count">Critical</th>
@@ -347,7 +348,7 @@
                 </thead>
                 <tbody id="images-tbody">
                     <tr>
-                        <td colspan="11" class="loading">Loading...</td>
+                        <td colspan="12" class="loading">Loading...</td>
                     </tr>
                 </tbody>
             </table>
@@ -469,7 +470,7 @@
 
         async function loadImages() {
             const tbody = document.getElementById('images-tbody');
-            tbody.innerHTML = '<tr><td colspan="11" class="loading">Loading...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12" class="loading">Loading...</td></tr>';
             hideError();
 
             try {
@@ -485,7 +486,7 @@
                 updatePagination(data);
             } catch (error) {
                 showError('Failed to load images: ' + error.message);
-                tbody.innerHTML = '<tr><td colspan="11" class="loading">Failed to load data</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12" class="loading">Failed to load data</td></tr>';
             }
         }
 
@@ -493,12 +494,13 @@
             const tbody = document.getElementById('images-tbody');
 
             if (!images || images.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="11" class="loading">No images found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12" class="loading">No images found</td></tr>';
                 return;
             }
 
             tbody.innerHTML = images.map(img => `
                 <tr>
+                    <td>${escapeHtml(img.status_description || 'Unknown')}</td>
                     <td><strong>${escapeHtml(img.image || '')}</strong></td>
                     <td>${img.instance_count || 0}</td>
                     <td>${img.critical_count ? `<span class="severity severity-critical">${img.critical_count}</span>` : '0'}</td>

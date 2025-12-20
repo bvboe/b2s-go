@@ -149,7 +149,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 		return fmt.Errorf("failed to store SBOM: %w", err)
 	}
 
-	// Parse and store SBOM data in packages and image_summary tables
+	// Parse and store SBOM data in packages table
 	if err := parseSBOMData(db.conn, imageID, sbomJSON); err != nil {
 		log.Printf("Warning: Failed to parse SBOM data for digest %s: %v", digest, err)
 		// Don't fail the whole operation if parsing fails

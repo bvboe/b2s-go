@@ -191,8 +191,8 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	var osName, osVersion string
 	err = db.conn.QueryRow(`
 		SELECT os_name, os_version
-		FROM image_summary
-		WHERE image_id = ?
+		FROM container_images
+		WHERE id = ?
 	`, imageID).Scan(&osName, &osVersion)
 
 	if err == nil {
