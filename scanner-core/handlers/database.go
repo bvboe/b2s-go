@@ -336,6 +336,7 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 	// It requires the provider to implement ImageQueryProvider interface
 	if queryProvider, ok := provider.(ImageQueryProvider); ok {
 		mux.HandleFunc("/api/images", ImagesHandler(queryProvider))
+		mux.HandleFunc("/api/pods", PodsHandler(queryProvider))
 		mux.HandleFunc("/api/filter-options", FilterOptionsHandler(queryProvider))
 	} else {
 		// Fallback to basic handler if provider doesn't support ExecuteReadOnlyQuery
