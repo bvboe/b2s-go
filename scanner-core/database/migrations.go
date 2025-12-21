@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 11
+const currentSchemaVersion = 12
 
 type migration struct {
 	version int
@@ -69,6 +69,11 @@ var migrations = []migration{
 		version: 11,
 		name:    "add_scan_status_table",
 		up:      migrateToV11,
+	},
+	{
+		version: 12,
+		name:    "add_unique_constraints_to_packages",
+		up:      migrateToV12,
 	},
 }
 
@@ -887,5 +892,82 @@ func migrateToV11(conn *sql.DB) error {
 	}
 
 	log.Println("Migration v11: Successfully created scan_status table")
+	return nil
+}
+
+// migrateToV12 adds UNIQUE constraint to packages table on (image_id, name, version, type)
+// and consolidates duplicate entries by summing number_of_instances
+func migrateToV12(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v12: Adding UNIQUE constraint to packages table...")
+
+	// Create new packages table with UNIQUE constraint
+	_, err = tx.Exec(`
+		CREATE TABLE packages_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			image_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			version TEXT,
+			type TEXT,
+			number_of_instances INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (image_id) REFERENCES container_images(id),
+			UNIQUE(image_id, name, version, type)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new packages table: %w", err)
+	}
+
+	// Copy data from old table, aggregating duplicates
+	log.Println("Migration v12: Consolidating duplicate packages...")
+	_, err = tx.Exec(`
+		INSERT INTO packages_new (image_id, name, version, type, number_of_instances, created_at)
+		SELECT
+			image_id,
+			name,
+			version,
+			type,
+			SUM(number_of_instances) as number_of_instances,
+			MIN(created_at) as created_at
+		FROM packages
+		GROUP BY image_id, name, version, type
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy packages data: %w", err)
+	}
+
+	// Drop old table
+	_, err = tx.Exec(`DROP TABLE packages`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old packages table: %w", err)
+	}
+
+	// Rename new table
+	_, err = tx.Exec(`ALTER TABLE packages_new RENAME TO packages`)
+	if err != nil {
+		return fmt.Errorf("failed to rename packages table: %w", err)
+	}
+
+	// Recreate indexes
+	_, err = tx.Exec(`
+		CREATE INDEX idx_packages_image ON packages(image_id);
+		CREATE INDEX idx_packages_type ON packages(type);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create packages indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v12: Successfully added UNIQUE constraint to packages table")
+	log.Println("Note: Duplicate packages have been consolidated by summing number_of_instances")
 	return nil
 }

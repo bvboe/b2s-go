@@ -205,6 +205,9 @@ async function loadVulnerabilitiesTable(imageid) {
             // Known exploits
             addCellToRow(row, 'right', formatNumber(vuln.vulnerability_known_exploits));
 
+            // Count
+            addCellToRow(row, 'right', formatNumber(vuln.vulnerability_count));
+
             tableBody.appendChild(row);
         });
 
@@ -215,7 +218,7 @@ async function loadVulnerabilitiesTable(imageid) {
         tableBody.innerHTML = '';
         const row = document.createElement('tr');
         const cell = addCellToRow(row, 'left', '⚠️ Error loading vulnerabilities: ' + error.message);
-        cell.colSpan = 9;
+        cell.colSpan = 10;
         cell.style.color = 'red';
         tableBody.appendChild(row);
     }

@@ -758,6 +758,12 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 		// Export format
 		format := params.Get("format")
 
+		// Handle raw JSON export from Grype
+		if format == "json" {
+			exportRawVulnerabilitiesJSON(w, provider, digest)
+			return
+		}
+
 		// Build query
 		query, countQuery := buildImageVulnerabilitiesQuery(digest, severities, fixStatuses, packageTypes, sortBy, sortOrder, pageSize, offset)
 
@@ -865,7 +871,8 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
     v.package_type as artifact_type,
     v.severity as vulnerability_severity,
     v.risk as vulnerability_risk,
-    v.known_exploited as vulnerability_known_exploits`
+    v.known_exploited as vulnerability_known_exploits,
+    v.count as vulnerability_count`
 
 	mainQuery := selectClause + baseQuery
 
@@ -874,6 +881,7 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 		"vulnerability_severity": true, "vulnerability_id": true, "artifact_name": true,
 		"artifact_version": true, "vulnerability_fix_versions": true, "vulnerability_fix_state": true,
 		"artifact_type": true, "vulnerability_risk": true, "vulnerability_known_exploits": true,
+		"vulnerability_count": true,
 	}
 
 	// Always sort by severity order first
@@ -911,6 +919,8 @@ ORDER BY
 			dbColumn = "v.risk"
 		case "vulnerability_known_exploits":
 			dbColumn = "v.known_exploited"
+		case "vulnerability_count":
+			dbColumn = "v.count"
 		}
 		if dbColumn != "vulnerability_severity" {
 			mainQuery += fmt.Sprintf(", %s %s", dbColumn, sortOrder)
@@ -947,6 +957,31 @@ func exportVulnerabilitiesCSV(w http.ResponseWriter, result *database.QueryResul
 			log.Printf("Error writing CSV row: %v", err)
 			return
 		}
+	}
+}
+
+// exportRawVulnerabilitiesJSON exports the raw Grype vulnerability JSON for an image
+func exportRawVulnerabilitiesJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
+	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+	query := `SELECT vulnerabilities FROM container_images WHERE digest = '` + escapedDigest + `'`
+
+	result, err := provider.ExecuteReadOnlyQuery(query)
+	if err != nil || len(result.Rows) == 0 {
+		log.Printf("Error fetching raw vulnerabilities JSON: %v", err)
+		http.Error(w, "Vulnerabilities JSON not found", http.StatusNotFound)
+		return
+	}
+
+	vulnJSON, ok := result.Rows[0]["vulnerabilities"].(string)
+	if !ok || vulnJSON == "" {
+		http.Error(w, "No vulnerabilities data available", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=grype-vulnerabilities.json")
+	if _, err := w.Write([]byte(vulnJSON)); err != nil {
+		log.Printf("Error writing vulnerabilities JSON: %v", err)
 	}
 }
 
@@ -993,6 +1028,12 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		// Export format
 		format := params.Get("format")
+
+		// Handle raw JSON export from Syft
+		if format == "json" {
+			exportRawSBOMJSON(w, provider, digest)
+			return
+		}
 
 		// Build query
 		query, countQuery := buildImagePackagesQuery(digest, packageTypes, sortBy, sortOrder, pageSize, offset)
@@ -1126,5 +1167,30 @@ func exportPackagesCSV(w http.ResponseWriter, result *database.QueryResult) {
 			log.Printf("Error writing CSV row: %v", err)
 			return
 		}
+	}
+}
+
+// exportRawSBOMJSON exports the raw Syft SBOM JSON for an image
+func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
+	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+	query := `SELECT sbom FROM container_images WHERE digest = '` + escapedDigest + `'`
+
+	result, err := provider.ExecuteReadOnlyQuery(query)
+	if err != nil || len(result.Rows) == 0 {
+		log.Printf("Error fetching raw SBOM JSON: %v", err)
+		http.Error(w, "SBOM JSON not found", http.StatusNotFound)
+		return
+	}
+
+	sbomJSON, ok := result.Rows[0]["sbom"].(string)
+	if !ok || sbomJSON == "" {
+		http.Error(w, "No SBOM data available", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=syft-sbom.json")
+	if _, err := w.Write([]byte(sbomJSON)); err != nil {
+		log.Printf("Error writing SBOM JSON: %v", err)
 	}
 }
