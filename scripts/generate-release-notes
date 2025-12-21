@@ -82,23 +82,24 @@ ${FILES_CHANGED}
 
 **Instructions:**
 1. Group changes into categories (Features, Bug Fixes, Performance, Tests, Documentation, etc.)
-2. Highlight the most significant changes first
+2. Highlight the most important changes first
 3. Be technical but concise - this is for developers/operators
 4. Mention breaking changes if any (look for keywords like "breaking", "remove", "deprecate")
-5. Keep the summary under 500 words
+5. Keep the summary under 400 words
 6. Use bullet points for clarity
-7. Format output in Markdown
+
+**CRITICAL:** Output ONLY the markdown content below. Do NOT include any conversational text, preambles, or explanations. Start directly with the ## emoji and title.
 
 **Output Format:**
 \`\`\`markdown
 ## 🎯 Highlights
 
-[2-3 most important changes in this release]
+[2-3 sentence summary of the most important changes]
 
-## 📋 Changes by Category
+## What's Changed
 
 ### ✨ Features
-- [Feature descriptions]
+- [New feature descriptions]
 
 ### 🐛 Bug Fixes
 - [Bug fix descriptions]
@@ -112,18 +113,18 @@ ${FILES_CHANGED}
 ### 📚 Documentation
 - [Documentation updates]
 
-### 🔧 Internal Changes
-- [Refactoring, CI/CD, etc.]
+### 🔧 Internal
+- [Refactoring, CI/CD, tooling, etc.]
 
 ## ⚠️ Breaking Changes
-[If any, otherwise omit this section]
+[Only include if there are breaking changes, otherwise omit this entire section]
 
 ## 📊 Statistics
 - X commits from Y contributors
 - Z files changed
 \`\`\`
 
-Generate the release summary now:
+Output the markdown now (NO preamble, start with ##):
 EOM
 
 log_info "Calling Claude CLI to analyze commits..."
