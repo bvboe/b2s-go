@@ -235,58 +235,29 @@ generate_release_notes() {
     local version=$1
     local tag="v$version"
 
-    log_warning "TESTING MODE: Using canned release notes"
+    log_info "Generating intelligent release notes using Claude..."
 
-    # TEMPORARY: Return test message with headers
-    cat << 'EOF'
-## 🎯 Highlights
+    # Check if generate script exists
+    if [ ! -f "scripts/generate-release-notes" ]; then
+        log_warning "Release notes generator not found"
+        log_info "Skipping AI-generated release notes"
+        echo "Release $tag"
+        return 0
+    fi
 
-This is a test release to verify markdown header formatting in release notes.
+    # Call the generate script (stderr goes to terminal for user feedback)
+    local notes=$(scripts/generate-release-notes "$tag")
 
-## What's Changed
-
-### ✨ Features
-- Test feature 1
-- Test feature 2
-
-### 🐛 Bug Fixes
-- Test bugfix 1
-- Test bugfix 2
-
-### 🔧 Internal
-- Test internal change 1
-- Test internal change 2
-
-## 📊 Statistics
-- 5 commits from 1 contributor
-- 10 files changed
-EOF
-    return 0
-
-    # ORIGINAL CODE (commented out for testing):
-    # log_info "Generating intelligent release notes using Claude..."
-    #
-    # # Check if generate script exists
-    # if [ ! -f "scripts/generate-release-notes" ]; then
-    #     log_warning "Release notes generator not found"
-    #     log_info "Skipping AI-generated release notes"
-    #     echo "Release $tag"
-    #     return 0
-    # fi
-    #
-    # # Call the generate script (stderr goes to terminal for user feedback)
-    # local notes=$(scripts/generate-release-notes "$tag")
-    #
-    # if [ $? -eq 0 ] && [ -n "$notes" ]; then
-    #     log_success "Release notes generated successfully"
-    #     echo "$notes"
-    #     return 0
-    # else
-    #     log_warning "Failed to generate AI release notes: $notes"
-    #     log_info "Falling back to simple release message"
-    #     echo "Release $tag"
-    #     return 1
-    # fi
+    if [ $? -eq 0 ] && [ -n "$notes" ]; then
+        log_success "Release notes generated successfully"
+        echo "$notes"
+        return 0
+    else
+        log_warning "Failed to generate AI release notes: $notes"
+        log_info "Falling back to simple release message"
+        echo "Release $tag"
+        return 1
+    fi
 }
 
 # Create and push tag
@@ -301,7 +272,9 @@ create_and_push_tag() {
     local tmpfile=$(mktemp)
     echo "$notes" > "$tmpfile"
 
-    if git tag -s "$tag" -F "$tmpfile"; then
+    # Use --cleanup=verbatim to prevent git from treating # as comments
+    # This is critical for markdown headers in release notes
+    if git tag -s "$tag" -F "$tmpfile" --cleanup=verbatim; then
         log_success "Tag $tag created"
         rm -f "$tmpfile"
     else
