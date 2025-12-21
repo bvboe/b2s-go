@@ -191,6 +191,22 @@ else
     ((TESTS_FAILED++))
 fi
 
+print_header "2. Code Quality - Web (HTML/CSS/JS)"
+cd "$SCRIPT_DIR/scanner-core/web"
+if command -v npm &> /dev/null; then
+    # Install dependencies if node_modules doesn't exist
+    if [ ! -d "node_modules" ]; then
+        print_info "Installing npm dependencies..."
+        npm install --silent
+    fi
+    run_test "Web: HTML lint" npm run lint:html --silent
+    run_test "Web: CSS lint" npm run lint:css --silent
+    run_test "Web: JavaScript lint" npm run lint:js --silent
+else
+    print_error "npm not installed, skipping web linting"
+    ((TESTS_FAILED++))
+fi
+
 # 3. Build
 print_header "3. Build Tests - k8s-scan-server"
 cd "$SCRIPT_DIR/k8s-scan-server"

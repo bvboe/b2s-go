@@ -30,9 +30,9 @@ echo ""
 echo -e "${BLUE}Press Ctrl+C to stop${NC}"
 echo ""
 
-# Run nginx with mounted web directory and config
+# Run nginx with mounted static directory and config
 docker run --rm \
-    -v "$REPO_ROOT/scanner-core/web:/usr/share/nginx/html:ro" \
+    -v "$REPO_ROOT/scanner-core/static:/usr/share/nginx/html:ro" \
     -v "$REPO_ROOT/scanner-core/web/dev-nginx.conf:/etc/nginx/nginx.conf:ro" \
     -p 9000:8080 \
     --name bjorn2scan-frontend-dev \

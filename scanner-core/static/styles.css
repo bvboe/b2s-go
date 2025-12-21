@@ -28,8 +28,10 @@ a {
 .summaryTable {
     border-collapse: collapse;
 }
+
 .summaryTable td {
     padding: 8px 10px 8px 20px;    
+
     /* border: 1px solid; */
 }
 
@@ -74,7 +76,7 @@ a {
     pointer-events: none;
     border-left: 0.35em solid transparent;
     border-right: 0.35em solid transparent;
-    border-top: 0.35em solid currentColor;
+    border-top: 0.35em solid currentcolor;
     transform: translateY(-50%);
   }
 
@@ -82,19 +84,19 @@ td.filterSelected {
     border-top: 1px solid black;
     border-left: 1px solid black;
     border-right: 1px solid black;
-    padding: 8px 20px 8px 20px;    
+    padding: 8px 20px;    
 }
 
 td.filterUnSelected {
     border: 1px solid black;
-    padding: 8px 20px 8px 20px;    
+    padding: 8px 20px;    
 }
 
 td.filterBody {
     border-bottom: 1px solid black;
     border-left: 1px solid black;
     border-right: 1px solid black;
-    padding: 8px 20px 8px 20px;    
+    padding: 8px 20px;    
 }
 
 .filterContainerSelected {

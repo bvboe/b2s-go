@@ -1,6 +1,6 @@
 # Web Frontend Development
 
-This directory contains the static web frontend for bjorn2scan.
+This directory contains the development tooling for bjorn2scan's web UI. The actual static files (HTML/CSS) are in `../static/`.
 
 ## Quick Start for Local Development
 
@@ -31,7 +31,7 @@ Open your browser to: **http://localhost:9000**
 
 The `run-local-frontend` script:
 - Runs nginx in a Docker container
-- Mounts the `scanner-core/web/` directory for live HTML editing
+- Mounts the `scanner-core/static/` directory for live HTML editing
 - Proxies API calls (`/api/*`, `/health`, `/info`) to `localhost:8080` (your port-forwarded backend)
 - Serves the frontend on `http://localhost:9000`
 
@@ -39,16 +39,21 @@ The `run-local-frontend` script:
 
 1. Start port-forward to your backend (once)
 2. Run `./scripts/run-local-frontend` (once)
-3. Edit HTML/CSS/JS files in `scanner-core/web/`
+3. Edit HTML/CSS files in `scanner-core/static/`
 4. Refresh browser to see changes (no rebuild needed!)
 5. Press Ctrl+C to stop the frontend server
 
-## Files
+## Directory Structure
 
-- **index.html** - Main dashboard
-- **images.html** - Images page with filtering/pagination
-- **sql.html** - SQL debug console
-- **dev-nginx.conf** - Nginx configuration for local development
+- **../static/** - Production HTML/CSS files (embedded into Go binary)
+  - `index.html` - Main dashboard
+  - `images.html` - Images page with filtering/pagination
+  - `sql.html` - SQL debug console
+  - `*.css` - Stylesheets
+- **This directory (web/)** - Development tooling only
+  - `dev-nginx.conf` - Nginx configuration for local development
+  - `package.json` - npm dependencies for linting
+  - Linter configurations (.eslintrc.json, .stylelintrc.json, .htmlhintrc)
 
 ## Production
 
@@ -69,3 +74,48 @@ In production, these HTML files are:
 **Changes not appearing:**
 - Hard refresh browser (Cmd+Shift+R on Mac, Ctrl+Shift+R on Windows/Linux)
 - Files are mounted read-only, so changes should be instant
+
+## Code Linting
+
+### Prerequisites
+
+- Node.js 18+ and npm
+
+### Setup
+
+Install linting dependencies:
+
+```bash
+npm install
+```
+
+### Running Linters
+
+Lint all files (HTML, CSS, JavaScript):
+```bash
+npm run lint
+```
+
+Lint specific file types:
+```bash
+npm run lint:html    # Lint HTML files
+npm run lint:css     # Lint CSS files
+npm run lint:js      # Lint JavaScript in HTML files
+```
+
+Auto-fix CSS issues:
+```bash
+npm run lint:fix
+```
+
+### Configuration Files
+
+- `.eslintrc.json` - JavaScript/ESLint configuration
+- `.stylelintrc.json` - CSS/stylelint configuration
+- `.htmlhintrc` - HTML/HTMLHint configuration
+
+### Integration
+
+Web linting is integrated into:
+- Local testing: `scripts/test_local`
+- CI/CD: `.github/workflows/ci.yaml` (web-lint job)

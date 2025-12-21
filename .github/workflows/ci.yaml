@@ -71,6 +71,37 @@ jobs:
       platforms: linux/amd64,linux/arm64
       attach-to-release: false
 
+  web-lint:
+    name: Web Linting (HTML/CSS/JS)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: scanner-core/web/package.json
+
+    - name: Install dependencies
+      working-directory: scanner-core/web
+      run: npm ci
+
+    - name: Lint HTML
+      working-directory: scanner-core/web
+      run: npm run lint:html
+
+    - name: Lint CSS
+      working-directory: scanner-core/web
+      run: npm run lint:css
+
+    - name: Lint JavaScript
+      working-directory: scanner-core/web
+      run: npm run lint:js
+
   helm-lint:
     runs-on: ubuntu-latest
 
