@@ -44,6 +44,45 @@ func (k *K8sScanServerInfo) GetInfo() interface{} {
 	}
 }
 
+func (k *K8sScanServerInfo) GetClusterName() string {
+	// Try to get cluster name from environment variable first
+	clusterName := os.Getenv("CLUSTER_NAME")
+	if clusterName != "" {
+		return clusterName
+	}
+
+	// Fall back to namespace if available
+	namespace := os.Getenv("NAMESPACE")
+	if namespace != "" {
+		return namespace
+	}
+
+	// Final fallback
+	return "kubernetes"
+}
+
+func (k *K8sScanServerInfo) GetVersion() string {
+	return version
+}
+
+func (k *K8sScanServerInfo) GetScanContainers() bool {
+	// Default to true, can be disabled via env var
+	scanContainers := os.Getenv("SCAN_CONTAINERS")
+	if scanContainers == "false" || scanContainers == "0" {
+		return false
+	}
+	return true
+}
+
+func (k *K8sScanServerInfo) GetScanNodes() bool {
+	// Default to false, can be enabled via env var
+	scanNodes := os.Getenv("SCAN_NODES")
+	if scanNodes == "true" || scanNodes == "1" {
+		return true
+	}
+	return false
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {

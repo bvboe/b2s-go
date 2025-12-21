@@ -19,6 +19,22 @@ func (t *testInfoProvider) GetInfo() interface{} {
 	}
 }
 
+func (t *testInfoProvider) GetClusterName() string {
+	return "test-cluster"
+}
+
+func (t *testInfoProvider) GetVersion() string {
+	return t.Version
+}
+
+func (t *testInfoProvider) GetScanContainers() bool {
+	return true
+}
+
+func (t *testInfoProvider) GetScanNodes() bool {
+	return false
+}
+
 func TestHealthHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()

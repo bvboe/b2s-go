@@ -12,6 +12,13 @@ type InfoProvider interface {
 	GetInfo() interface{}
 }
 
+// AppInfoProvider is a combined interface that provides both info and config data
+// This simplifies the API by requiring only one provider instance
+type AppInfoProvider interface {
+	InfoProvider
+	ConfigProvider
+}
+
 // HealthHandler returns a simple OK response for health checks
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -34,10 +41,11 @@ func InfoHandler(provider InfoProvider) http.HandlerFunc {
 	}
 }
 
-// RegisterHandlers registers the standard scanner endpoints (/health and /info) on the provided mux
-func RegisterHandlers(mux *http.ServeMux, provider InfoProvider) {
+// RegisterHandlers registers the standard scanner endpoints (/health, /info, and /api/config) on the provided mux
+func RegisterHandlers(mux *http.ServeMux, provider AppInfoProvider) {
 	mux.HandleFunc("/health", HealthHandler)
 	mux.HandleFunc("/info", InfoHandler(provider))
+	mux.HandleFunc("/api/config", ConfigHandler(provider))
 }
 
 // RegisterDefaultHandlers registers the standard scanner endpoints (/health and /info) on the default mux

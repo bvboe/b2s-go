@@ -48,6 +48,29 @@ func (a *AgentInfo) GetInfo() interface{} {
 	}
 }
 
+func (a *AgentInfo) GetClusterName() string {
+	// For agent, use hostname as cluster name
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		return "localhost"
+	}
+	return hostname
+}
+
+func (a *AgentInfo) GetVersion() string {
+	return version
+}
+
+func (a *AgentInfo) GetScanContainers() bool {
+	// Agent scans containers via Docker
+	return true
+}
+
+func (a *AgentInfo) GetScanNodes() bool {
+	// Agent does not scan nodes
+	return false
+}
+
 // setupLogging configures logging to write to both stdout and a log file
 func setupLogging() (*os.File, error) {
 	logDir := "/var/log/bjorn2scan"

@@ -5,6 +5,9 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Cluster name displayed in the UI
+clusterName: "kubernetes"
+
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
