@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 12
+const currentSchemaVersion = 13
 
 type migration struct {
 	version int
@@ -74,6 +74,11 @@ var migrations = []migration{
 		version: 12,
 		name:    "add_unique_constraints_to_packages",
 		up:      migrateToV12,
+	},
+	{
+		version: 13,
+		name:    "add_vulnerability_and_package_details_tables",
+		up:      migrateToV13,
 	},
 }
 
@@ -969,5 +974,69 @@ func migrateToV12(conn *sql.DB) error {
 
 	log.Println("Migration v12: Successfully added UNIQUE constraint to packages table")
 	log.Println("Note: Duplicate packages have been consolidated by summing number_of_instances")
+	return nil
+}
+
+// migrateToV13 adds vulnerability_details and package_details tables to store JSON details
+func migrateToV13(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v13: Creating vulnerability_details and package_details tables...")
+
+	// Create vulnerability_details table
+	_, err = tx.Exec(`
+		CREATE TABLE vulnerability_details (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			vulnerability_id INTEGER NOT NULL,
+			details TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (vulnerability_id) REFERENCES vulnerabilities(id) ON DELETE CASCADE,
+			UNIQUE(vulnerability_id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerability_details table: %w", err)
+	}
+
+	// Create index on vulnerability_id for fast lookups
+	_, err = tx.Exec(`
+		CREATE INDEX idx_vulnerability_details_vuln ON vulnerability_details(vulnerability_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerability_details index: %w", err)
+	}
+
+	// Create package_details table
+	_, err = tx.Exec(`
+		CREATE TABLE package_details (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			package_id INTEGER NOT NULL,
+			details TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE,
+			UNIQUE(package_id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create package_details table: %w", err)
+	}
+
+	// Create index on package_id for fast lookups
+	_, err = tx.Exec(`
+		CREATE INDEX idx_package_details_pkg ON package_details(package_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create package_details index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v13: Successfully created vulnerability_details and package_details tables")
 	return nil
 }

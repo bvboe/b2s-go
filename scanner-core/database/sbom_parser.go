@@ -151,13 +151,49 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 		}
 	}()
 
+	// Prepare statement for package details
+	detailsStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO package_details (package_id, details)
+		VALUES (?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare details statement: %w", err)
+	}
+	defer func() {
+		if err := detailsStmt.Close(); err != nil {
+			log.Printf("Warning: Failed to close details statement: %v", err)
+		}
+	}()
+
 	totalPackages := 0
 	for key, count := range packageCounts {
 		pkg := packageInfo[key]
-		if _, err := stmt.Exec(imageID, pkg.Name, pkg.Version, pkg.Type, count); err != nil {
+		result, err := stmt.Exec(imageID, pkg.Name, pkg.Version, pkg.Type, count)
+		if err != nil {
 			log.Printf("Warning: Failed to insert package %s: %v", pkg.Name, err)
 			continue
 		}
+
+		// Get the package ID (either newly inserted or existing)
+		packageID, err := result.LastInsertId()
+		if err != nil {
+			log.Printf("Warning: Failed to get package ID for %s: %v", pkg.Name, err)
+			continue
+		}
+
+		// Marshal package details to JSON
+		detailsJSON, err := json.Marshal(pkg)
+		if err != nil {
+			log.Printf("Warning: Failed to marshal package details for %s: %v", pkg.Name, err)
+			continue
+		}
+
+		// Insert package details
+		if _, err := detailsStmt.Exec(packageID, string(detailsJSON)); err != nil {
+			log.Printf("Warning: Failed to insert package details for %s: %v", pkg.Name, err)
+			// Continue anyway - the package itself was inserted
+		}
+
 		totalPackages++
 	}
 
@@ -225,6 +261,20 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		}
 	}()
 
+	// Prepare statement for vulnerability details
+	detailsStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO vulnerability_details (vulnerability_id, details)
+		VALUES (?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare details statement: %w", err)
+	}
+	defer func() {
+		if err := detailsStmt.Close(); err != nil {
+			log.Printf("Warning: Failed to close details statement: %v", err)
+		}
+	}()
+
 	totalVulns := 0
 	for key, count := range vulnCounts {
 		match := vulnInfo[key]
@@ -262,7 +312,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		// (previously this was set to RelatedVulnerabilities count, which was incorrect)
 		knownExploits := knownExploited
 
-		_, err := stmt.Exec(
+		result, err := stmt.Exec(
 			imageID,
 			key.cveID,
 			key.packageName,
@@ -282,6 +332,27 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			log.Printf("Warning: Failed to insert vulnerability %s: %v", key.cveID, err)
 			continue
 		}
+
+		// Get the vulnerability ID (either newly inserted or existing)
+		vulnID, err := result.LastInsertId()
+		if err != nil {
+			log.Printf("Warning: Failed to get vulnerability ID for %s: %v", key.cveID, err)
+			continue
+		}
+
+		// Marshal vulnerability details to JSON
+		detailsJSON, err := json.Marshal(match)
+		if err != nil {
+			log.Printf("Warning: Failed to marshal vulnerability details for %s: %v", key.cveID, err)
+			continue
+		}
+
+		// Insert vulnerability details
+		if _, err := detailsStmt.Exec(vulnID, string(detailsJSON)); err != nil {
+			log.Printf("Warning: Failed to insert vulnerability details for %s: %v", key.cveID, err)
+			// Continue anyway - the vulnerability itself was inserted
+		}
+
 		totalVulns++
 	}
 
