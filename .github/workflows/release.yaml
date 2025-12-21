@@ -162,8 +162,8 @@ jobs:
       run: |
         echo "Extracting annotation for tag: ${GITHUB_REF_NAME}"
 
-        # Extract the tag annotation (full contents)
-        TAG_MESSAGE=$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}")
+        # Extract the tag annotation (body only, without PGP signature)
+        TAG_MESSAGE=$(git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}")
 
         # Debug: Show first 200 chars of tag message
         echo "Tag message preview (first 200 chars):"
