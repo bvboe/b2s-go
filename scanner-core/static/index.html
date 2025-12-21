@@ -3,1006 +3,513 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>bjorn2scan - Container Registry</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px 20px;
-            margin: -20px -20px 30px -20px;
-            border-radius: 0 0 10px 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
-        .subtitle {
-            opacity: 0.9;
-            font-size: 1rem;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .stat-card .label {
-            color: #666;
-            font-size: 0.875rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-
-        .stat-card .value {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #667eea;
-        }
-
-        .section {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-            overflow: hidden;
-        }
-
-        .section-header {
-            padding: 20px;
-            background: #f8f9fa;
-            border-bottom: 2px solid #e9ecef;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .section-header h2 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: #333;
-        }
-
-        .refresh-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-
-        .refresh-btn:hover {
-            background: #5568d3;
-            transform: translateY(-1px);
-        }
-
-        .refresh-btn:active {
-            transform: translateY(0);
-        }
-
-        .table-container {
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            text-align: left;
-            font-weight: 600;
-            color: #495057;
-            font-size: 0.875rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 2px solid #dee2e6;
-        }
-
-        td {
-            padding: 12px 16px;
-            border-bottom: 1px solid #e9ecef;
-            font-size: 0.875rem;
-        }
-
-        tr:hover {
-            background: #f8f9fa;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .badge-success {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .badge-warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .badge-secondary {
-            background: #e9ecef;
-            color: #495057;
-        }
-
-        .badge-info {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-
-        .badge-danger {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .download-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.75rem;
-            font-weight: 500;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-block;
-        }
-
-        .download-btn:hover {
-            background: #218838;
-            transform: translateY(-1px);
-        }
-
-        .download-btn:active {
-            transform: translateY(0);
-        }
-
-        .download-btn:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-
-        .code {
-            font-family: 'Monaco', 'Courier New', monospace;
-            background: #f8f9fa;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.875rem;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-
-        .empty-state svg {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-
-        .last-updated {
-            font-size: 0.75rem;
-            color: #999;
-            margin-top: 8px;
-        }
-
-        footer {
-            text-align: center;
-            padding: 20px;
-            color: #666;
-            font-size: 0.875rem;
-        }
-
-        footer a {
-            color: #667eea;
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            text-decoration: underline;
-        }
-
-        /* Modal Styles */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-            background-color: rgba(0,0,0,0.5);
-            animation: fadeIn 0.2s;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .modal-content {
-            background-color: #fff;
-            margin: 2% auto;
-            padding: 0;
-            border-radius: 8px;
-            width: 90%;
-            max-width: 1200px;
-            max-height: 90vh;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            animation: slideDown 0.3s;
-        }
-
-        @keyframes slideDown {
-            from {
-                transform: translateY(-50px);
-                opacity: 0;
-            }
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
-        }
-
-        .modal-header {
-            padding: 20px 30px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 8px 8px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .modal-header h2 {
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .modal-close {
-            color: white;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-            background: none;
-            border: none;
-            padding: 0;
-            width: 30px;
-            height: 30px;
-            line-height: 28px;
-            text-align: center;
-            border-radius: 50%;
-            transition: background 0.2s;
-        }
-
-        .modal-close:hover {
-            background: rgba(255,255,255,0.2);
-        }
-
-        .modal-body {
-            padding: 30px;
-            overflow-y: auto;
-            max-height: calc(90vh - 140px);
-        }
-
-        .modal-summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-
-        .modal-summary-item {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 6px;
-            text-align: center;
-        }
-
-        .modal-summary-item .label {
-            font-size: 0.875rem;
-            color: #666;
-            margin-bottom: 5px;
-        }
-
-        .modal-summary-item .value {
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .vuln-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-
-        .vuln-table th {
-            background: #f8f9fa;
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            color: #333;
-            border-bottom: 2px solid #dee2e6;
-            font-size: 0.875rem;
-        }
-
-        .vuln-table td {
-            padding: 12px;
-            border-bottom: 1px solid #e9ecef;
-            font-size: 0.875rem;
-        }
-
-        .vuln-table tr:hover {
-            background: #f8f9fa;
-        }
-
-        .severity-critical {
-            background: #dc3545;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 0.75rem;
-        }
-
-        .severity-high {
-            background: #fd7e14;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 0.75rem;
-        }
-
-        .severity-medium {
-            background: #17a2b8;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 0.75rem;
-        }
-
-        .severity-low {
-            background: #6c757d;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 0.75rem;
-        }
-
-        .view-btn {
-            background: #17a2b8;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            margin-right: 4px;
-            transition: all 0.2s;
-        }
-
-        .view-btn:hover {
-            background: #138496;
-        }
-
-        tr.clickable-row {
-            cursor: pointer;
-        }
-
-        tr.clickable-row:hover {
-            background: #f0f0f0;
-        }
-    </style>
+    <title>bjorn2scan - Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="multi-select-styles.css">
+    <link rel="stylesheet" href="custom-styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🔍 bjorn2scan</h1>
-            <div class="subtitle">Container Security Scanner - Registry Dashboard</div>
-        </header>
-
-        <div class="stats">
-            <div class="stat-card">
-                <div class="label">Container Instances</div>
-                <div class="value" id="instances-count">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Unique Images</div>
-                <div class="value" id="images-count">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Total Packages</div>
-                <div class="value" id="total-packages">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Total Vulnerabilities</div>
-                <div class="value" id="total-vulns">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Critical Vulns</div>
-                <div class="value" id="critical-vulns" style="color: #dc3545;">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">High Vulns</div>
-                <div class="value" id="high-vulns" style="color: #fd7e14;">-</div>
-            </div>
-        </div>
-
-        <div class="section">
-            <div class="section-header">
-                <div>
-                    <h2>Container Instances</h2>
-                    <div class="last-updated" id="instances-updated">Last updated: -</div>
-                </div>
-                <button class="refresh-btn" onclick="loadInstances()">↻ Refresh</button>
-            </div>
-            <div class="table-container">
-                <div id="instances-loading" class="loading">
-                    <div class="spinner"></div>
-                    <div>Loading container instances...</div>
-                </div>
-                <table id="instances-table" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>Namespace</th>
-                            <th>Pod</th>
-                            <th>Container</th>
-                            <th>Repository</th>
-                            <th>Tag</th>
-                            <th>Digest</th>
-                            <th>Created</th>
-                        </tr>
-                    </thead>
-                    <tbody id="instances-tbody"></tbody>
+    <table width="100%">
+        <tr>
+            <td valign="top">
+                <table id="headerTable">
+                    <thead></thead>
+                    <tbody id="sidebarNav">
+                        <!-- Sidebar navigation will be populated here -->
+                    </tbody>
                 </table>
-                <div id="instances-empty" class="empty-state" style="display: none;">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                    </svg>
-                    <div>No container instances found</div>
-                </div>
-            </div>
-        </div>
+            </td>
+            <td width="100%" valign="top">
+                <h1><div id="clusterName">bjorn2scan</div></h1>
 
-        <div class="section">
-            <div class="section-header">
-                <div>
-                    <h2>Container Images</h2>
-                    <div class="last-updated" id="images-updated">Last updated: -</div>
+                <!-- Scan Status Widget -->
+                <div id="containerScanStatus">
+                    <h3>Container Scan Status</h3>
+                    <table id="containerScanStatusTable" class="listingTable">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
-                <button class="refresh-btn" onclick="loadImages()">↻ Refresh</button>
-            </div>
-            <div class="table-container">
-                <div id="images-loading" class="loading">
-                    <div class="spinner"></div>
-                    <div>Loading container images...</div>
-                </div>
-                <table id="images-table" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>Digest</th>
-                            <th>Packages</th>
-                            <th>Vulnerabilities</th>
-                            <th>Critical</th>
-                            <th>High</th>
-                            <th>Medium</th>
-                            <th>Low</th>
-                            <th>OS</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="images-tbody"></tbody>
-                </table>
-                <div id="images-empty" class="empty-state" style="display: none;">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    <div>No container images found</div>
-                </div>
-            </div>
-        </div>
+                <br/>
 
-        <!-- Vulnerability Details Modal -->
-        <div id="vulnModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Vulnerability Details</h2>
-                    <button class="modal-close" onclick="closeModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="modal-summary" id="modalSummary"></div>
-                    <div id="modalContent"></div>
-                </div>
-            </div>
-        </div>
+                <!-- Namespace Summary Section -->
+                <div id="namespaceSummary">
+                    <h3>Namespace Summary</h3>
+                    <div style="text-align: right; text-decoration: underline;">
+                        <b><a href="" id="namespaceCSVLink">Export to CSV</a></b>
+                    </div>
 
-        <footer>
-            <div>bjorn2scan v2 - Container Security Scanner</div>
-            <div><a href="https://github.com/bvboe/b2s-go" target="_blank">GitHub</a> | <a href="/health">Health</a> | <a href="/info">Info</a></div>
-        </footer>
-    </div>
+                    <table id="namespaceTable" width="100%" class="listingTable">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" class="sortable" data-sort-field="namespace" onclick="sortNamespaceTable('namespace')"><b>Namespace</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="instance_count" onclick="sortNamespaceTable('instance_count')"><b># Instances</b></th>
+                                <th colspan="6"><b>Avg Vulnerabilities per Container</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="avg_risk" onclick="sortNamespaceTable('avg_risk')"><b>Avg Risk Score</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="avg_exploits" onclick="sortNamespaceTable('avg_exploits')"><b>Avg Exploits</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="avg_packages" onclick="sortNamespaceTable('avg_packages')"><b>Avg Packages</b></th>
+                            </tr>
+                            <tr>
+                                <th class="sortable" data-sort-field="avg_critical" onclick="sortNamespaceTable('avg_critical')"><b>Critical</b></th>
+                                <th class="sortable" data-sort-field="avg_high" onclick="sortNamespaceTable('avg_high')"><b>High</b></th>
+                                <th class="sortable" data-sort-field="avg_medium" onclick="sortNamespaceTable('avg_medium')"><b>Medium</b></th>
+                                <th class="sortable" data-sort-field="avg_low" onclick="sortNamespaceTable('avg_low')"><b>Low</b></th>
+                                <th class="sortable" data-sort-field="avg_negligible" onclick="sortNamespaceTable('avg_negligible')"><b>Negligible</b></th>
+                                <th class="sortable" data-sort-field="avg_unknown" onclick="sortNamespaceTable('avg_unknown')"><b>Unknown</b></th>
+                            </tr>
+                        </thead>
+                        <tbody id="namespaceTableBody"></tbody>
+                    </table>
 
+                    <div id="namespacePagination" style="margin: 20px 0; text-align: center;">
+                        <!-- Pagination controls will be inserted here -->
+                    </div>
+                    <br/>
+                </div>
+
+                <!-- Distribution Summary Section -->
+                <div id="distroSummary">
+                    <h3>Container Distribution Summary</h3>
+                    <div style="text-align: right; text-decoration: underline;">
+                        <b><a href="" id="distributionCSVLink">Export to CSV</a></b>
+                    </div>
+
+                    <table id="distributionTable" width="100%" class="listingTable">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" class="sortable" data-sort-field="os_name" onclick="sortDistributionTable('os_name')"><b>OS Distribution</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="instance_count" onclick="sortDistributionTable('instance_count')"><b># Instances</b></th>
+                                <th colspan="6"><b>Avg Vulnerabilities per Container</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="avg_risk" onclick="sortDistributionTable('avg_risk')"><b>Avg Risk Score</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="avg_exploits" onclick="sortDistributionTable('avg_exploits')"><b>Avg Exploits</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="avg_packages" onclick="sortDistributionTable('avg_packages')"><b>Avg Packages</b></th>
+                            </tr>
+                            <tr>
+                                <th class="sortable" data-sort-field="avg_critical" onclick="sortDistributionTable('avg_critical')"><b>Critical</b></th>
+                                <th class="sortable" data-sort-field="avg_high" onclick="sortDistributionTable('avg_high')"><b>High</b></th>
+                                <th class="sortable" data-sort-field="avg_medium" onclick="sortDistributionTable('avg_medium')"><b>Medium</b></th>
+                                <th class="sortable" data-sort-field="avg_low" onclick="sortDistributionTable('avg_low')"><b>Low</b></th>
+                                <th class="sortable" data-sort-field="avg_negligible" onclick="sortDistributionTable('avg_negligible')"><b>Negligible</b></th>
+                                <th class="sortable" data-sort-field="avg_unknown" onclick="sortDistributionTable('avg_unknown')"><b>Unknown</b></th>
+                            </tr>
+                        </thead>
+                        <tbody id="distributionTableBody"></tbody>
+                    </table>
+
+                    <div id="distributionPagination" style="margin: 20px 0; text-align: center;">
+                        <!-- Pagination controls will be inserted here -->
+                    </div>
+                </div>
+
+                <div id="app-footer"></div>
+            </td>
+        </tr>
+    </table>
+
+    <script src="shared.js"></script>
     <script>
-        // Auto-refresh every 30 seconds
-        let autoRefreshInterval;
+        // Page-specific state
+        const pageTitle = 'Vulnerability Summary';
 
-        async function loadInstances() {
-            const loading = document.getElementById('instances-loading');
-            const table = document.getElementById('instances-table');
-            const empty = document.getElementById('instances-empty');
-            const tbody = document.getElementById('instances-tbody');
-
-            loading.style.display = 'block';
-            table.style.display = 'none';
-            empty.style.display = 'none';
-
-            try {
-                const response = await fetch('/api/containers/instances');
-                const data = await response.json();
-
-                document.getElementById('instances-count').textContent = data.instances?.length || 0;
-                document.getElementById('instances-updated').textContent = `Last updated: ${new Date().toLocaleString()}`;
-
-                if (!data.instances || data.instances.length === 0) {
-                    loading.style.display = 'none';
-                    empty.style.display = 'block';
-                    return;
-                }
-
-                tbody.innerHTML = data.instances.map(instance => `
-                    <tr>
-                        <td><span class="badge badge-secondary">${escapeHtml(instance.namespace)}</span></td>
-                        <td><strong>${escapeHtml(instance.pod)}</strong></td>
-                        <td>${escapeHtml(instance.container)}</td>
-                        <td><span class="code">${escapeHtml(instance.repository)}</span></td>
-                        <td><span class="code">${escapeHtml(instance.tag)}</span></td>
-                        <td><span class="code" style="font-size: 0.75rem;">${truncateDigest(instance.digest)}</span></td>
-                        <td>${formatDate(instance.created_at)}</td>
-                    </tr>
-                `).join('');
-
-                loading.style.display = 'none';
-                table.style.display = 'table';
-            } catch (error) {
-                console.error('Error loading instances:', error);
-                loading.innerHTML = '<div style="color: #dc3545;">Error loading data. Please try again.</div>';
-            }
-        }
-
-        async function loadImages() {
-            const loading = document.getElementById('images-loading');
-            const table = document.getElementById('images-table');
-            const empty = document.getElementById('images-empty');
-            const tbody = document.getElementById('images-tbody');
-
-            loading.style.display = 'block';
-            table.style.display = 'none';
-            empty.style.display = 'none';
-
-            try {
-                const response = await fetch('/api/containers/images');
-                const data = await response.json();
-
-                // Calculate totals
-                let totalPackages = 0;
-                let totalVulns = 0;
-                let totalCritical = 0;
-                let totalHigh = 0;
-
-                if (data.images) {
-                    data.images.forEach(img => {
-                        totalPackages += img.package_count || 0;
-                        totalVulns += img.vulnerability_count || 0;
-                        totalCritical += img.critical_count || 0;
-                        totalHigh += img.high_count || 0;
-                    });
-                }
-
-                document.getElementById('images-count').textContent = data.images?.length || 0;
-                document.getElementById('total-packages').textContent = totalPackages;
-                document.getElementById('total-vulns').textContent = totalVulns;
-                document.getElementById('critical-vulns').textContent = totalCritical;
-                document.getElementById('high-vulns').textContent = totalHigh;
-                document.getElementById('images-updated').textContent = `Last updated: ${new Date().toLocaleString()}`;
-
-                if (!data.images || data.images.length === 0) {
-                    loading.style.display = 'none';
-                    empty.style.display = 'block';
-                    return;
-                }
-
-                tbody.innerHTML = data.images.map(image => `
-                    <tr>
-                        <td><span class="code" style="font-size: 0.75rem;" title="${escapeHtml(image.digest)}">${truncateDigest(image.digest)}</span></td>
-                        <td>${image.package_count > 0 ? '<strong>' + image.package_count + '</strong>' : '-'}</td>
-                        <td>${image.vulnerability_count > 0 ? '<strong>' + image.vulnerability_count + '</strong>' : '-'}</td>
-                        <td>${getCountBadge(image.critical_count, 'critical')}</td>
-                        <td>${getCountBadge(image.high_count, 'high')}</td>
-                        <td>${getCountBadge(image.medium_count, 'medium')}</td>
-                        <td>${getCountBadge(image.low_count, 'low')}</td>
-                        <td>${getOSInfo(image.os_name, image.os_version)}</td>
-                        <td>${getActionButtons(image)}</td>
-                    </tr>
-                `).join('');
-
-                loading.style.display = 'none';
-                table.style.display = 'table';
-            } catch (error) {
-                console.error('Error loading images:', error);
-                loading.innerHTML = '<div style="color: #dc3545;">Error loading data. Please try again.</div>';
-            }
-        }
-
-        function truncateDigest(digest) {
-            if (!digest) return 'N/A';
-            if (digest.startsWith('sha256:')) {
-                return 'sha256:' + digest.substring(7, 19) + '...';
-            }
-            return digest.substring(0, 12) + '...';
-        }
-
-        function getBadge(value) {
-            if (value) {
-                return '<span class="badge badge-success">✓ Yes</span>';
-            }
-            return '<span class="badge badge-warning">✗ No</span>';
-        }
-
-        // Unified status badge for new status field
-        function getStatusBadge(status) {
-            if (!status) status = 'pending';
-
-            switch(status) {
-                case 'pending':
-                    return '<span class="badge badge-secondary">⏳ Pending</span>';
-                case 'generating_sbom':
-                    return '<span class="badge badge-info">📦 Generating SBOM...</span>';
-                case 'scanning_vulnerabilities':
-                    return '<span class="badge badge-info">🔍 Scanning Vulnerabilities...</span>';
-                case 'completed':
-                    return '<span class="badge badge-success">✓ Complete</span>';
-                case 'sbom_failed':
-                    return '<span class="badge badge-danger">✗ SBOM Failed</span>';
-                case 'sbom_unavailable':
-                    return '<span class="badge badge-warning">⊘ No Scanner Available</span>';
-                case 'vuln_scan_failed':
-                    return '<span class="badge badge-warning">⚠ Vuln Scan Failed</span>';
-                // Backward compatibility with old status values
-                case 'scanning':
-                    return '<span class="badge badge-info">Scanning...</span>';
-                case 'scanned':
-                    return '<span class="badge badge-success">✓ Scanned</span>';
-                case 'failed':
-                    return '<span class="badge badge-danger">✗ Failed</span>';
-                default:
-                    return `<span class="badge badge-secondary">${escapeHtml(status)}</span>`;
-            }
-        }
-
-        // Legacy functions for backward compatibility
-        function getScanStatusBadge(status) {
-            return getStatusBadge(status);
-        }
-
-        function getVulnStatusBadge(status) {
-            return getStatusBadge(status);
-        }
-
-        function getCountBadge(count, severity) {
-            if (!count || count === 0) {
-                return '<span style="color: #999;">-</span>';
-            }
-
-            let colorClass = 'badge-secondary';
-            if (severity === 'critical') {
-                colorClass = 'badge-danger';
-            } else if (severity === 'high') {
-                colorClass = 'badge-warning';
-            } else if (severity === 'medium') {
-                colorClass = 'badge-info';
-            }
-
-            return `<span class="badge ${colorClass}">${count}</span>`;
-        }
-
-        function getOSInfo(osName, osVersion) {
-            if (!osName && !osVersion) {
-                return '<span style="color: #999;">-</span>';
-            }
-            const name = osName || 'Unknown';
-            const version = osVersion ? ` ${osVersion}` : '';
-            return `<span class="code" style="font-size: 0.75rem;">${escapeHtml(name + version)}</span>`;
-        }
-
-        function getActionButtons(image) {
-            let buttons = [];
-
-            // Check status - support both old and new status fields
-            const status = image.status || '';
-            const hasSBOM = status === 'scanning_vulnerabilities' || status === 'vuln_scan_failed' || status === 'completed' ||
-                           image.scan_status === 'scanned'; // backward compat
-            const hasVulns = status === 'completed' || image.vulnerability_status === 'scanned'; // backward compat
-
-            // Add View button if vulnerabilities are available
-            if (hasVulns) {
-                buttons.push(`<button class="view-btn" onclick="viewDetails('${escapeHtml(image.digest)}', event)" title="View Details">👁 View</button>`);
-            }
-
-            // Add download buttons
-            if (hasSBOM) {
-                buttons.push(`<a href="/api/sbom/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download SBOM">↓ SBOM</a>`);
-            }
-
-            if (hasVulns) {
-                buttons.push(`<a href="/api/vulnerabilities/${encodeURIComponent(image.digest)}" class="download-btn" download title="Download Vulnerabilities" style="margin-left: 4px;">↓ Vulns</a>`);
-            }
-
-            if (buttons.length === 0) {
-                return '<span style="color: #999; font-size: 0.75rem;">-</span>';
-            }
-
-            return buttons.join('');
-        }
-
-        function getDownloadButtons(digest, scanStatus, vulnStatus) {
-            let buttons = [];
-
-            if (scanStatus === 'scanned') {
-                buttons.push(`<a href="/api/sbom/${encodeURIComponent(digest)}" class="download-btn" download>↓ SBOM</a>`);
-            }
-
-            if (vulnStatus === 'scanned') {
-                buttons.push(`<a href="/api/vulnerabilities/${encodeURIComponent(digest)}" class="download-btn" download style="margin-left: 4px;">↓ Vulns</a>`);
-            }
-
-            if (buttons.length === 0) {
-                return '<span style="color: #999; font-size: 0.75rem;">-</span>';
-            }
-
-            return buttons.join('');
-        }
-
-        function formatDate(dateStr) {
-            if (!dateStr) return 'N/A';
-            const date = new Date(dateStr);
-            return date.toLocaleString();
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text || '';
-            return div.innerHTML;
-        }
-
-        function startAutoRefresh() {
-            stopAutoRefresh();
-            autoRefreshInterval = setInterval(() => {
-                loadInstances();
-                loadImages();
-            }, 30000); // 30 seconds
-        }
-
-        function stopAutoRefresh() {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-            }
-        }
-
-        // Initial load
-        window.addEventListener('DOMContentLoaded', () => {
-            loadInstances();
-            loadImages();
-            startAutoRefresh();
-        });
-
-        // Stop refresh when page is hidden
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                stopAutoRefresh();
-            } else {
-                loadInstances();
-                loadImages();
-                startAutoRefresh();
-            }
-        });
-
-        // Modal functions
-        async function viewDetails(digest, event) {
-            if (event) {
-                event.stopPropagation();
-            }
-
-            const modal = document.getElementById('vulnModal');
-            const modalSummary = document.getElementById('modalSummary');
-            const modalContent = document.getElementById('modalContent');
-
-            // Show modal with loading state
-            modal.style.display = 'block';
-            modalSummary.innerHTML = '<div class="loading">Loading...</div>';
-            modalContent.innerHTML = '';
-
-            try {
-                // Fetch image details and vulnerabilities in parallel
-                const [detailsResponse, vulnsResponse] = await Promise.all([
-                    fetch(`/api/images/${encodeURIComponent(digest)}`),
-                    fetch(`/api/images/${encodeURIComponent(digest)}/vulnerabilities`)
-                ]);
-
-                if (!detailsResponse.ok || !vulnsResponse.ok) {
-                    throw new Error('Failed to fetch data');
-                }
-
-                const imageDetails = await detailsResponse.json();
-                const vulnsData = await vulnsResponse.json();
-                const vulnerabilities = vulnsData.vulnerabilities || [];
-
-                // Display summary
-                modalSummary.innerHTML = `
-                    <div class="modal-summary-item">
-                        <div class="label">Image Digest</div>
-                        <div class="value" style="font-size: 1rem; word-break: break-all;">${truncateDigest(digest)}</div>
-                    </div>
-                    <div class="modal-summary-item">
-                        <div class="label">Total Packages</div>
-                        <div class="value">${imageDetails.package_count || 0}</div>
-                    </div>
-                    <div class="modal-summary-item">
-                        <div class="label">Total Vulnerabilities</div>
-                        <div class="value">${imageDetails.vulnerability_count || 0}</div>
-                    </div>
-                    <div class="modal-summary-item">
-                        <div class="label">Critical</div>
-                        <div class="value" style="color: #dc3545;">${imageDetails.critical_count || 0}</div>
-                    </div>
-                    <div class="modal-summary-item">
-                        <div class="label">High</div>
-                        <div class="value" style="color: #fd7e14;">${imageDetails.high_count || 0}</div>
-                    </div>
-                    <div class="modal-summary-item">
-                        <div class="label">Medium</div>
-                        <div class="value" style="color: #17a2b8;">${imageDetails.medium_count || 0}</div>
-                    </div>
-                    <div class="modal-summary-item">
-                        <div class="label">Low</div>
-                        <div class="value" style="color: #6c757d;">${imageDetails.low_count || 0}</div>
-                    </div>
-                `;
-
-                // Display vulnerabilities table
-                if (vulnerabilities.length === 0) {
-                    modalContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #28a745; font-size: 1.2rem;">✓ No vulnerabilities found!</div>';
-                } else {
-                    modalContent.innerHTML = `
-                        <h3 style="margin-top: 20px; margin-bottom: 15px;">Vulnerabilities (${vulnerabilities.length})</h3>
-                        <table class="vuln-table">
-                            <thead>
-                                <tr>
-                                    <th>CVE ID</th>
-                                    <th>Severity</th>
-                                    <th>Package</th>
-                                    <th>Version</th>
-                                    <th>Fix Status</th>
-                                    <th>Fixed In</th>
-                                    <th>Exploits</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${vulnerabilities.map(v => `
-                                    <tr>
-                                        <td><a href="https://nvd.nist.gov/vuln/detail/${escapeHtml(v.cve_id)}" target="_blank" style="color: #667eea; text-decoration: none;">${escapeHtml(v.cve_id)}</a></td>
-                                        <td><span class="severity-${escapeHtml(v.severity.toLowerCase())}">${escapeHtml(v.severity)}</span></td>
-                                        <td><code>${escapeHtml(v.package_name)}</code></td>
-                                        <td><code>${escapeHtml(v.package_version)}</code></td>
-                                        <td>${escapeHtml(v.fix_status || 'unknown')}</td>
-                                        <td>${v.fixed_version ? '<code>' + escapeHtml(v.fixed_version) + '</code>' : '-'}</td>
-                                        <td>${v.known_exploits ? '<span style="color: #dc3545; font-weight: 600;">⚠ Yes</span>' : '-'}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    `;
-                }
-            } catch (error) {
-                console.error('Error loading vulnerability details:', error);
-                modalContent.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 40px;">Error loading vulnerability details. Please try again.</div>';
-            }
-        }
-
-        function closeModal() {
-            document.getElementById('vulnModal').style.display = 'none';
-        }
-
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modal = document.getElementById('vulnModal');
-            if (event.target === modal) {
-                closeModal();
-            }
+        // State for each table
+        let namespaceTableState = {
+            page: 1,
+            sortBy: 'namespace',
+            sortOrder: 'ASC',
+            totalPages: 1,
+            totalItems: 0,
+            pageSize: 100
         };
 
-        // Close modal on Escape key
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-                closeModal();
+        let distributionTableState = {
+            page: 1,
+            sortBy: 'os_name',
+            sortOrder: 'ASC',
+            totalPages: 1,
+            totalItems: 0,
+            pageSize: 100
+        };
+
+        // Load all data on page init
+        async function initPage() {
+            try {
+                // Load config and setup navigation
+                await loadConfig();
+
+                // Set page title manually
+                const clusterNameDiv = document.getElementById('clusterName');
+                if (clusterNameDiv && appConfig) {
+                    clusterNameDiv.textContent = pageTitle + ' - ' + appConfig.clusterName;
+                    document.title = pageTitle + ' - ' + appConfig.clusterName;
+                }
+
+                renderSidebarNav('index.html');
+                renderVersionFooter();
+
+                // Load all widgets
+                await Promise.all([
+                    loadScanStatusWidget(),
+                    loadNamespaceTable(),
+                    loadDistributionTable()
+                ]);
+            } catch (error) {
+                console.error('Error initializing page:', error);
             }
-        });
+        }
+
+        // Load scan status widget
+        async function loadScanStatusWidget() {
+            const tableBody = document.querySelector('#containerScanStatusTable tbody');
+
+            try {
+                const params = buildQueryParams();
+                const response = await fetch(`/api/summary/scan-status${params}`);
+                if (!response.ok) throw new Error('Failed to load scan status');
+
+                const data = await response.json();
+                tableBody.innerHTML = '';
+
+                const statusCounts = data.statusCounts || [];
+                statusCounts.forEach(status => {
+                    if (status.count > 0) {
+                        const row = document.createElement('tr');
+                        const statusCell = document.createElement('td');
+                        statusCell.innerHTML = '<b>' + escapeHtml(status.description) + '</b>';
+                        row.appendChild(statusCell);
+
+                        const countCell = document.createElement('td');
+                        countCell.innerHTML = formatNumber(status.count);
+                        countCell.style.textAlign = 'right';
+                        row.appendChild(countCell);
+
+                        tableBody.appendChild(row);
+                    }
+                });
+
+                if (statusCounts.length === 0 || statusCounts.every(s => s.count === 0)) {
+                    const row = document.createElement('tr');
+                    const cell = document.createElement('td');
+                    cell.innerHTML = 'No scan data available';
+                    cell.colSpan = 2;
+                    row.appendChild(cell);
+                    tableBody.appendChild(row);
+                }
+            } catch (error) {
+                console.error('Error loading scan status:', error);
+                tableBody.innerHTML = '';
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = '⚠️ Error loading data: ' + error.message;
+                cell.colSpan = 2;
+                cell.style.color = 'red';
+                row.appendChild(cell);
+                tableBody.appendChild(row);
+            }
+        }
+
+        // Load namespace table
+        async function loadNamespaceTable() {
+            try {
+                const params = buildQueryParams({
+                    page: namespaceTableState.page,
+                    sortBy: namespaceTableState.sortBy,
+                    sortOrder: namespaceTableState.sortOrder,
+                    pageSize: 100
+                });
+
+                const response = await fetch(`/api/summary/by-namespace${params}`);
+                if (!response.ok) throw new Error('Failed to load namespace summary');
+
+                const data = await response.json();
+                namespaceTableState.totalPages = data.totalPages || 1;
+                namespaceTableState.totalItems = data.totalCount || 0;
+
+                renderNamespaceTable(data.namespaces || []);
+                renderNamespacePagination();
+                updateNamespaceCSVLink(params);
+            } catch (error) {
+                console.error('Error loading namespace summary:', error);
+                const tbody = document.getElementById('namespaceTableBody');
+                tbody.innerHTML = '';
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = '⚠️ Error loading data: ' + error.message;
+                cell.colSpan = 11;
+                cell.style.color = 'red';
+                row.appendChild(cell);
+                tbody.appendChild(row);
+            }
+        }
+
+        // Render namespace table
+        function renderNamespaceTable(namespaces) {
+            const tbody = document.getElementById('namespaceTableBody');
+            tbody.innerHTML = '';
+
+            if (namespaces.length === 0) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = 'No data available';
+                cell.colSpan = 11;
+                row.appendChild(cell);
+                tbody.appendChild(row);
+                return;
+            }
+
+            namespaces.forEach(ns => {
+                const row = document.createElement('tr');
+                row.classList.add('clickable-row');
+                row.onclick = function() {
+                    window.location.href = 'pods.html?namespaces=' + encodeURIComponent(ns.namespace);
+                };
+
+                addCellToRow(row, 'left', ns.namespace || '');
+                addCellToRow(row, 'right', formatNumber(ns.instance_count));
+                addCellToRow(row, 'right', formatAverage(ns.avg_critical));
+                addCellToRow(row, 'right', formatAverage(ns.avg_high));
+                addCellToRow(row, 'right', formatAverage(ns.avg_medium));
+                addCellToRow(row, 'right', formatAverage(ns.avg_low));
+                addCellToRow(row, 'right', formatAverage(ns.avg_negligible));
+                addCellToRow(row, 'right', formatAverage(ns.avg_unknown));
+                addCellToRow(row, 'right', formatRiskNumber(ns.avg_risk));
+                addCellToRow(row, 'right', formatAverage(ns.avg_exploits));
+                addCellToRow(row, 'right', formatAverage(ns.avg_packages));
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // Render namespace pagination
+        function renderNamespacePagination() {
+            const container = document.getElementById('namespacePagination');
+            if (!container) return;
+
+            if (namespaceTableState.totalPages <= 1) {
+                container.innerHTML = '';
+                return;
+            }
+
+            let html = '<div style="display: flex; justify-content: center; align-items: center; gap: 10px;">';
+            html += `<button onclick="goToNamespacePage(${namespaceTableState.page - 1})" ${namespaceTableState.page === 1 ? 'disabled' : ''}>Previous</button>`;
+            html += '<div style="display: flex; gap: 5px;">';
+
+            for (let i = Math.max(1, namespaceTableState.page - 2); i <= Math.min(namespaceTableState.totalPages, namespaceTableState.page + 2); i++) {
+                if (i === namespaceTableState.page) {
+                    html += `<button style="font-weight: bold; background: lightgrey;">${i}</button>`;
+                } else {
+                    html += `<button onclick="goToNamespacePage(${i})">${i}</button>`;
+                }
+            }
+
+            html += '</div>';
+            html += `<button onclick="goToNamespacePage(${namespaceTableState.page + 1})" ${namespaceTableState.page === namespaceTableState.totalPages ? 'disabled' : ''}>Next</button>`;
+
+            const startItem = (namespaceTableState.page - 1) * namespaceTableState.pageSize + 1;
+            const endItem = Math.min(namespaceTableState.page * namespaceTableState.pageSize, namespaceTableState.totalItems);
+            html += `<span style="margin-left: 20px; color: #666;">Showing ${startItem}-${endItem} of ${namespaceTableState.totalItems}</span>`;
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function goToNamespacePage(page) {
+            if (page < 1 || page > namespaceTableState.totalPages) return;
+            namespaceTableState.page = page;
+            loadNamespaceTable();
+        }
+
+        // Update namespace CSV link
+        function updateNamespaceCSVLink(params) {
+            const link = document.getElementById('namespaceCSVLink');
+            link.href = `/api/summary/by-namespace${params}&format=csv`;
+        }
+
+        // Sort namespace table
+        function sortNamespaceTable(column) {
+            if (namespaceTableState.sortBy === column) {
+                namespaceTableState.sortOrder = namespaceTableState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+            } else {
+                namespaceTableState.sortBy = column;
+                namespaceTableState.sortOrder = 'DESC';
+            }
+            namespaceTableState.page = 1;
+            updateNamespaceTableSortIndicators();
+            loadNamespaceTable();
+        }
+
+        function updateNamespaceTableSortIndicators() {
+            const table = document.getElementById('namespaceTable');
+            const headers = table.querySelectorAll('th.sortable');
+
+            headers.forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+                if (th.getAttribute('data-sort-field') === namespaceTableState.sortBy) {
+                    th.classList.add(namespaceTableState.sortOrder === 'ASC' ? 'sorted-asc' : 'sorted-desc');
+                }
+            });
+        }
+
+        // Load distribution table
+        async function loadDistributionTable() {
+            try {
+                const params = buildQueryParams({
+                    page: distributionTableState.page,
+                    sortBy: distributionTableState.sortBy,
+                    sortOrder: distributionTableState.sortOrder,
+                    pageSize: 100
+                });
+
+                const response = await fetch(`/api/summary/by-distribution${params}`);
+                if (!response.ok) throw new Error('Failed to load distribution summary');
+
+                const data = await response.json();
+                distributionTableState.totalPages = data.totalPages || 1;
+                distributionTableState.totalItems = data.totalCount || 0;
+
+                renderDistributionTable(data.distributions || []);
+                renderDistributionPagination();
+                updateDistributionCSVLink(params);
+            } catch (error) {
+                console.error('Error loading distribution summary:', error);
+                const tbody = document.getElementById('distributionTableBody');
+                tbody.innerHTML = '';
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = '⚠️ Error loading data: ' + error.message;
+                cell.colSpan = 11;
+                cell.style.color = 'red';
+                row.appendChild(cell);
+                tbody.appendChild(row);
+            }
+        }
+
+        // Render distribution table
+        function renderDistributionTable(distributions) {
+            const tbody = document.getElementById('distributionTableBody');
+            tbody.innerHTML = '';
+
+            if (distributions.length === 0) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = 'No data available';
+                cell.colSpan = 11;
+                row.appendChild(cell);
+                tbody.appendChild(row);
+                return;
+            }
+
+            distributions.forEach(dist => {
+                const row = document.createElement('tr');
+
+                addCellToRow(row, 'left', dist.os_name || '');
+                addCellToRow(row, 'right', formatNumber(dist.instance_count));
+                addCellToRow(row, 'right', formatAverage(dist.avg_critical));
+                addCellToRow(row, 'right', formatAverage(dist.avg_high));
+                addCellToRow(row, 'right', formatAverage(dist.avg_medium));
+                addCellToRow(row, 'right', formatAverage(dist.avg_low));
+                addCellToRow(row, 'right', formatAverage(dist.avg_negligible));
+                addCellToRow(row, 'right', formatAverage(dist.avg_unknown));
+                addCellToRow(row, 'right', formatRiskNumber(dist.avg_risk));
+                addCellToRow(row, 'right', formatAverage(dist.avg_exploits));
+                addCellToRow(row, 'right', formatAverage(dist.avg_packages));
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // Render distribution pagination
+        function renderDistributionPagination() {
+            const container = document.getElementById('distributionPagination');
+            if (!container) return;
+
+            if (distributionTableState.totalPages <= 1) {
+                container.innerHTML = '';
+                return;
+            }
+
+            let html = '<div style="display: flex; justify-content: center; align-items: center; gap: 10px;">';
+            html += `<button onclick="goToDistributionPage(${distributionTableState.page - 1})" ${distributionTableState.page === 1 ? 'disabled' : ''}>Previous</button>`;
+            html += '<div style="display: flex; gap: 5px;">';
+
+            for (let i = Math.max(1, distributionTableState.page - 2); i <= Math.min(distributionTableState.totalPages, distributionTableState.page + 2); i++) {
+                if (i === distributionTableState.page) {
+                    html += `<button style="font-weight: bold; background: lightgrey;">${i}</button>`;
+                } else {
+                    html += `<button onclick="goToDistributionPage(${i})">${i}</button>`;
+                }
+            }
+
+            html += '</div>';
+            html += `<button onclick="goToDistributionPage(${distributionTableState.page + 1})" ${distributionTableState.page === distributionTableState.totalPages ? 'disabled' : ''}>Next</button>`;
+
+            const startItem = (distributionTableState.page - 1) * distributionTableState.pageSize + 1;
+            const endItem = Math.min(distributionTableState.page * distributionTableState.pageSize, distributionTableState.totalItems);
+            html += `<span style="margin-left: 20px; color: #666;">Showing ${startItem}-${endItem} of ${distributionTableState.totalItems}</span>`;
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function goToDistributionPage(page) {
+            if (page < 1 || page > distributionTableState.totalPages) return;
+            distributionTableState.page = page;
+            loadDistributionTable();
+        }
+
+        // Update distribution CSV link
+        function updateDistributionCSVLink(params) {
+            const link = document.getElementById('distributionCSVLink');
+            link.href = `/api/summary/by-distribution${params}&format=csv`;
+        }
+
+        // Sort distribution table
+        function sortDistributionTable(column) {
+            if (distributionTableState.sortBy === column) {
+                distributionTableState.sortOrder = distributionTableState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+            } else {
+                distributionTableState.sortBy = column;
+                distributionTableState.sortOrder = 'DESC';
+            }
+            distributionTableState.page = 1;
+            updateDistributionTableSortIndicators();
+            loadDistributionTable();
+        }
+
+        function updateDistributionTableSortIndicators() {
+            const table = document.getElementById('distributionTable');
+            const headers = table.querySelectorAll('th.sortable');
+
+            headers.forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+                if (th.getAttribute('data-sort-field') === distributionTableState.sortBy) {
+                    th.classList.add(distributionTableState.sortOrder === 'ASC' ? 'sorted-asc' : 'sorted-desc');
+                }
+            });
+        }
+
+        // Build query parameters
+        function buildQueryParams(additionalParams = {}) {
+            const params = new URLSearchParams();
+
+            // Add additional params
+            Object.entries(additionalParams).forEach(([key, value]) => {
+                if (value !== null && value !== undefined && value !== '') {
+                    params.append(key, value);
+                }
+            });
+
+            const paramString = params.toString();
+            return paramString ? '?' + paramString : '';
+        }
+
+        // Format average numbers
+        function formatAverage(value) {
+            if (value === null || value === undefined) return '0.0';
+            return value.toFixed(1);
+        }
+
+        // Initialize page when DOM is ready
+        document.addEventListener('DOMContentLoaded', initPage);
     </script>
 </body>
 </html>

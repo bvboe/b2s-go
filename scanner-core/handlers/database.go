@@ -338,6 +338,9 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 		mux.HandleFunc("/api/images", ImagesHandler(queryProvider))
 		mux.HandleFunc("/api/pods", PodsHandler(queryProvider))
 		mux.HandleFunc("/api/filter-options", FilterOptionsHandler(queryProvider))
+		mux.HandleFunc("/api/summary/scan-status", ScanStatusCountsHandler(queryProvider))
+		mux.HandleFunc("/api/summary/by-namespace", NamespaceSummaryHandler(queryProvider))
+		mux.HandleFunc("/api/summary/by-distribution", DistributionSummaryHandler(queryProvider))
 	} else {
 		// Fallback to basic handler if provider doesn't support ExecuteReadOnlyQuery
 		mux.HandleFunc("/api/images", ImageDetailsHandler(provider))
