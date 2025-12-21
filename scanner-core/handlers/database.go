@@ -348,20 +348,45 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 	mux.HandleFunc("/api/images/", func(w http.ResponseWriter, r *http.Request) {
 		// Route to appropriate handler based on path suffix
 		path := r.URL.Path
-		// "/api/images/" is 12 characters, not 13!
+		log.Printf("Routing /api/images/ - path: %s", path)
+
+		// "/api/images/" is 12 characters
 		if len(path) > 12 {
 			pathWithoutPrefix := path[12:]
-			if len(pathWithoutPrefix) > 9 && pathWithoutPrefix[len(pathWithoutPrefix)-9:] == "/packages" {
-				PackagesHandler(provider)(w, r)
-				return
+			log.Printf("Routing /api/images/ - pathWithoutPrefix: %s", pathWithoutPrefix)
+
+			// Check if we have ImageQueryProvider for enhanced handlers
+			if queryProvider, ok := provider.(ImageQueryProvider); ok {
+				log.Printf("Routing /api/images/ - using ImageQueryProvider")
+
+				// Check for /packages suffix
+				if len(pathWithoutPrefix) > 9 && pathWithoutPrefix[len(pathWithoutPrefix)-9:] == "/packages" {
+					log.Printf("Routing to ImagePackagesDetailHandler")
+					ImagePackagesDetailHandler(queryProvider)(w, r)
+					return
+				}
+				// Check for /vulnerabilities suffix
+				// "/vulnerabilities" is 16 characters
+				if len(pathWithoutPrefix) > 16 && pathWithoutPrefix[len(pathWithoutPrefix)-16:] == "/vulnerabilities" {
+					log.Printf("Routing to ImageVulnerabilitiesDetailHandler")
+					ImageVulnerabilitiesDetailHandler(queryProvider)(w, r)
+					return
+				}
+				// Single image detail with full info (repositories and instances)
+				log.Printf("Routing to ImageDetailFullHandler")
+				ImageDetailFullHandler(queryProvider)(w, r)
+			} else {
+				// Fallback to basic handlers if provider doesn't support ExecuteReadOnlyQuery
+				if len(pathWithoutPrefix) > 9 && pathWithoutPrefix[len(pathWithoutPrefix)-9:] == "/packages" {
+					PackagesHandler(provider)(w, r)
+					return
+				}
+				if len(pathWithoutPrefix) > 16 && pathWithoutPrefix[len(pathWithoutPrefix)-16:] == "/vulnerabilities" {
+					VulnerabilitiesHandler(provider)(w, r)
+					return
+				}
+				ImageDetailHandler(provider)(w, r)
 			}
-			// "/vulnerabilities" is 16 characters, not 17!
-			if len(pathWithoutPrefix) > 16 && pathWithoutPrefix[len(pathWithoutPrefix)-16:] == "/vulnerabilities" {
-				VulnerabilitiesHandler(provider)(w, r)
-				return
-			}
-			// Single image detail
-			ImageDetailHandler(provider)(w, r)
 		}
 	})
 }

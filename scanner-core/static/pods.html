@@ -107,6 +107,12 @@
             defaultSortBy: 'namespace',
             columnCount: 12,
             renderRow: function(row, item) {
+                // Make row clickable to navigate to image detail page
+                row.onclick = function() {
+                    window.location.href = 'image.html?imageid=' + encodeURIComponent(item.digest);
+                };
+                row.style.cursor = 'pointer';
+
                 // Add namespace
                 addCellToRow(row, 'left', item.namespace || '');
 

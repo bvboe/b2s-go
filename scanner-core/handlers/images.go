@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -260,7 +261,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	}
 
 	// Group by
-	groupBy := " GROUP BY instances.repository || ':' || instances.tag, images.os_name, status.status"
+	groupBy := " GROUP BY instances.repository || ':' || instances.tag, images.digest, images.os_name, status.status"
 
 	// Build count query
 	countQuery := "SELECT COUNT(*) FROM (" +
@@ -272,6 +273,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	// Build main query with sorting
 	selectClause := `SELECT
       instances.repository || ':' || instances.tag as image,
+      images.digest,
       COUNT(*) as instance_count,
       COALESCE(vuln_counts.critical_count, 0) as critical_count,
       COALESCE(vuln_counts.high_count, 0) as high_count,
@@ -502,6 +504,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
       instances.namespace,
       instances.pod,
       instances.container,
+      images.digest,
       COALESCE(vuln_counts.critical_count, 0) as critical_count,
       COALESCE(vuln_counts.high_count, 0) as high_count,
       COALESCE(vuln_counts.medium_count, 0) as medium_count,
@@ -570,6 +573,539 @@ func exportCSV(w http.ResponseWriter, result *database.QueryResult) {
 func exportPodsCSV(w http.ResponseWriter, result *database.QueryResult) {
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", "attachment; filename=pods.csv")
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Write headers
+	if err := writer.Write(result.Columns); err != nil {
+		log.Printf("Error writing CSV headers: %v", err)
+		return
+	}
+
+	// Write rows
+	for _, rowMap := range result.Rows {
+		strRow := make([]string, len(result.Columns))
+		for i, col := range result.Columns {
+			strRow[i] = fmt.Sprintf("%v", rowMap[col])
+		}
+		if err := writer.Write(strRow); err != nil {
+			log.Printf("Error writing CSV row: %v", err)
+			return
+		}
+	}
+}
+
+// ImageDetailFullHandler creates an HTTP handler for /api/images/{digest} endpoint
+// Returns detailed information for a specific image including repositories and instances
+func ImageDetailFullHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		path := r.URL.Path
+		log.Printf("ImageDetailFullHandler: received path: %s", path)
+
+		if len(path) <= 12 { // "/api/images/" is 12 characters
+			log.Printf("ImageDetailFullHandler: path too short: %d chars", len(path))
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		digest := path[12:] // Remove "/api/images/" prefix
+		log.Printf("ImageDetailFullHandler: extracted digest: %s", digest)
+
+		if digest == "" {
+			log.Printf("ImageDetailFullHandler: empty digest")
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+
+		// Build query to get basic image details
+		escapedDigest := strings.ReplaceAll(digest, "'", "''")
+		imageQuery := `
+SELECT
+    images.id,
+    images.digest as image_id,
+    images.status as scan_status,
+    images.os_name as distro_display_name,
+    status.description as status_description
+FROM container_images images
+JOIN scan_status status ON images.status = status.status
+WHERE images.digest = '` + escapedDigest + `'`
+
+		log.Printf("ImageDetailFullHandler: executing image query for digest: %s", digest)
+		imageResult, err := provider.ExecuteReadOnlyQuery(imageQuery)
+		if err != nil {
+			log.Printf("Error querying image details for %s: %v", digest, err)
+			http.Error(w, fmt.Sprintf("Error querying image: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if len(imageResult.Rows) == 0 {
+			log.Printf("No image found with digest: %s", digest)
+			http.Error(w, "Image not found", http.StatusNotFound)
+			return
+		}
+
+		log.Printf("ImageDetailFullHandler: found image")
+		imageRow := imageResult.Rows[0]
+		imageID := imageRow["id"]
+
+		// Get distinct repositories for this image
+		repoQuery := `
+SELECT DISTINCT repository || ':' || tag as repo
+FROM container_instances
+WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
+ORDER BY repository, tag`
+
+		log.Printf("ImageDetailFullHandler: fetching repositories for image_id: %v", imageID)
+		repoResult, err := provider.ExecuteReadOnlyQuery(repoQuery)
+		if err != nil {
+			log.Printf("Error querying repositories for image_id %v: %v", imageID, err)
+			http.Error(w, fmt.Sprintf("Error querying repositories: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		repositories := []string{}
+		for _, row := range repoResult.Rows {
+			if repo, ok := row["repo"].(string); ok && repo != "" {
+				repositories = append(repositories, repo)
+			}
+		}
+		log.Printf("ImageDetailFullHandler: found %d repositories", len(repositories))
+
+		// Get distinct instances for this image
+		instanceQuery := `
+SELECT DISTINCT namespace || '.' || pod || '.' || container as instance
+FROM container_instances
+WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
+ORDER BY namespace, pod, container`
+
+		log.Printf("ImageDetailFullHandler: fetching instances for image_id: %v", imageID)
+		instanceResult, err := provider.ExecuteReadOnlyQuery(instanceQuery)
+		if err != nil {
+			log.Printf("Error querying instances for image_id %v: %v", imageID, err)
+			http.Error(w, fmt.Sprintf("Error querying instances: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		instances := []string{}
+		for _, row := range instanceResult.Rows {
+			if inst, ok := row["instance"].(string); ok && inst != "" {
+				instances = append(instances, inst)
+			}
+		}
+		log.Printf("ImageDetailFullHandler: found %d instances", len(instances))
+
+		response := map[string]interface{}{
+			"image_id":            imageRow["image_id"],
+			"repositories":        repositories,
+			"instances":           instances,
+			"distro_display_name": imageRow["distro_display_name"],
+			"scan_status":         imageRow["scan_status"],
+			"status_description":  imageRow["status_description"],
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding image detail response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	}
+}
+
+// ImageVulnerabilitiesDetailHandler creates an HTTP handler for /api/images/{digest}/vulnerabilities endpoint
+// Returns vulnerabilities for a specific image with filtering, sorting, and pagination
+func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		path := r.URL.Path
+		if len(path) <= 12 {
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		pathWithoutPrefix := path[12:]
+		if len(pathWithoutPrefix) <= 16 || pathWithoutPrefix[len(pathWithoutPrefix)-16:] != "/vulnerabilities" {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		digest := pathWithoutPrefix[:len(pathWithoutPrefix)-16]
+
+		// Parse query parameters
+		params := r.URL.Query()
+
+		// Pagination
+		page, _ := strconv.Atoi(params.Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(params.Get("pageSize"))
+		if pageSize < 1 || pageSize > 1000 {
+			pageSize = 100
+		}
+		offset := (page - 1) * pageSize
+
+		// Filters
+		severities := parseMultiSelect(params.Get("severity"))
+		fixStatuses := parseMultiSelect(params.Get("fixStatus"))
+		packageTypes := parseMultiSelect(params.Get("packageType"))
+
+		// Sorting
+		sortBy := params.Get("sortBy")
+		sortOrder := params.Get("sortOrder")
+		if sortOrder != "ASC" && sortOrder != "DESC" {
+			sortOrder = "ASC"
+		}
+
+		// Export format
+		format := params.Get("format")
+
+		// Build query
+		query, countQuery := buildImageVulnerabilitiesQuery(digest, severities, fixStatuses, packageTypes, sortBy, sortOrder, pageSize, offset)
+
+		// Execute count query for pagination
+		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
+		if err != nil {
+			log.Printf("Error executing vulnerability count query: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		totalCount := int64(0)
+		if len(countResult.Rows) > 0 {
+			if count, ok := countResult.Rows[0]["COUNT(*)"].(int64); ok {
+				totalCount = count
+			}
+		}
+
+		// Execute main query
+		result, err := provider.ExecuteReadOnlyQuery(query)
+		if err != nil {
+			log.Printf("Error executing vulnerability query: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Handle CSV export
+		if format == "csv" {
+			exportVulnerabilitiesCSV(w, result)
+			return
+		}
+
+		// Return JSON response
+		totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"vulnerabilities": result.Rows,
+			"page":            page,
+			"pageSize":        pageSize,
+			"totalCount":      totalCount,
+			"totalPages":      totalPages,
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding vulnerabilities response: %v", err)
+		}
+	}
+}
+
+// buildImageVulnerabilitiesQuery constructs the SQL query for image vulnerabilities
+func buildImageVulnerabilitiesQuery(digest string, severities, fixStatuses, packageTypes []string, sortBy, sortOrder string, limit, offset int) (string, string) {
+	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+
+	// Build WHERE conditions
+	var conditions []string
+
+	// Severity filter
+	if len(severities) > 0 {
+		escaped := make([]string, len(severities))
+		for i, s := range severities {
+			escaped[i] = "'" + strings.ReplaceAll(s, "'", "''") + "'"
+		}
+		conditions = append(conditions, "v.severity IN ("+strings.Join(escaped, ",")+")")
+	}
+
+	// Fix status filter
+	if len(fixStatuses) > 0 {
+		escaped := make([]string, len(fixStatuses))
+		for i, s := range fixStatuses {
+			escaped[i] = "'" + strings.ReplaceAll(s, "'", "''") + "'"
+		}
+		conditions = append(conditions, "v.fix_status IN ("+strings.Join(escaped, ",")+")")
+	}
+
+	// Package type filter
+	if len(packageTypes) > 0 {
+		escaped := make([]string, len(packageTypes))
+		for i, t := range packageTypes {
+			escaped[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
+		}
+		conditions = append(conditions, "v.package_type IN ("+strings.Join(escaped, ",")+")")
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " AND " + strings.Join(conditions, " AND ")
+	}
+
+	// Base query
+	baseQuery := fmt.Sprintf(`
+FROM vulnerabilities v
+JOIN container_images images ON v.image_id = images.id
+WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
+
+	// Build count query
+	countQuery := "SELECT COUNT(*)" + baseQuery
+
+	// Build main query with sorting
+	selectClause := `SELECT
+    v.id,
+    v.cve_id as vulnerability_id,
+    v.package_name as artifact_name,
+    v.package_version as artifact_version,
+    v.fixed_version as vulnerability_fix_versions,
+    v.fix_status as vulnerability_fix_state,
+    v.package_type as artifact_type,
+    v.severity as vulnerability_severity,
+    v.risk as vulnerability_risk,
+    v.known_exploited as vulnerability_known_exploits`
+
+	mainQuery := selectClause + baseQuery
+
+	// Add sorting
+	validSortColumns := map[string]bool{
+		"vulnerability_severity": true, "vulnerability_id": true, "artifact_name": true,
+		"artifact_version": true, "vulnerability_fix_versions": true, "vulnerability_fix_state": true,
+		"artifact_type": true, "vulnerability_risk": true, "vulnerability_known_exploits": true,
+	}
+
+	// Always sort by severity order first
+	mainQuery += `
+ORDER BY
+    CASE v.severity
+        WHEN 'Critical' THEN 1
+        WHEN 'High' THEN 2
+        WHEN 'Medium' THEN 3
+        WHEN 'Low' THEN 4
+        WHEN 'Negligible' THEN 5
+        ELSE 6
+    END ASC`
+
+	// Add secondary sort if specified
+	if sortBy != "" && validSortColumns[sortBy] {
+		// Map UI column names to database columns
+		dbColumn := sortBy
+		switch sortBy {
+		case "vulnerability_severity":
+			// Already sorted by severity, skip
+		case "vulnerability_id":
+			dbColumn = "v.cve_id"
+		case "artifact_name":
+			dbColumn = "v.package_name"
+		case "artifact_version":
+			dbColumn = "v.package_version"
+		case "vulnerability_fix_versions":
+			dbColumn = "v.fixed_version"
+		case "vulnerability_fix_state":
+			dbColumn = "v.fix_status"
+		case "artifact_type":
+			dbColumn = "v.package_type"
+		case "vulnerability_risk":
+			dbColumn = "v.risk"
+		case "vulnerability_known_exploits":
+			dbColumn = "v.known_exploited"
+		}
+		if dbColumn != "vulnerability_severity" {
+			mainQuery += fmt.Sprintf(", %s %s", dbColumn, sortOrder)
+		}
+	}
+
+	// Add pagination
+	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+
+	return mainQuery, countQuery
+}
+
+// exportVulnerabilitiesCSV exports vulnerabilities as CSV
+func exportVulnerabilitiesCSV(w http.ResponseWriter, result *database.QueryResult) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=vulnerabilities.csv")
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Write headers
+	if err := writer.Write(result.Columns); err != nil {
+		log.Printf("Error writing CSV headers: %v", err)
+		return
+	}
+
+	// Write rows
+	for _, rowMap := range result.Rows {
+		strRow := make([]string, len(result.Columns))
+		for i, col := range result.Columns {
+			strRow[i] = fmt.Sprintf("%v", rowMap[col])
+		}
+		if err := writer.Write(strRow); err != nil {
+			log.Printf("Error writing CSV row: %v", err)
+			return
+		}
+	}
+}
+
+// ImagePackagesDetailHandler creates an HTTP handler for /api/images/{digest}/packages endpoint
+// Returns packages for a specific image with filtering, sorting, and pagination
+func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract digest from URL path
+		path := r.URL.Path
+		if len(path) <= 12 {
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		pathWithoutPrefix := path[12:]
+		if len(pathWithoutPrefix) <= 9 || pathWithoutPrefix[len(pathWithoutPrefix)-9:] != "/packages" {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		digest := pathWithoutPrefix[:len(pathWithoutPrefix)-9]
+
+		// Parse query parameters
+		params := r.URL.Query()
+
+		// Pagination
+		page, _ := strconv.Atoi(params.Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(params.Get("pageSize"))
+		if pageSize < 1 || pageSize > 1000 {
+			pageSize = 100
+		}
+		offset := (page - 1) * pageSize
+
+		// Filters
+		packageTypes := parseMultiSelect(params.Get("type"))
+
+		// Sorting
+		sortBy := params.Get("sortBy")
+		sortOrder := params.Get("sortOrder")
+		if sortOrder != "ASC" && sortOrder != "DESC" {
+			sortOrder = "ASC"
+		}
+
+		// Export format
+		format := params.Get("format")
+
+		// Build query
+		query, countQuery := buildImagePackagesQuery(digest, packageTypes, sortBy, sortOrder, pageSize, offset)
+
+		// Execute count query for pagination
+		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
+		if err != nil {
+			log.Printf("Error executing package count query: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		totalCount := int64(0)
+		if len(countResult.Rows) > 0 {
+			if count, ok := countResult.Rows[0]["COUNT(*)"].(int64); ok {
+				totalCount = count
+			}
+		}
+
+		// Execute main query
+		result, err := provider.ExecuteReadOnlyQuery(query)
+		if err != nil {
+			log.Printf("Error executing package query: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Handle CSV export
+		if format == "csv" {
+			exportPackagesCSV(w, result)
+			return
+		}
+
+		// Return JSON response
+		totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"packages":   result.Rows,
+			"page":       page,
+			"pageSize":   pageSize,
+			"totalCount": totalCount,
+			"totalPages": totalPages,
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding packages response: %v", err)
+		}
+	}
+}
+
+// buildImagePackagesQuery constructs the SQL query for image packages
+func buildImagePackagesQuery(digest string, packageTypes []string, sortBy, sortOrder string, limit, offset int) (string, string) {
+	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+
+	// Build WHERE conditions
+	var conditions []string
+
+	// Package type filter
+	if len(packageTypes) > 0 {
+		escaped := make([]string, len(packageTypes))
+		for i, t := range packageTypes {
+			escaped[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
+		}
+		conditions = append(conditions, "p.type IN ("+strings.Join(escaped, ",")+")")
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " AND " + strings.Join(conditions, " AND ")
+	}
+
+	// Base query
+	baseQuery := fmt.Sprintf(`
+FROM packages p
+JOIN container_images images ON p.image_id = images.id
+WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
+
+	// Build count query
+	countQuery := "SELECT COUNT(*)" + baseQuery
+
+	// Build main query with sorting
+	selectClause := `SELECT
+    p.name,
+    p.version,
+    p.type,
+    p.number_of_instances as count`
+
+	mainQuery := selectClause + baseQuery
+
+	// Add sorting
+	validSortColumns := map[string]bool{
+		"name": true, "version": true, "type": true, "count": true,
+	}
+
+	if sortBy != "" && validSortColumns[sortBy] {
+		dbColumn := "p." + sortBy
+		if sortBy == "count" {
+			dbColumn = "p.number_of_instances"
+		}
+		mainQuery += fmt.Sprintf(" ORDER BY %s %s", dbColumn, sortOrder)
+	} else {
+		mainQuery += " ORDER BY p.name ASC"
+	}
+
+	// Add pagination
+	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+
+	return mainQuery, countQuery
+}
+
+// exportPackagesCSV exports packages as CSV
+func exportPackagesCSV(w http.ResponseWriter, result *database.QueryResult) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=packages.csv")
 
 	writer := csv.NewWriter(w)
 	defer writer.Flush()

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bjorn2scan - Image Details</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="multi-select-styles.css">
+    <link rel="stylesheet" href="custom-styles.css">
+</head>
+<body>
+    <table width="100%">
+        <tr>
+            <td>
+                <h3><a href="#" onclick="window.history.back(); return false;" style="cursor: pointer;">Back</a></h3>
+            </td>
+        </tr>
+        <tr>
+            <td valign="top">
+                <h1><u>Image Details</u></h1>
+
+                <!-- Summary table -->
+                <table class="summaryTable" style="margin-bottom: 20px;">
+                    <tr><td width="180"><b>Image ID:</b></td><td id="image_id"></td></tr>
+                    <tr><td><b>Repository:</b></td><td id="repositories"></td></tr>
+                    <tr><td><b>Linux Distribution:</b></td><td id="distro_display_name"></td></tr>
+                    <tr><td><b>Container Instances:</b></td><td id="instances"></td></tr>
+                    <tr><td><b>Scan Status:</b></td><td id="scan_status"></td></tr>
+                </table>
+
+                <!-- Tab headers -->
+                <table>
+                    <tr>
+                        <td><h1 style="cursor: pointer" onclick="showVulnerabilityTable()">
+                            <div id="cvesHeader" style="text-decoration: underline">Vulnerabilities</div>
+                        </h1></td>
+                        <td><h1 style="cursor: pointer" onclick="showSBOMTable()">
+                            <div id="sbomHeader">SBOM</div>
+                        </h1></td>
+                    </tr>
+                </table>
+
+                <!-- Vulnerabilities section -->
+                <div id="cvesSection" style="display: block;">
+                    <table style="border-collapse: collapse;" width="100%" id="vulnFilterTable">
+                        <thead>
+                            <tr>
+                                <td width="1%" style="cursor: pointer" onclick="toggleVulnFilterVisible()" class="filterSelected" id="vulnFilterCell">
+                                    <b><div class="filterContainerSelected" id="vulnFilterContainer">Filters</div></b>
+                                </td>
+                                <td colspan="1"></td>
+                            </tr>
+                        </thead>
+                        <tbody id="vulnFilterDetails">
+                            <tr height="1px">
+                                <td style="border-left: 1px solid black;"/>
+                                <td style="border-top: 1px solid black; border-right: 1px solid black;"/>
+                            </tr>
+                            <tr>
+                                <td colspan="2" class="filterBody">
+                                    <form>
+                                        <label for="severityFilter"><b>Severity:</b></label>
+                                        <select id="severityFilter" name="severity" multiple onchange="onVulnFilterChange()">
+                                        </select>
+
+                                        <label for="fixStatusFilter"><b>Status:</b></label>
+                                        <select id="fixStatusFilter" name="fixStatus" multiple onchange="onVulnFilterChange()">
+                                        </select>
+
+                                        <label for="packageTypeFilter"><b>Type:</b></label>
+                                        <select id="packageTypeFilter" name="packageType" multiple onchange="onVulnFilterChange()">
+                                        </select>
+                                    </form>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Export links -->
+                    <div style="text-align: right; text-decoration: underline;">
+                        <b><a href="" id="cvejsonlink">Export to JSON</a></b> |
+                        <b><a href="" id="cvecsvlink">Export to CSV</a></b>
+                    </div>
+
+                    <!-- Vulnerabilities table -->
+                    <table id="cvesTable" width="100%" class="listingTable">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-sort-field="vulnerability_severity" onclick="sortVulnByColumn('vulnerability_severity')"><b>Severity</b></th>
+                                <th class="sortable" data-sort-field="vulnerability_id" onclick="sortVulnByColumn('vulnerability_id')"><b>Vulnerability</b></th>
+                                <th class="sortable" data-sort-field="artifact_name" onclick="sortVulnByColumn('artifact_name')"><b>Name</b></th>
+                                <th class="sortable" data-sort-field="artifact_version" onclick="sortVulnByColumn('artifact_version')"><b>Installed</b></th>
+                                <th class="sortable" data-sort-field="vulnerability_fix_versions" onclick="sortVulnByColumn('vulnerability_fix_versions')"><b>Fixed In</b></th>
+                                <th class="sortable" data-sort-field="vulnerability_fix_state" onclick="sortVulnByColumn('vulnerability_fix_state')"><b>Status</b></th>
+                                <th class="sortable" data-sort-field="artifact_type" onclick="sortVulnByColumn('artifact_type')"><b>Type</b></th>
+                                <th class="sortable" data-sort-field="vulnerability_risk" onclick="sortVulnByColumn('vulnerability_risk')"><b>Risk</b></th>
+                                <th class="sortable" data-sort-field="vulnerability_known_exploits" onclick="sortVulnByColumn('vulnerability_known_exploits')"><b>Exploits</b></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+
+                    <div id="vulnPagination" style="margin: 20px 0; text-align: center;">
+                        <!-- Pagination controls will be inserted here -->
+                    </div>
+                </div>
+
+                <!-- SBOM section -->
+                <div id="sbomSection" style="display: none;">
+                    <table style="border-collapse: collapse;" width="100%" id="sbomFilterTable">
+                        <thead>
+                            <tr>
+                                <td width="1%" style="cursor: pointer" onclick="toggleSBOMFilterVisible()" class="filterSelected" id="sbomFilterCell">
+                                    <b><div class="filterContainerSelected" id="sbomFilterContainer">Filters</div></b>
+                                </td>
+                                <td colspan="1"></td>
+                            </tr>
+                        </thead>
+                        <tbody id="sbomFilterDetails">
+                            <tr height="1px">
+                                <td style="border-left: 1px solid black;"/>
+                                <td style="border-top: 1px solid black; border-right: 1px solid black;"/>
+                            </tr>
+                            <tr>
+                                <td colspan="2" class="filterBody">
+                                    <form>
+                                        <label for="sbomTypeFilter"><b>Type:</b></label>
+                                        <select id="sbomTypeFilter" name="type" multiple onchange="onSBOMFilterChange()">
+                                        </select>
+                                    </form>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Export links -->
+                    <div style="text-align: right; text-decoration: underline;">
+                        <b><a href="" id="sbomjsonlink">Export to JSON</a></b> |
+                        <b><a href="" id="sbomcsvlink">Export to CSV</a></b>
+                    </div>
+
+                    <!-- SBOM table -->
+                    <table id="sbomTable" width="100%" class="listingTable">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-sort-field="name" onclick="sortSBOMByColumn('name')"><b>Name</b></th>
+                                <th class="sortable" data-sort-field="version" onclick="sortSBOMByColumn('version')"><b>Version</b></th>
+                                <th class="sortable" data-sort-field="type" onclick="sortSBOMByColumn('type')"><b>Type</b></th>
+                                <th class="sortable" data-sort-field="count" onclick="sortSBOMByColumn('count')"><b>Count</b></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+
+                    <div id="sbomPagination" style="margin: 20px 0; text-align: center;">
+                        <!-- Pagination controls will be inserted here -->
+                    </div>
+                </div>
+
+                <div id="app-footer"></div>
+            </td>
+        </tr>
+    </table>
+
+    <script src="shared.js"></script>
+    <script src="image.js"></script>
+</body>
+</html>
