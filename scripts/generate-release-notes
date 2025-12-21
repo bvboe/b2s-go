@@ -88,43 +88,41 @@ ${FILES_CHANGED}
 5. Keep the summary under 400 words
 6. Use bullet points for clarity
 
-**CRITICAL:** Output ONLY the markdown content below. Do NOT include any conversational text, preambles, or explanations. Start directly with the ## emoji and title.
+**CRITICAL FORMATTING REQUIREMENTS:**
+1. You MUST include ALL markdown headers (## and ###) with emojis
+2. Do NOT output conversational text or explanations
+3. Start your response with exactly: ## 🎯 Highlights
+4. Follow the exact structure shown below
+5. Keep ALL section headers even if empty (just write "None" for empty sections)
 
-**Output Format:**
-\`\`\`markdown
+**Required Output Structure (copy this exactly):**
+
 ## 🎯 Highlights
 
-[2-3 sentence summary of the most important changes]
+[Write 2-3 sentences summarizing the key changes]
 
 ## What's Changed
 
 ### ✨ Features
-- [New feature descriptions]
+- [List new features, or write "None"]
 
 ### 🐛 Bug Fixes
-- [Bug fix descriptions]
-
-### ⚡ Performance
-- [Performance improvements]
+- [List bug fixes, or write "None"]
 
 ### 🧪 Testing
-- [Test improvements]
+- [List testing improvements, or write "None"]
 
 ### 📚 Documentation
-- [Documentation updates]
+- [List documentation updates, or write "None"]
 
 ### 🔧 Internal
-- [Refactoring, CI/CD, tooling, etc.]
-
-## ⚠️ Breaking Changes
-[Only include if there are breaking changes, otherwise omit this entire section]
+- [List internal changes like refactoring, CI/CD, tooling]
 
 ## 📊 Statistics
 - X commits from Y contributors
 - Z files changed
-\`\`\`
 
-Output the markdown now (NO preamble, start with ##):
+**IMPORTANT:** Your first line MUST be: ## 🎯 Highlights
 EOM
 
 log_info "Calling Claude CLI to analyze commits..."
