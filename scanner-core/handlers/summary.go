@@ -210,14 +210,18 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			defer writer.Flush()
 
 			// Write header
-			writer.Write([]string{
+			if err := writer.Write([]string{
 				"Namespace", "Instances", "Avg Critical", "Avg High", "Avg Medium",
 				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
-			})
+			}); err != nil {
+				log.Printf("Error writing CSV header: %v", err)
+				http.Error(w, "Error generating CSV", http.StatusInternalServerError)
+				return
+			}
 
 			// Write data
 			for _, item := range namespaceData {
-				writer.Write([]string{
+				if err := writer.Write([]string{
 					fmt.Sprintf("%v", item["namespace"]),
 					fmt.Sprintf("%v", item["instance_count"]),
 					fmt.Sprintf("%.1f", item["avg_critical"]),
@@ -229,7 +233,11 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 					fmt.Sprintf("%.1f", item["avg_risk"]),
 					fmt.Sprintf("%.1f", item["avg_exploits"]),
 					fmt.Sprintf("%.1f", item["avg_packages"]),
-				})
+				}); err != nil {
+					log.Printf("Error writing CSV row: %v", err)
+					http.Error(w, "Error generating CSV", http.StatusInternalServerError)
+					return
+				}
 			}
 			return
 		}
@@ -472,14 +480,18 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			defer writer.Flush()
 
 			// Write header
-			writer.Write([]string{
+			if err := writer.Write([]string{
 				"OS Distribution", "Instances", "Avg Critical", "Avg High", "Avg Medium",
 				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
-			})
+			}); err != nil {
+				log.Printf("Error writing CSV header: %v", err)
+				http.Error(w, "Error generating CSV", http.StatusInternalServerError)
+				return
+			}
 
 			// Write data
 			for _, item := range distributionData {
-				writer.Write([]string{
+				if err := writer.Write([]string{
 					fmt.Sprintf("%v", item["os_name"]),
 					fmt.Sprintf("%v", item["instance_count"]),
 					fmt.Sprintf("%.1f", item["avg_critical"]),
@@ -491,7 +503,11 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 					fmt.Sprintf("%.1f", item["avg_risk"]),
 					fmt.Sprintf("%.1f", item["avg_exploits"]),
 					fmt.Sprintf("%.1f", item["avg_packages"]),
-				})
+				}); err != nil {
+					log.Printf("Error writing CSV row: %v", err)
+					http.Error(w, "Error generating CSV", http.StatusInternalServerError)
+					return
+				}
 			}
 			return
 		}
