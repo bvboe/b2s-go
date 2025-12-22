@@ -242,8 +242,7 @@ func TestParseImageNameAndExtractDigest(t *testing.T) {
 // TestWatchPodsInformerIntegration tests the informer-based pod watcher with add/update/delete events
 func TestWatchPodsInformerIntegration(t *testing.T) {
 	// Create fake clientset
-	//nolint:staticcheck // NewSimpleClientset is deprecated but NewClientset requires apply configurations
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 
 	// Create a manager to track container instances
 	manager := containers.NewManager()
@@ -348,8 +347,7 @@ func TestWatchPodsInformerDeletion(t *testing.T) {
 		},
 	}
 
-	//nolint:staticcheck // NewSimpleClientset is deprecated but NewClientset requires apply configurations
-	clientset := fake.NewSimpleClientset(testPod)
+	clientset := fake.NewClientset(testPod)
 	manager := containers.NewManager()
 
 	// Start the watcher
@@ -417,8 +415,7 @@ func TestWatchPodsInformerUpdate(t *testing.T) {
 		},
 	}
 
-	//nolint:staticcheck // NewSimpleClientset is deprecated but NewClientset requires apply configurations
-	clientset := fake.NewSimpleClientset(testPod)
+	clientset := fake.NewClientset(testPod)
 	manager := containers.NewManager()
 
 	// Start the watcher
@@ -461,8 +458,7 @@ func TestWatchPodsInformerUpdate(t *testing.T) {
 // TestWatchPodsInformerMultiplePods tests handling multiple pods simultaneously
 func TestWatchPodsInformerMultiplePods(t *testing.T) {
 	// Create fake clientset with multiple running pods
-	//nolint:staticcheck // NewSimpleClientset is deprecated but NewClientset requires apply configurations
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	manager := containers.NewManager()
 
 	// Start the watcher

@@ -38,7 +38,8 @@ func (p *SyftPackage) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON returns the raw JSON (preserving all fields and original order)
-func (p *SyftPackage) MarshalJSON() ([]byte, error) {
+// Uses value receiver so it works when marshaling []SyftPackage (not just []*SyftPackage)
+func (p SyftPackage) MarshalJSON() ([]byte, error) {
 	return p.Raw, nil
 }
 
@@ -78,7 +79,8 @@ func (m *GrypeMatch) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON returns the raw JSON (preserving all fields and original order)
-func (m *GrypeMatch) MarshalJSON() ([]byte, error) {
+// Uses value receiver so it works when marshaling []GrypeMatch (not just []*GrypeMatch)
+func (m GrypeMatch) MarshalJSON() ([]byte, error) {
 	return m.Raw, nil
 }
 
