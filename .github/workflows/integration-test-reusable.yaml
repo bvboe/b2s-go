@@ -29,6 +29,50 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    # Cache for Kind binary and cluster images
+    - name: Cache Kind
+      if: inputs.cluster_type == 'kind'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.kind
+          /var/lib/docker/image
+        key: ${{ runner.os }}-kind-${{ hashFiles('.github/workflows/integration-test-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-kind-
+
+    # Cache for Minikube binary and cluster data
+    - name: Cache Minikube
+      if: inputs.cluster_type == 'minikube'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.minikube
+          /var/lib/minikube
+        key: ${{ runner.os }}-minikube-${{ hashFiles('.github/workflows/integration-test-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-minikube-
+
+    # Cache for Helm binary and repositories
+    - name: Cache Helm
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/helm
+          ~/.local/share/helm
+        key: ${{ runner.os }}-helm-${{ hashFiles('helm/**') }}
+        restore-keys: |
+          ${{ runner.os }}-helm-
+
+    # Cache for kubectl binary
+    - name: Cache kubectl
+      uses: actions/cache@v4
+      with:
+        path: ~/.kube/cache
+        key: ${{ runner.os }}-kubectl-cache
+        restore-keys: |
+          ${{ runner.os }}-kubectl-
+
     - name: Build k8s-scan-server image
       uses: docker/build-push-action@v6
       with:
@@ -124,3 +168,44 @@ jobs:
     - name: Cleanup
       if: always()
       run: helm uninstall bjorn2scan -n default || true
+
+    - name: Report Cache Statistics
+      if: always()
+      run: |
+        echo "=== Cache Statistics Report ==="
+        echo "Cluster Type: ${{ inputs.cluster_type }}"
+        echo ""
+        echo "Cache Directories:"
+
+        # Check Kind cache
+        if [ -d ~/.kind ]; then
+          KIND_SIZE=$(du -sh ~/.kind 2>/dev/null | cut -f1 || echo "0")
+          echo "  Kind cache: $KIND_SIZE"
+        fi
+
+        # Check Minikube cache
+        if [ -d ~/.minikube ]; then
+          MINIKUBE_SIZE=$(du -sh ~/.minikube 2>/dev/null | cut -f1 || echo "0")
+          echo "  Minikube cache: $MINIKUBE_SIZE"
+        fi
+
+        # Check Helm cache
+        if [ -d ~/.cache/helm ]; then
+          HELM_SIZE=$(du -sh ~/.cache/helm 2>/dev/null | cut -f1 || echo "0")
+          echo "  Helm cache: $HELM_SIZE"
+        fi
+
+        # Check kubectl cache
+        if [ -d ~/.kube/cache ]; then
+          KUBECTL_SIZE=$(du -sh ~/.kube/cache 2>/dev/null | cut -f1 || echo "0")
+          echo "  kubectl cache: $KUBECTL_SIZE"
+        fi
+
+        # Check Go cache
+        if [ -d ~/.cache/go-build ]; then
+          GO_SIZE=$(du -sh ~/.cache/go-build 2>/dev/null | cut -f1 || echo "0")
+          echo "  Go build cache: $GO_SIZE"
+        fi
+
+        echo ""
+        echo "Total workflow duration: ${{ github.event.workflow_run.run_duration_ms || 'N/A' }}ms"

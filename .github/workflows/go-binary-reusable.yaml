@@ -83,6 +83,18 @@ jobs:
         go-version: '1.25'
         cache-dependency-path: ${{ inputs.component-path }}/go.sum
 
+    # Cache golangci-lint analysis results
+    - name: Cache golangci-lint
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/golangci-lint
+          ~/.cache/go-build
+        key: ${{ runner.os }}-golangci-lint-${{ inputs.component-name }}-${{ hashFiles(format('{0}/go.sum', inputs.component-path)) }}
+        restore-keys: |
+          ${{ runner.os }}-golangci-lint-${{ inputs.component-name }}-
+          ${{ runner.os }}-golangci-lint-
+
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
@@ -123,6 +135,16 @@ jobs:
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
         fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    # Cache cosign binary
+    - name: Cache cosign
+      if: github.ref_type == 'tag'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cosign
+        key: ${{ runner.os }}-cosign-${{ hashFiles('.github/workflows/go-binary-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-cosign-
 
     - name: Build binaries
       run: |

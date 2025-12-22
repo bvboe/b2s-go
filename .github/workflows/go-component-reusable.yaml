@@ -123,6 +123,18 @@ jobs:
         go-version: '1.25'
         cache-dependency-path: ${{ inputs.component-path }}/go.sum
 
+    # Cache golangci-lint analysis results
+    - name: Cache golangci-lint
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/golangci-lint
+          ~/.cache/go-build
+        key: ${{ runner.os }}-golangci-lint-${{ inputs.component-name }}-${{ hashFiles(format('{0}/go.sum', inputs.component-path)) }}
+        restore-keys: |
+          ${{ runner.os }}-golangci-lint-${{ inputs.component-name }}-
+          ${{ runner.os }}-golangci-lint-
+
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
@@ -152,6 +164,25 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+
+    # Cache Grype vulnerability database
+    - name: Cache Grype DB
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/grype
+        key: ${{ runner.os }}-grype-db-${{ hashFiles('.github/workflows/go-component-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-grype-db-
+
+    # Cache cosign binary
+    - name: Cache cosign
+      if: inputs.docker-push
+      uses: actions/cache@v4
+      with:
+        path: ~/.cosign
+        key: ${{ runner.os }}-cosign-${{ hashFiles('.github/workflows/go-component-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-cosign-
 
     - name: Log in to Container Registry
       if: inputs.docker-push
@@ -261,6 +292,43 @@ jobs:
         for tag in ${TAGS}; do
           cosign sign --yes "${tag}@${DIGEST}"
         done
+
+    - name: Report Cache Statistics
+      if: always()
+      run: |
+        echo "=== Cache Statistics Report ==="
+        echo "Component: ${{ inputs.component-name }}"
+        echo ""
+        echo "Cache Directories:"
+
+        # Check golangci-lint cache
+        if [ -d ~/.cache/golangci-lint ]; then
+          GOLANGCI_SIZE=$(du -sh ~/.cache/golangci-lint 2>/dev/null | cut -f1 || echo "0")
+          echo "  golangci-lint cache: $GOLANGCI_SIZE"
+        fi
+
+        # Check Grype cache
+        if [ -d ~/.cache/grype ]; then
+          GRYPE_SIZE=$(du -sh ~/.cache/grype 2>/dev/null | cut -f1 || echo "0")
+          echo "  Grype DB cache: $GRYPE_SIZE"
+        fi
+
+        # Check Go build cache
+        if [ -d ~/.cache/go-build ]; then
+          GO_SIZE=$(du -sh ~/.cache/go-build 2>/dev/null | cut -f1 || echo "0")
+          echo "  Go build cache: $GO_SIZE"
+        fi
+
+        # Check cosign cache
+        if [ -d ~/.cosign ]; then
+          COSIGN_SIZE=$(du -sh ~/.cosign 2>/dev/null | cut -f1 || echo "0")
+          echo "  cosign cache: $COSIGN_SIZE"
+        fi
+
+        echo ""
+        echo "Docker cache info:"
+        docker system df 2>/dev/null || echo "  Docker info unavailable"
+
   # Parallel platform builds (faster for multi-arch releases)
   docker-prep-parallel:
     if: inputs.run-docker && inputs.parallel-builds && inputs.docker-push
@@ -323,17 +391,27 @@ jobs:
     
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
-    
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    
+
+    # Cache for parallel builds
+    - name: Cache Docker layers
+      uses: actions/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ inputs.component-name }}-${{ matrix.platform }}-${{ hashFiles(format('{0}/go.sum', inputs.component-path)) }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-${{ inputs.component-name }}-${{ matrix.platform }}-
+          ${{ runner.os }}-buildx-${{ inputs.component-name }}-
+
     - name: Log in to Container Registry
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - name: Build and push platform-specific image
       uses: docker/build-push-action@v6
       with:
@@ -360,11 +438,29 @@ jobs:
     outputs:
       digest: ${{ steps.merge.outputs.digest }}
       tags: ${{ needs.docker-prep-parallel.outputs.tags }}
-    
+
     steps:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    
+
+    # Cache Grype vulnerability database
+    - name: Cache Grype DB
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/grype
+        key: ${{ runner.os }}-grype-db-${{ hashFiles('.github/workflows/go-component-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-grype-db-
+
+    # Cache cosign binary
+    - name: Cache cosign
+      uses: actions/cache@v4
+      with:
+        path: ~/.cosign
+        key: ${{ runner.os }}-cosign-${{ hashFiles('.github/workflows/go-component-reusable.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-cosign-
+
     - name: Log in to Container Registry
       uses: docker/login-action@v3
       with:
@@ -438,3 +534,27 @@ jobs:
         for tag in ${TAGS}; do
           cosign sign --yes "${tag}@${DIGEST}"
         done
+
+    - name: Report Cache Statistics
+      if: always()
+      run: |
+        echo "=== Cache Statistics Report (Parallel Build) ==="
+        echo "Component: ${{ inputs.component-name }}"
+        echo ""
+        echo "Cache Directories:"
+
+        # Check Grype cache
+        if [ -d ~/.cache/grype ]; then
+          GRYPE_SIZE=$(du -sh ~/.cache/grype 2>/dev/null | cut -f1 || echo "0")
+          echo "  Grype DB cache: $GRYPE_SIZE"
+        fi
+
+        # Check cosign cache
+        if [ -d ~/.cosign ]; then
+          COSIGN_SIZE=$(du -sh ~/.cosign 2>/dev/null | cut -f1 || echo "0")
+          echo "  cosign cache: $COSIGN_SIZE"
+        fi
+
+        echo ""
+        echo "Docker cache info:"
+        docker system df 2>/dev/null || echo "  Docker info unavailable"
