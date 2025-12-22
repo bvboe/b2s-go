@@ -1115,6 +1115,7 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
 	// Build main query with sorting
 	selectClause := `SELECT
+    p.id,
     p.name,
     p.version,
     p.type,
@@ -1192,5 +1193,137 @@ func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, diges
 	w.Header().Set("Content-Disposition", "attachment; filename=syft-sbom.json")
 	if _, err := w.Write([]byte(sbomJSON)); err != nil {
 		log.Printf("Error writing SBOM JSON: %v", err)
+	}
+}
+
+// VulnerabilityDetailsHandler returns the full JSON details for a specific vulnerability
+func VulnerabilityDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract vulnerability ID from URL path
+		// Expected format: /api/vulnerabilities/{id}/details
+		path := r.URL.Path
+		log.Printf("VulnerabilityDetailsHandler - full path: %s", path)
+
+		// Remove "/api/vulnerabilities/" prefix (22 characters) and "/details" suffix (8 characters)
+		if len(path) <= 30 {
+			log.Printf("VulnerabilityDetailsHandler - path too short: %d characters", len(path))
+			http.Error(w, "Invalid vulnerability ID", http.StatusBadRequest)
+			return
+		}
+
+		vulnIDStr := path[22 : len(path)-8] // Extract ID from path
+		log.Printf("VulnerabilityDetailsHandler - extracted ID string: '%s'", vulnIDStr)
+
+		// Validate that the ID is a valid integer
+		vulnID, err := strconv.ParseInt(vulnIDStr, 10, 64)
+		if err != nil {
+			log.Printf("VulnerabilityDetailsHandler - invalid ID format: %s, error: %v", vulnIDStr, err)
+			http.Error(w, "Invalid vulnerability ID format", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Fetching details for vulnerability ID: %d", vulnID)
+
+		// Query vulnerability_details table
+		query := fmt.Sprintf(`
+			SELECT vd.details
+			FROM vulnerability_details vd
+			WHERE vd.vulnerability_id = %d`, vulnID)
+
+		log.Printf("VulnerabilityDetailsHandler - executing query: %s", query)
+
+		result, err := provider.ExecuteReadOnlyQuery(query)
+		if err != nil {
+			log.Printf("Error fetching vulnerability details: %v", err)
+			http.Error(w, "Failed to fetch vulnerability details", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("VulnerabilityDetailsHandler - query returned %d rows", len(result.Rows))
+
+		if len(result.Rows) == 0 {
+			log.Printf("VulnerabilityDetailsHandler - no details found for ID %d", vulnID)
+			http.Error(w, "Vulnerability details not found", http.StatusNotFound)
+			return
+		}
+
+		detailsJSON, ok := result.Rows[0]["details"].(string)
+		if !ok || detailsJSON == "" {
+			log.Printf("VulnerabilityDetailsHandler - details field is empty or wrong type")
+			http.Error(w, "No details available", http.StatusNotFound)
+			return
+		}
+
+		log.Printf("VulnerabilityDetailsHandler - returning %d bytes of JSON", len(detailsJSON))
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(detailsJSON)); err != nil {
+			log.Printf("Error writing vulnerability details: %v", err)
+		}
+	}
+}
+
+// PackageDetailsHandler returns the full JSON details for a specific package
+func PackageDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract package ID from URL path
+		// Expected format: /api/packages/{id}/details
+		path := r.URL.Path
+		log.Printf("PackageDetailsHandler - full path: %s", path)
+
+		// Remove "/api/packages/" prefix (14 characters) and "/details" suffix (8 characters)
+		if len(path) <= 22 {
+			log.Printf("PackageDetailsHandler - path too short: %d characters", len(path))
+			http.Error(w, "Invalid package ID", http.StatusBadRequest)
+			return
+		}
+
+		pkgIDStr := path[14 : len(path)-8] // Extract ID from path
+		log.Printf("PackageDetailsHandler - extracted ID string: '%s'", pkgIDStr)
+
+		// Validate that the ID is a valid integer
+		pkgID, err := strconv.ParseInt(pkgIDStr, 10, 64)
+		if err != nil {
+			log.Printf("PackageDetailsHandler - invalid ID format: %s, error: %v", pkgIDStr, err)
+			http.Error(w, "Invalid package ID format", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Fetching details for package ID: %d", pkgID)
+
+		// Query package_details table
+		query := fmt.Sprintf(`
+			SELECT pd.details
+			FROM package_details pd
+			WHERE pd.package_id = %d`, pkgID)
+
+		log.Printf("PackageDetailsHandler - executing query: %s", query)
+
+		result, err := provider.ExecuteReadOnlyQuery(query)
+		if err != nil {
+			log.Printf("Error fetching package details: %v", err)
+			http.Error(w, "Failed to fetch package details", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("PackageDetailsHandler - query returned %d rows", len(result.Rows))
+
+		if len(result.Rows) == 0 {
+			log.Printf("PackageDetailsHandler - no details found for ID %d", pkgID)
+			http.Error(w, "Package details not found", http.StatusNotFound)
+			return
+		}
+
+		detailsJSON, ok := result.Rows[0]["details"].(string)
+		if !ok || detailsJSON == "" {
+			log.Printf("PackageDetailsHandler - details field is empty or wrong type")
+			http.Error(w, "No details available", http.StatusNotFound)
+			return
+		}
+
+		log.Printf("PackageDetailsHandler - returning %d bytes of JSON", len(detailsJSON))
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(detailsJSON)); err != nil {
+			log.Printf("Error writing package details: %v", err)
+		}
 	}
 }

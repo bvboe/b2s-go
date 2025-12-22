@@ -80,6 +80,11 @@ var migrations = []migration{
 		name:    "add_vulnerability_and_package_details_tables",
 		up:      migrateToV13,
 	},
+	{
+		version: 14,
+		name:    "backfill_vulnerability_and_package_details",
+		up:      migrateToV14,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -1038,5 +1043,89 @@ func migrateToV13(conn *sql.DB) error {
 	}
 
 	log.Println("Migration v13: Successfully created vulnerability_details and package_details tables")
+	return nil
+}
+
+// migrateToV14 backfills vulnerability_details and package_details tables with existing data
+func migrateToV14(conn *sql.DB) error {
+	log.Println("Migration v14: Backfilling vulnerability_details and package_details tables...")
+
+	// Get all image IDs that have SBOM or vulnerability data
+	rows, err := conn.Query(`
+		SELECT id
+		FROM container_images
+		WHERE (sbom IS NOT NULL AND sbom != '')
+		   OR (vulnerabilities IS NOT NULL AND vulnerabilities != '')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	var imageIDs []int64
+	for rows.Next() {
+		var imageID int64
+		if err := rows.Scan(&imageID); err != nil {
+			log.Printf("Warning: Failed to scan image ID: %v", err)
+			continue
+		}
+		imageIDs = append(imageIDs, imageID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating image rows: %w", err)
+	}
+
+	log.Printf("Migration v14: Found %d images to backfill", len(imageIDs))
+
+	// Re-parse each image to populate details tables
+	successCount := 0
+	failCount := 0
+	for _, imageID := range imageIDs {
+		// Parse SBOM if available
+		var sbomJSON sql.NullString
+		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to get SBOM for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if sbomJSON.Valid && sbomJSON.String != "" {
+			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		// Parse vulnerabilities if available
+		var vulnJSON sql.NullString
+		err = conn.QueryRow(`SELECT vulnerabilities FROM container_images WHERE id = ?`, imageID).Scan(&vulnJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to get vulnerabilities for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if vulnJSON.Valid && vulnJSON.String != "" {
+			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse vulnerabilities for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		successCount++
+		if successCount%10 == 0 {
+			log.Printf("Migration v14: Processed %d/%d images...", successCount, len(imageIDs))
+		}
+	}
+
+	log.Printf("Migration v14: Successfully backfilled details for %d images (%d failed)", successCount, failCount)
 	return nil
 }

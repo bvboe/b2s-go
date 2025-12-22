@@ -178,6 +178,12 @@ async function loadVulnerabilitiesTable(imageid) {
         (data.vulnerabilities || []).forEach(vuln => {
             const row = document.createElement('tr');
 
+            // Make row clickable to show details
+            row.style.cursor = 'pointer';
+            row.onclick = function() {
+                showVulnerabilityDetails(vuln.id, vuln.vulnerability_id);
+            };
+
             // Severity
             addCellToRow(row, 'left', vuln.vulnerability_severity || '');
 
@@ -246,6 +252,12 @@ async function loadSBOMTable(imageid) {
 
         (data.packages || []).forEach(pkg => {
             const row = document.createElement('tr');
+
+            // Make row clickable to show details
+            row.style.cursor = 'pointer';
+            row.onclick = function() {
+                showPackageDetails(pkg.id, pkg.name);
+            };
 
             // Name
             addCellToRow(row, 'left', pkg.name || '');
@@ -567,6 +579,57 @@ function updateSBOMExportLinks() {
     const baseUrl = `/api/images/${encodeURIComponent(currentImageId)}/packages`;
     document.getElementById('sbomcsvlink').href = `${baseUrl}?${params}&format=csv`;
     document.getElementById('sbomjsonlink').href = `${baseUrl}?${params}&format=json`;
+}
+
+// Modal functions for displaying JSON details
+function showDetailsModal(title, content) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalContent').textContent = content;
+    document.getElementById('detailsModal').style.display = 'block';
+}
+
+function closeDetailsModal() {
+    document.getElementById('detailsModal').style.display = 'none';
+}
+
+// Close modal when clicking outside of it
+window.onclick = function(event) {
+    const modal = document.getElementById('detailsModal');
+    if (event.target === modal) {
+        closeDetailsModal();
+    }
+}
+
+// Fetch and display vulnerability details
+async function showVulnerabilityDetails(vulnerabilityId, vulnerabilityCVE) {
+    try {
+        const response = await fetch(`/api/vulnerabilities/${vulnerabilityId}/details`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        const prettyJson = JSON.stringify(data, null, 2);
+        showDetailsModal(`Vulnerability Details: ${vulnerabilityCVE}`, prettyJson);
+    } catch (error) {
+        console.error('Error fetching vulnerability details:', error);
+        showDetailsModal(`Error`, `Failed to load vulnerability details: ${error.message}`);
+    }
+}
+
+// Fetch and display package details
+async function showPackageDetails(packageId, packageName) {
+    try {
+        const response = await fetch(`/api/packages/${packageId}/details`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        const prettyJson = JSON.stringify(data, null, 2);
+        showDetailsModal(`Package Details: ${packageName}`, prettyJson);
+    } catch (error) {
+        console.error('Error fetching package details:', error);
+        showDetailsModal(`Error`, `Failed to load package details: ${error.message}`);
+    }
 }
 
 // DOM ready

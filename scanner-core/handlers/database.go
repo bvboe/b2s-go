@@ -328,7 +328,24 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 	if overrides != nil && overrides.VulnerabilitiesHandler != nil {
 		mux.HandleFunc("/api/vulnerabilities/", overrides.VulnerabilitiesHandler)
 	} else {
-		mux.HandleFunc("/api/vulnerabilities/", VulnerabilitiesDownloadHandler(provider))
+		mux.HandleFunc("/api/vulnerabilities/", func(w http.ResponseWriter, r *http.Request) {
+			// Check if this is a request for vulnerability details
+			path := r.URL.Path
+			log.Printf("Vulnerability route handler - path: %s", path)
+			if len(path) > 8 && path[len(path)-8:] == "/details" {
+				log.Printf("Path ends with /details, checking for ImageQueryProvider")
+				// Route to details handler if ImageQueryProvider is available
+				if queryProvider, ok := provider.(ImageQueryProvider); ok {
+					log.Printf("Routing to VulnerabilityDetailsHandler")
+					VulnerabilityDetailsHandler(queryProvider)(w, r)
+					return
+				}
+				log.Printf("ImageQueryProvider not available, falling through")
+			}
+			// Otherwise, use the download handler
+			log.Printf("Routing to VulnerabilitiesDownloadHandler")
+			VulnerabilitiesDownloadHandler(provider)(w, r)
+		})
 	}
 
 	// Register new API endpoints for aggregated data
@@ -388,5 +405,21 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 				ImageDetailHandler(provider)(w, r)
 			}
 		}
+	})
+
+	// Route for package details (separate from image packages)
+	// This handles /api/packages/{id}/details for showing individual package JSON details
+	mux.HandleFunc("/api/packages/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a request for package details
+		path := r.URL.Path
+		if len(path) > 8 && path[len(path)-8:] == "/details" {
+			// Route to details handler if ImageQueryProvider is available
+			if queryProvider, ok := provider.(ImageQueryProvider); ok {
+				log.Printf("Routing to PackageDetailsHandler")
+				PackageDetailsHandler(queryProvider)(w, r)
+				return
+			}
+		}
+		http.Error(w, "Not found", http.StatusNotFound)
 	})
 }
