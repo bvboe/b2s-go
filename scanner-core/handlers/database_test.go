@@ -756,15 +756,10 @@ func TestRegisterDatabaseHandlers(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		// Check that we get a paginated response structure
+		// Verify we get a valid JSON response
 		var response map[string]interface{}
-		if err := json.Unmarshal(rec.Body.Bytes(), &response); err == nil {
-			// If it's the ImagesHandler, it should have pagination fields
-			if _, hasPage := response["page"]; hasPage {
-				// Good - using ImagesHandler
-			} else if _, hasImages := response["images"]; hasImages {
-				// Using ImageDetailsHandler (fallback)
-			}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Errorf("Failed to unmarshal response: %v", err)
 		}
 	})
 }
