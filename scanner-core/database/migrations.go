@@ -85,6 +85,21 @@ var migrations = []migration{
 		name:    "backfill_vulnerability_and_package_details",
 		up:      migrateToV14,
 	},
+	{
+		version: 15,
+		name:    "update_details_to_store_all_instances",
+		up:      migrateToV15,
+	},
+	{
+		version: 16,
+		name:    "update_package_details_with_complete_sbom_data",
+		up:      migrateToV16,
+	},
+	{
+		version: 17,
+		name:    "update_package_details_with_struct_format",
+		up:      migrateToV17,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -1127,5 +1142,232 @@ func migrateToV14(conn *sql.DB) error {
 	}
 
 	log.Printf("Migration v14: Successfully backfilled details for %d images (%d failed)", successCount, failCount)
+	return nil
+}
+
+// migrateToV15 updates existing detail records to store arrays instead of single objects
+func migrateToV15(conn *sql.DB) error {
+	log.Println("Migration v15: Updating detail records to store all instances...")
+
+	// Clear existing details - they will be regenerated with all instances
+	_, err := conn.Exec(`DELETE FROM vulnerability_details`)
+	if err != nil {
+		return fmt.Errorf("failed to clear vulnerability_details: %w", err)
+	}
+
+	_, err = conn.Exec(`DELETE FROM package_details`)
+	if err != nil {
+		return fmt.Errorf("failed to clear package_details: %w", err)
+	}
+
+	log.Println("Migration v15: Cleared existing details, will regenerate from raw SBOM/vulnerability data")
+
+	// Get all image IDs that have SBOM or vulnerability data
+	rows, err := conn.Query(`
+		SELECT id
+		FROM container_images
+		WHERE (sbom IS NOT NULL AND sbom != '')
+		   OR (vulnerabilities IS NOT NULL AND vulnerabilities != '')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	var imageIDs []int64
+	for rows.Next() {
+		var imageID int64
+		if err := rows.Scan(&imageID); err != nil {
+			log.Printf("Warning: Failed to scan image ID: %v", err)
+			continue
+		}
+		imageIDs = append(imageIDs, imageID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating image rows: %w", err)
+	}
+
+	log.Printf("Migration v15: Found %d images to regenerate details for", len(imageIDs))
+
+	// Re-parse each image to populate details tables with arrays
+	successCount := 0
+	failCount := 0
+	for _, imageID := range imageIDs {
+		// Parse SBOM if available
+		var sbomJSON sql.NullString
+		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to get SBOM for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if sbomJSON.Valid && sbomJSON.String != "" {
+			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		// Parse vulnerabilities if available
+		var vulnJSON sql.NullString
+		err = conn.QueryRow(`SELECT vulnerabilities FROM container_images WHERE id = ?`, imageID).Scan(&vulnJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to get vulnerabilities for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if vulnJSON.Valid && vulnJSON.String != "" {
+			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse vulnerabilities for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		successCount++
+		if successCount%10 == 0 {
+			log.Printf("Migration v15: Processed %d/%d images...", successCount, len(imageIDs))
+		}
+	}
+
+	log.Printf("Migration v15: Successfully regenerated details for %d images (%d failed)", successCount, failCount)
+	return nil
+}
+
+// migrateToV16 regenerates package_details to include complete SBOM artifact data
+// instead of just name/version/type
+func migrateToV16(conn *sql.DB) error {
+	log.Println("Migration v16: Updating package_details with complete SBOM artifact data...")
+
+	// Clear existing package details - they will be regenerated with complete data
+	_, err := conn.Exec(`DELETE FROM package_details`)
+	if err != nil {
+		return fmt.Errorf("failed to clear package_details: %w", err)
+	}
+
+	// Get all image IDs that have SBOM data
+	rows, err := conn.Query(`
+		SELECT id
+		FROM container_images
+		WHERE sbom IS NOT NULL AND sbom != ''
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+
+	var imageIDs []int64
+	for rows.Next() {
+		var imageID int64
+		if err := rows.Scan(&imageID); err != nil {
+			log.Printf("Warning: Failed to scan image ID: %v", err)
+			continue
+		}
+		imageIDs = append(imageIDs, imageID)
+	}
+	rows.Close()
+
+	log.Printf("Migration v16: Found %d images with SBOM data to process", len(imageIDs))
+
+	// Re-parse each image's SBOM to populate package_details with complete artifact data
+	successCount := 0
+	failCount := 0
+	for _, imageID := range imageIDs {
+		// Get SBOM data
+		var sbomJSON sql.NullString
+		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to query SBOM for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if sbomJSON.Valid && sbomJSON.String != "" {
+			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		successCount++
+		if successCount%10 == 0 {
+			log.Printf("Migration v16: Processed %d/%d images...", successCount, len(imageIDs))
+		}
+	}
+
+	log.Printf("Migration v16: Successfully regenerated package details for %d images (%d failed)", successCount, failCount)
+	return nil
+}
+
+// migrateToV17 regenerates package_details using struct format for consistent field ordering
+// This ensures packages display like CVEs with fields in a logical order, not alphabetically
+func migrateToV17(conn *sql.DB) error {
+	log.Println("Migration v17: Updating package_details with struct format for consistent field ordering...")
+
+	// Clear existing package details - they will be regenerated with struct format
+	_, err := conn.Exec(`DELETE FROM package_details`)
+	if err != nil {
+		return fmt.Errorf("failed to clear package_details: %w", err)
+	}
+
+	// Get all image IDs that have SBOM data
+	rows, err := conn.Query(`
+		SELECT id
+		FROM container_images
+		WHERE sbom IS NOT NULL AND sbom != ''
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+
+	var imageIDs []int64
+	for rows.Next() {
+		var imageID int64
+		if err := rows.Scan(&imageID); err != nil {
+			log.Printf("Warning: Failed to scan image ID: %v", err)
+			continue
+		}
+		imageIDs = append(imageIDs, imageID)
+	}
+	rows.Close()
+
+	log.Printf("Migration v17: Found %d images with SBOM data to process", len(imageIDs))
+
+	// Re-parse each image's SBOM to populate package_details with struct format
+	successCount := 0
+	failCount := 0
+	for _, imageID := range imageIDs {
+		// Get SBOM data
+		var sbomJSON sql.NullString
+		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to query SBOM for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if sbomJSON.Valid && sbomJSON.String != "" {
+			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		successCount++
+		if successCount%10 == 0 {
+			log.Printf("Migration v17: Processed %d/%d images...", successCount, len(imageIDs))
+		}
+	}
+
+	log.Printf("Migration v17: Successfully regenerated package details for %d images (%d failed)", successCount, failCount)
 	return nil
 }

@@ -1204,14 +1204,15 @@ func VulnerabilityDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		path := r.URL.Path
 		log.Printf("VulnerabilityDetailsHandler - full path: %s", path)
 
-		// Remove "/api/vulnerabilities/" prefix (22 characters) and "/details" suffix (8 characters)
-		if len(path) <= 30 {
+		// Remove "/api/vulnerabilities/" prefix (21 characters) and "/details" suffix (8 characters)
+		// Minimum valid path is 29 chars (with 1-digit ID), so check for < 29
+		if len(path) < 29 {
 			log.Printf("VulnerabilityDetailsHandler - path too short: %d characters", len(path))
 			http.Error(w, "Invalid vulnerability ID", http.StatusBadRequest)
 			return
 		}
 
-		vulnIDStr := path[22 : len(path)-8] // Extract ID from path
+		vulnIDStr := path[21 : len(path)-8] // Extract ID from path (21 = length of "/api/vulnerabilities/")
 		log.Printf("VulnerabilityDetailsHandler - extracted ID string: '%s'", vulnIDStr)
 
 		// Validate that the ID is a valid integer
@@ -1271,7 +1272,8 @@ func PackageDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		log.Printf("PackageDetailsHandler - full path: %s", path)
 
 		// Remove "/api/packages/" prefix (14 characters) and "/details" suffix (8 characters)
-		if len(path) <= 22 {
+		// Minimum valid path is 22 chars (with 1-digit ID), so check for < 22
+		if len(path) < 22 {
 			log.Printf("PackageDetailsHandler - path too short: %d characters", len(path))
 			http.Error(w, "Invalid package ID", http.StatusBadRequest)
 			return

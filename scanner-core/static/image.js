@@ -181,6 +181,10 @@ async function loadVulnerabilitiesTable(imageid) {
             // Make row clickable to show details
             row.style.cursor = 'pointer';
             row.onclick = function() {
+                console.log('[Row Click] Vulnerability row clicked');
+                console.log('[Row Click] vuln object:', vuln);
+                console.log('[Row Click] vuln.id:', vuln.id, 'type:', typeof vuln.id);
+                console.log('[Row Click] vuln.vulnerability_id:', vuln.vulnerability_id);
                 showVulnerabilityDetails(vuln.id, vuln.vulnerability_id);
             };
 
@@ -256,6 +260,10 @@ async function loadSBOMTable(imageid) {
             // Make row clickable to show details
             row.style.cursor = 'pointer';
             row.onclick = function() {
+                console.log('[Row Click] Package row clicked');
+                console.log('[Row Click] pkg object:', pkg);
+                console.log('[Row Click] pkg.id:', pkg.id, 'type:', typeof pkg.id);
+                console.log('[Row Click] pkg.name:', pkg.name);
                 showPackageDetails(pkg.id, pkg.name);
             };
 
@@ -602,33 +610,61 @@ window.onclick = function(event) {
 
 // Fetch and display vulnerability details
 async function showVulnerabilityDetails(vulnerabilityId, vulnerabilityCVE) {
+    const url = `/api/vulnerabilities/${vulnerabilityId}/details`;
+    console.log('[Vulnerability Details] Click handler called');
+    console.log('[Vulnerability Details] ID:', vulnerabilityId);
+    console.log('[Vulnerability Details] CVE:', vulnerabilityCVE);
+    console.log('[Vulnerability Details] Fetching URL:', url);
+
     try {
-        const response = await fetch(`/api/vulnerabilities/${vulnerabilityId}/details`);
+        const response = await fetch(url);
+        console.log('[Vulnerability Details] Response status:', response.status);
+        console.log('[Vulnerability Details] Response OK:', response.ok);
+
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            console.error('[Vulnerability Details] Error response body:', errorText);
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
+
         const data = await response.json();
+        console.log('[Vulnerability Details] Data received, size:', JSON.stringify(data).length, 'bytes');
         const prettyJson = JSON.stringify(data, null, 2);
         showDetailsModal(`Vulnerability Details: ${vulnerabilityCVE}`, prettyJson);
     } catch (error) {
-        console.error('Error fetching vulnerability details:', error);
-        showDetailsModal(`Error`, `Failed to load vulnerability details: ${error.message}`);
+        console.error('[Vulnerability Details] Error:', error);
+        console.error('[Vulnerability Details] Error stack:', error.stack);
+        showDetailsModal(`Error`, `Failed to load vulnerability details for ${vulnerabilityCVE}:\n\n${error.message}`);
     }
 }
 
 // Fetch and display package details
 async function showPackageDetails(packageId, packageName) {
+    const url = `/api/packages/${packageId}/details`;
+    console.log('[Package Details] Click handler called');
+    console.log('[Package Details] ID:', packageId);
+    console.log('[Package Details] Name:', packageName);
+    console.log('[Package Details] Fetching URL:', url);
+
     try {
-        const response = await fetch(`/api/packages/${packageId}/details`);
+        const response = await fetch(url);
+        console.log('[Package Details] Response status:', response.status);
+        console.log('[Package Details] Response OK:', response.ok);
+
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            console.error('[Package Details] Error response body:', errorText);
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
+
         const data = await response.json();
+        console.log('[Package Details] Data received, size:', JSON.stringify(data).length, 'bytes');
         const prettyJson = JSON.stringify(data, null, 2);
         showDetailsModal(`Package Details: ${packageName}`, prettyJson);
     } catch (error) {
-        console.error('Error fetching package details:', error);
-        showDetailsModal(`Error`, `Failed to load package details: ${error.message}`);
+        console.error('[Package Details] Error:', error);
+        console.error('[Package Details] Error stack:', error.stack);
+        showDetailsModal(`Error`, `Failed to load package details for ${packageName}:\n\n${error.message}`);
     }
 }
 

@@ -7,11 +7,36 @@ import (
 	"log"
 )
 
-// SyftPackage represents a package from Syft SBOM
+// SyftPackage represents a package from Syft SBOM with all fields
 type SyftPackage struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Type    string `json:"type"`
+	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	Version      string              `json:"version"`
+	Type         string              `json:"type"`
+	FoundBy      []string            `json:"foundBy"`
+	Locations    []SyftLocation      `json:"locations"`
+	Licenses     []SyftLicense       `json:"licenses"`
+	Language     string              `json:"language"`
+	CPEs         []string            `json:"cpes"`
+	PURL         string              `json:"purl"`
+	Metadata     json.RawMessage     `json:"metadata,omitempty"` // Type-specific metadata
+	MetadataType string              `json:"metadataType,omitempty"`
+}
+
+// SyftLocation represents a location where a package was found
+type SyftLocation struct {
+	Path        string                 `json:"path"`
+	LayerID     string                 `json:"layerID,omitempty"`
+	Annotations map[string]interface{} `json:"annotations,omitempty"`
+}
+
+// SyftLicense represents license information
+type SyftLicense struct {
+	Value          string   `json:"value"`
+	SPDXExpression string   `json:"spdxExpression,omitempty"`
+	Type           string   `json:"type,omitempty"`
+	URLs           []string `json:"urls,omitempty"`
+	Locations      []string `json:"locations,omitempty"`
 }
 
 // SyftSBOM represents a Syft SBOM document
@@ -121,14 +146,13 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 
 	// Count packages by name+version+type
 	packageCounts := make(map[string]int)
-	packageInfo := make(map[string]SyftPackage)
+	packageInfo := make(map[string][]SyftPackage) // Changed to store ALL packages, not just first
 
 	for _, pkg := range sbom.Artifacts {
 		key := fmt.Sprintf("%s|%s|%s", pkg.Name, pkg.Version, pkg.Type)
 		packageCounts[key]++
-		if _, exists := packageInfo[key]; !exists {
-			packageInfo[key] = pkg
-		}
+		// Store ALL complete package data for this key
+		packageInfo[key] = append(packageInfo[key], pkg)
 	}
 
 	// Insert packages into database
@@ -167,30 +191,40 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 
 	totalPackages := 0
 	for key, count := range packageCounts {
-		pkg := packageInfo[key]
-		result, err := stmt.Exec(imageID, pkg.Name, pkg.Version, pkg.Type, count)
+		packages := packageInfo[key]
+		if len(packages) == 0 {
+			log.Printf("Warning: No packages found for key %s", key)
+			continue
+		}
+
+		// Use first package for summary data (they should all be identical for the same key)
+		firstPkg := packages[0]
+
+		result, err := stmt.Exec(imageID, firstPkg.Name, firstPkg.Version, firstPkg.Type, count)
 		if err != nil {
-			log.Printf("Warning: Failed to insert package %s: %v", pkg.Name, err)
+			log.Printf("Warning: Failed to insert package %s: %v", firstPkg.Name, err)
 			continue
 		}
 
 		// Get the package ID (either newly inserted or existing)
 		packageID, err := result.LastInsertId()
 		if err != nil {
-			log.Printf("Warning: Failed to get package ID for %s: %v", pkg.Name, err)
+			log.Printf("Warning: Failed to get package ID for %s: %v", firstPkg.Name, err)
 			continue
 		}
 
-		// Marshal package details to JSON
-		detailsJSON, err := json.Marshal(pkg)
+		// Marshal ALL package instances to JSON with COMPLETE data
+		// This ensures we capture all instances when count > 1 AND preserve all SBOM fields
+		// Using struct marshaling preserves field order as defined in the struct
+		detailsJSON, err := json.Marshal(packages)
 		if err != nil {
-			log.Printf("Warning: Failed to marshal package details for %s: %v", pkg.Name, err)
+			log.Printf("Warning: Failed to marshal package details for %s: %v", firstPkg.Name, err)
 			continue
 		}
 
 		// Insert package details
 		if _, err := detailsStmt.Exec(packageID, string(detailsJSON)); err != nil {
-			log.Printf("Warning: Failed to insert package details for %s: %v", pkg.Name, err)
+			log.Printf("Warning: Failed to insert package details for %s: %v", firstPkg.Name, err)
 			// Continue anyway - the package itself was inserted
 		}
 
@@ -221,7 +255,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		packageType    string
 	}
 	vulnCounts := make(map[vulnKey]int)
-	vulnInfo := make(map[vulnKey]GrypeMatch)
+	vulnInfo := make(map[vulnKey][]GrypeMatch) // Changed to store ALL matches, not just first
 
 	for _, match := range doc.Matches {
 		// Get package info from artifact field
@@ -233,9 +267,8 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		}
 
 		vulnCounts[key]++
-		if _, exists := vulnInfo[key]; !exists {
-			vulnInfo[key] = match
-		}
+		// Store ALL matches for this vulnerability, not just the first one
+		vulnInfo[key] = append(vulnInfo[key], match)
 	}
 
 	// Insert vulnerabilities into database
@@ -277,12 +310,22 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 
 	totalVulns := 0
 	for key, count := range vulnCounts {
-		match := vulnInfo[key]
+		matches := vulnInfo[key]
+		if len(matches) == 0 {
+			log.Printf("Warning: No matches found for vulnerability %s", key.cveID)
+			continue
+		}
+
+		log.Printf("[DEBUG] Processing vulnerability %s for package %s: count=%d, matches in array=%d",
+			key.cveID, key.packageName, count, len(matches))
+
+		// Use first match for summary data (they should all be identical for the same vulnerability)
+		firstMatch := matches[0]
 
 		// Determine fix status and version
-		fixStatus := match.Vulnerability.Fix.State
+		fixStatus := firstMatch.Vulnerability.Fix.State
 		if fixStatus == "" {
-			if len(match.Vulnerability.Fix.Versions) > 0 {
+			if len(firstMatch.Vulnerability.Fix.Versions) > 0 {
 				fixStatus = "fixed"
 			} else {
 				fixStatus = "not-fixed"
@@ -290,23 +333,23 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		}
 
 		fixedVersion := ""
-		if len(match.Vulnerability.Fix.Versions) > 0 {
-			fixedVersion = match.Vulnerability.Fix.Versions[0]
+		if len(firstMatch.Vulnerability.Fix.Versions) > 0 {
+			fixedVersion = firstMatch.Vulnerability.Fix.Versions[0]
 		}
 
 		// Extract risk score
-		risk := match.Vulnerability.Risk
+		risk := firstMatch.Vulnerability.Risk
 
 		// Extract EPSS data (use first entry if available)
 		epssScore := 0.0
 		epssPercentile := 0.0
-		if len(match.Vulnerability.EPSS) > 0 {
-			epssScore = match.Vulnerability.EPSS[0].Score
-			epssPercentile = match.Vulnerability.EPSS[0].Percentile
+		if len(firstMatch.Vulnerability.EPSS) > 0 {
+			epssScore = firstMatch.Vulnerability.EPSS[0].Score
+			epssPercentile = firstMatch.Vulnerability.EPSS[0].Percentile
 		}
 
 		// Count known exploits from CISA KEV catalog
-		knownExploited := len(match.Vulnerability.KnownExploited)
+		knownExploited := len(firstMatch.Vulnerability.KnownExploited)
 
 		// Set known_exploits to match known_exploited for backward compatibility
 		// (previously this was set to RelatedVulnerabilities count, which was incorrect)
@@ -318,7 +361,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			key.packageName,
 			key.packageVersion,
 			key.packageType,
-			match.Vulnerability.Severity,
+			firstMatch.Vulnerability.Severity,
 			fixStatus,
 			fixedVersion,
 			knownExploits,
@@ -340,12 +383,16 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			continue
 		}
 
-		// Marshal vulnerability details to JSON
-		detailsJSON, err := json.Marshal(match)
+		// Marshal ALL vulnerability matches to JSON (not just the first one)
+		// This ensures we capture all instances when count > 1
+		detailsJSON, err := json.Marshal(matches)
 		if err != nil {
 			log.Printf("Warning: Failed to marshal vulnerability details for %s: %v", key.cveID, err)
 			continue
 		}
+
+		log.Printf("[DEBUG] Storing details for %s (vuln_id=%d): %d matches, JSON size=%d bytes",
+			key.cveID, vulnID, len(matches), len(detailsJSON))
 
 		// Insert vulnerability details
 		if _, err := detailsStmt.Exec(vulnID, string(detailsJSON)); err != nil {
