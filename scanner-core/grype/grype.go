@@ -13,6 +13,14 @@ import (
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/matcher"
+	"github.com/anchore/grype/grype/matcher/dotnet"
+	"github.com/anchore/grype/grype/matcher/golang"
+	"github.com/anchore/grype/grype/matcher/java"
+	"github.com/anchore/grype/grype/matcher/javascript"
+	"github.com/anchore/grype/grype/matcher/python"
+	"github.com/anchore/grype/grype/matcher/ruby"
+	"github.com/anchore/grype/grype/matcher/rust"
+	"github.com/anchore/grype/grype/matcher/stock"
 	grypePkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
 )
@@ -22,6 +30,41 @@ type Config struct {
 	// DBRootDir is the root directory where Grype stores its vulnerability database
 	// If empty, uses the default location (~/.cache/grype/db)
 	DBRootDir string
+}
+
+// DefaultMatcherConfig returns the default matcher configuration that aligns with Grype CLI defaults
+// This configuration is based on Grype v0.104.2 defaults and should be updated when Grype is upgraded
+//
+// Reference: https://github.com/anchore/grype
+// To check current Grype defaults, run: grype <image> -o json | jq .descriptor.configuration.match
+func DefaultMatcherConfig() matcher.Config {
+	return matcher.Config{
+		// Golang configuration - Critical for Go applications
+		Golang: golang.MatcherConfig{
+			UseCPEs: false, // Use direct matching via PURLs for Go modules
+			// CRITICAL: Enable CPE matching for Go stdlib to catch standard library CVEs
+			// Without this, stdlib vulnerabilities (often High/Critical severity) are missed
+			AlwaysUseCPEForStdlib:                  true,
+			AllowMainModulePseudoVersionComparison: false,
+		},
+		// Stock configuration - Generic package matching
+		Stock: stock.MatcherConfig{
+			UseCPEs: true, // Use CPE matching for packages without language-specific matchers
+		},
+		// Language-specific matchers - Use native package matching (not CPEs) by default
+		// These rely on package URLs (PURLs) and native version comparisons which are more accurate
+		Java: java.MatcherConfig{
+			UseCPEs: false,
+			ExternalSearchConfig: java.ExternalSearchConfig{
+				SearchMavenUpstream: false, // Disabled by default - enable if needed for unknown Java deps
+			},
+		},
+		Dotnet:     dotnet.MatcherConfig{UseCPEs: false},
+		Javascript: javascript.MatcherConfig{UseCPEs: false},
+		Python:     python.MatcherConfig{UseCPEs: false},
+		Ruby:       ruby.MatcherConfig{UseCPEs: false},
+		Rust:       rust.MatcherConfig{UseCPEs: false},
+	}
 }
 
 // ScanVulnerabilities scans an SBOM for vulnerabilities using Grype library
@@ -115,9 +158,10 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 	}
 
 	// Create vulnerability matcher with all default matchers (dpkg, rpm, apk, etc.)
+	// Use DefaultMatcherConfig() to ensure we match Grype CLI defaults
 	vulnerabilityMatcher := grype.VulnerabilityMatcher{
 		VulnerabilityProvider: vulnProvider,
-		Matchers:              matcher.NewDefaultMatchers(matcher.Config{}),
+		Matchers:              matcher.NewDefaultMatchers(DefaultMatcherConfig()),
 	}
 
 	// Find vulnerability matches

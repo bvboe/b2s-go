@@ -1277,7 +1277,9 @@ func migrateToV16(conn *sql.DB) error {
 		}
 		imageIDs = append(imageIDs, imageID)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		log.Printf("Warning: Failed to close rows: %v", err)
+	}
 
 	log.Printf("Migration v16: Found %d images with SBOM data to process", len(imageIDs))
 
@@ -1342,7 +1344,9 @@ func migrateToV17(conn *sql.DB) error {
 		}
 		imageIDs = append(imageIDs, imageID)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		log.Printf("Warning: Failed to close rows: %v", err)
+	}
 
 	log.Printf("Migration v17: Found %d images with SBOM data to process", len(imageIDs))
 
@@ -1407,7 +1411,9 @@ func migrateToV18(conn *sql.DB) error {
 		}
 		imageIDs = append(imageIDs, imageID)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		log.Printf("Warning: Failed to close rows: %v", err)
+	}
 
 	log.Printf("Migration v18: Found %d images with vulnerability data to process", len(imageIDs))
 
