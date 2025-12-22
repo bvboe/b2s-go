@@ -23,8 +23,8 @@ type ImageQueryProvider interface {
 func FilterOptionsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		queries := map[string]string{
-			"namespaces": "SELECT DISTINCT namespace FROM container_instances WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace",
-			"osNames":    "SELECT DISTINCT os_name FROM container_images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
+			"namespaces":   "SELECT DISTINCT namespace FROM container_instances WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace",
+			"osNames":      "SELECT DISTINCT os_name FROM container_images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
 			"vulnStatuses": "SELECT DISTINCT fix_status FROM vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status",
 			"packageTypes": "SELECT DISTINCT type FROM packages WHERE type IS NOT NULL AND type != '' ORDER BY type",
 		}

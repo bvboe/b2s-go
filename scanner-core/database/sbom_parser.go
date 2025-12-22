@@ -7,36 +7,39 @@ import (
 	"log"
 )
 
-// SyftPackage represents a package from Syft SBOM with all fields
+// SyftPackage represents a package from Syft SBOM
+// We store the complete raw JSON to preserve ALL fields (current and future) and original field order
 type SyftPackage struct {
-	ID           string              `json:"id"`
-	Name         string              `json:"name"`
-	Version      string              `json:"version"`
-	Type         string              `json:"type"`
-	FoundBy      []string            `json:"foundBy"`
-	Locations    []SyftLocation      `json:"locations"`
-	Licenses     []SyftLicense       `json:"licenses"`
-	Language     string              `json:"language"`
-	CPEs         []string            `json:"cpes"`
-	PURL         string              `json:"purl"`
-	Metadata     json.RawMessage     `json:"metadata,omitempty"` // Type-specific metadata
-	MetadataType string              `json:"metadataType,omitempty"`
+	Name    string          `json:"-"` // Extracted for indexing, not marshaled
+	Version string          `json:"-"` // Extracted for indexing, not marshaled
+	Type    string          `json:"-"` // Extracted for indexing, not marshaled
+	Raw     json.RawMessage `json:"-"` // Complete raw JSON with original field order
 }
 
-// SyftLocation represents a location where a package was found
-type SyftLocation struct {
-	Path        string                 `json:"path"`
-	LayerID     string                 `json:"layerID,omitempty"`
-	Annotations map[string]interface{} `json:"annotations,omitempty"`
+// UnmarshalJSON implements custom unmarshaling to extract index fields and preserve raw JSON
+func (p *SyftPackage) UnmarshalJSON(data []byte) error {
+	// Store the complete raw JSON (preserves all fields and original order)
+	p.Raw = json.RawMessage(data)
+
+	// Extract only the fields we need for indexing (name/version/type)
+	var temp struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		Type    string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	p.Name = temp.Name
+	p.Version = temp.Version
+	p.Type = temp.Type
+	return nil
 }
 
-// SyftLicense represents license information
-type SyftLicense struct {
-	Value          string   `json:"value"`
-	SPDXExpression string   `json:"spdxExpression,omitempty"`
-	Type           string   `json:"type,omitempty"`
-	URLs           []string `json:"urls,omitempty"`
-	Locations      []string `json:"locations,omitempty"`
+// MarshalJSON returns the raw JSON (preserving all fields and original order)
+func (p *SyftPackage) MarshalJSON() ([]byte, error) {
+	return p.Raw, nil
 }
 
 // SyftSBOM represents a Syft SBOM document
@@ -45,11 +48,38 @@ type SyftSBOM struct {
 }
 
 // GrypeMatch represents a vulnerability match from Grype
+// We store the complete raw JSON to preserve ALL fields (current and future) and original field order
 type GrypeMatch struct {
-	Vulnerability          GrypeVulnerability `json:"vulnerability"`
-	RelatedVulnerabilities []GrypeRelatedVuln `json:"relatedVulnerabilities"`
-	MatchDetails           []GrypeMatchDetail `json:"matchDetails"`
-	Artifact               GrypeArtifact      `json:"artifact"`
+	// Fields extracted for indexing (not marshaled back)
+	Vulnerability GrypeVulnerability `json:"-"`
+	Artifact      GrypeArtifact      `json:"-"`
+
+	// Complete raw JSON with original field order
+	Raw json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON implements custom unmarshaling to extract index fields and preserve raw JSON
+func (m *GrypeMatch) UnmarshalJSON(data []byte) error {
+	// Store the complete raw JSON (preserves all fields and original order)
+	m.Raw = json.RawMessage(data)
+
+	// Extract only the fields we need for indexing
+	var temp struct {
+		Vulnerability GrypeVulnerability `json:"vulnerability"`
+		Artifact      GrypeArtifact      `json:"artifact"`
+	}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	m.Vulnerability = temp.Vulnerability
+	m.Artifact = temp.Artifact
+	return nil
+}
+
+// MarshalJSON returns the raw JSON (preserving all fields and original order)
+func (m *GrypeMatch) MarshalJSON() ([]byte, error) {
+	return m.Raw, nil
 }
 
 // GrypeArtifact represents the artifact (package) that has a vulnerability
@@ -61,11 +91,11 @@ type GrypeArtifact struct {
 
 // GrypeVulnerability represents vulnerability details
 type GrypeVulnerability struct {
-	ID             string             `json:"id"`
-	Severity       string             `json:"severity"`
-	Fix            GrypeFix           `json:"fix"`
-	Risk           float64            `json:"risk"`
-	EPSS           []GrypeEPSS        `json:"epss"`
+	ID             string              `json:"id"`
+	Severity       string              `json:"severity"`
+	Fix            GrypeFix            `json:"fix"`
+	Risk           float64             `json:"risk"`
+	EPSS           []GrypeEPSS         `json:"epss"`
 	KnownExploited []GrypeKnownExploit `json:"knownExploited"`
 }
 
@@ -103,8 +133,8 @@ type GrypeFix struct {
 
 // GrypeMatchDetail represents match details
 type GrypeMatchDetail struct {
-	Type   string        `json:"type"`
-	Found  GrypeFound    `json:"found"`
+	Type       string          `json:"type"`
+	Found      GrypeFound      `json:"found"`
 	SearchedBy GrypeSearchedBy `json:"searchedBy"`
 }
 

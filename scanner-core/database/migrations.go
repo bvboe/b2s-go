@@ -100,6 +100,11 @@ var migrations = []migration{
 		name:    "update_package_details_with_struct_format",
 		up:      migrateToV17,
 	},
+	{
+		version: 18,
+		name:    "update_vulnerability_details_with_raw_json",
+		up:      migrateToV18,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -1369,5 +1374,70 @@ func migrateToV17(conn *sql.DB) error {
 	}
 
 	log.Printf("Migration v17: Successfully regenerated package details for %d images (%d failed)", successCount, failCount)
+	return nil
+}
+
+// migrateToV18 regenerates vulnerability_details using raw JSON format
+// This ensures vulnerabilities preserve ALL fields (current and future) from Grype output
+func migrateToV18(conn *sql.DB) error {
+	log.Println("Migration v18: Updating vulnerability_details with raw JSON format for complete data preservation...")
+
+	// Clear existing vulnerability details - they will be regenerated with raw JSON
+	_, err := conn.Exec(`DELETE FROM vulnerability_details`)
+	if err != nil {
+		return fmt.Errorf("failed to clear vulnerability_details: %w", err)
+	}
+
+	// Get all image IDs that have vulnerability data
+	rows, err := conn.Query(`
+		SELECT id
+		FROM container_images
+		WHERE vulnerabilities IS NOT NULL AND vulnerabilities != ''
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+
+	var imageIDs []int64
+	for rows.Next() {
+		var imageID int64
+		if err := rows.Scan(&imageID); err != nil {
+			log.Printf("Warning: Failed to scan image ID: %v", err)
+			continue
+		}
+		imageIDs = append(imageIDs, imageID)
+	}
+	rows.Close()
+
+	log.Printf("Migration v18: Found %d images with vulnerability data to process", len(imageIDs))
+
+	// Re-parse each image's vulnerabilities to populate vulnerability_details with raw JSON
+	successCount := 0
+	failCount := 0
+	for _, imageID := range imageIDs {
+		// Get vulnerability data
+		var vulnJSON sql.NullString
+		err := conn.QueryRow(`SELECT vulnerabilities FROM container_images WHERE id = ?`, imageID).Scan(&vulnJSON)
+		if err != nil {
+			log.Printf("Warning: Failed to query vulnerabilities for image_id=%d: %v", imageID, err)
+			failCount++
+			continue
+		}
+
+		if vulnJSON.Valid && vulnJSON.String != "" {
+			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
+				log.Printf("Warning: Failed to parse vulnerabilities for image_id=%d: %v", imageID, err)
+				failCount++
+				continue
+			}
+		}
+
+		successCount++
+		if successCount%10 == 0 {
+			log.Printf("Migration v18: Processed %d/%d images...", successCount, len(imageIDs))
+		}
+	}
+
+	log.Printf("Migration v18: Successfully regenerated vulnerability details for %d images (%d failed)", successCount, failCount)
 	return nil
 }

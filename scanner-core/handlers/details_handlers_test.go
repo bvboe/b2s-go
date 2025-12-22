@@ -197,9 +197,9 @@ func TestVulnerabilityDetailsHandler_Integration(t *testing.T) {
 		shouldContain  string
 	}{
 		{
-			name: "Valid vulnerability with details",
-			path: "/api/vulnerabilities/123/details",
-			mockData: `[{"vulnerability":{"id":"CVE-2024-1234"},"artifact":{"name":"test"}}]`,
+			name:           "Valid vulnerability with details",
+			path:           "/api/vulnerabilities/123/details",
+			mockData:       `[{"vulnerability":{"id":"CVE-2024-1234"},"artifact":{"name":"test"}}]`,
 			expectedStatus: 200,
 			shouldContain:  "CVE-2024-1234",
 		},
@@ -333,9 +333,9 @@ func TestPrefixLengths(t *testing.T) {
 // TestPathConstruction verifies paths are constructed correctly
 func TestPathConstruction(t *testing.T) {
 	tests := []struct {
-		id             string
+		id                string
 		vulnerabilityPath string
-		packagePath    string
+		packagePath       string
 	}{
 		{"1", "/api/vulnerabilities/1/details", "/api/packages/1/details"},
 		{"42", "/api/vulnerabilities/42/details", "/api/packages/42/details"},
