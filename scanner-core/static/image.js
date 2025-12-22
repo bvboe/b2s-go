@@ -177,6 +177,7 @@ async function loadVulnerabilitiesTable(imageid) {
 
         (data.vulnerabilities || []).forEach(vuln => {
             const row = document.createElement('tr');
+            row.classList.add('clickable-row');
 
             // Make row clickable to show details
             row.style.cursor = 'pointer';
@@ -256,6 +257,7 @@ async function loadSBOMTable(imageid) {
 
         (data.packages || []).forEach(pkg => {
             const row = document.createElement('tr');
+            row.classList.add('clickable-row');
 
             // Make row clickable to show details
             row.style.cursor = 'pointer';

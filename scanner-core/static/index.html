@@ -143,7 +143,8 @@
                     document.title = pageTitle + ' - ' + appConfig.clusterName;
                 }
 
-                renderSidebarNav('index.html');
+                pageConfig.currentPageUrl = 'index.html';
+                renderSidebarNav();
                 renderVersionFooter();
 
                 // Load all widgets
