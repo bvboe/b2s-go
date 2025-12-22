@@ -38,7 +38,7 @@ func TestSBOMHandler_EmptyDigest(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
@@ -64,7 +64,7 @@ func TestSBOMHandler_DigestNormalization(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
 	// Add test instance with image (use proper 64-char hex digest)
@@ -119,7 +119,7 @@ func TestSBOMHandler_DatabaseCacheHit(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
 	// Add test instance with image (use proper 64-char hex digest)
@@ -191,7 +191,7 @@ func TestSBOMHandler_ImageNotFound(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
@@ -217,7 +217,7 @@ func TestSBOMHandler_ImageWithoutNodeName(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
 	// Add instance without node name (simulates agent-scanned image)
@@ -265,7 +265,7 @@ func TestSBOMHandler_ContextTimeout(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
 	// Add instance with node name (so it tries to route to pod-scanner)
