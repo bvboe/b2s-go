@@ -70,7 +70,7 @@ jobs:
 
     - name: Upload test logs
       if: failure()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: k8s-update-controller-logs
         path: |
@@ -113,7 +113,7 @@ jobs:
 
     - name: Upload test logs
       if: failure()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: agent-updater-logs
         path: |
