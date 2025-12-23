@@ -172,10 +172,12 @@ EOF
 start_agent() {
     log_info "Starting agent..."
 
-    # Start agent in background
+    # Start agent in background from TEST_DIR so it finds ./agent.conf
+    cd "$TEST_DIR"
     PORT=$TEST_PORT DB_PATH="$TEST_DIR/containers.db" \
         "$AGENT_BINARY" &
     local pid=$!
+    cd - > /dev/null
 
     echo $pid > "$AGENT_PID_FILE"
 

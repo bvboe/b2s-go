@@ -148,9 +148,9 @@ build_test_images() {
 
     # Load images into kind
     log_info "Loading images into kind cluster..."
-    kind load docker-image "ghcr.io/bvboe/b2s-go/k8s-scan-server:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
-    kind load docker-image "ghcr.io/bvboe/b2s-go/pod-scanner:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
-    kind load docker-image "ghcr.io/bvboe/b2s-go/k8s-update-controller:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
+    kind load docker-image "k8s-scan-server:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
+    kind load docker-image "pod-scanner:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
+    kind load docker-image "k8s-update-controller:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
 
     assert_command_success "docker images | grep -q 'k8s-scan-server.*$TEST_VERSION_OLD'" "Images built successfully"
 }
