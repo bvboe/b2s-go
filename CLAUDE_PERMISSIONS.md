@@ -10,6 +10,7 @@ Claude can perform these operations freely:
 - Read any file in the repository
 - Edit/Write files (for requested code changes)
 - Search codebase (Glob, Grep)
+- Access to /tmp for storing temporary files
 
 ### Git (Read-Only)
 - `git status`, `git diff`, `git log`, `git show`

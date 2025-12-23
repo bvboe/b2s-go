@@ -7,9 +7,9 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Test sorting on all tables
 - [ ] Node scanning
 - [ ] Agent autoupdate
-- [ ] Deep scan validation
 - [ ] Remote workers for increased performance?
 - [ ] Test agent on other linux distributions (alpine, raspberry pi)
 - [ ] OpenTelemetry integration
@@ -23,6 +23,7 @@
 - [ ] Scheduled tasks (rescan, clean up data, delete old data)
 
 ## Recently Completed
+- [x] [2025-12-22] Created deep-scan-test script for validating syft/grype integration
 - [x] [2025-12-22] Added GitHub Actions caching to all reusable workflows
 - [x] [2025-12-22] Added cache monitoring/reporting to workflows
 - [x] [2025-12-22] Created local workflow testing with act (.actrc + scripts/test-workflows-local)
