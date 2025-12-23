@@ -19,10 +19,14 @@ jobs:
     name: Integration Tests
     uses: ./.github/workflows/integration-test.yaml
 
+  auto-update-tests:
+    name: Auto-Update Tests
+    uses: ./.github/workflows/auto-update-test.yaml
+
   # k8s-scan-server component
   release-k8s-scan-server:
     name: Release k8s-scan-server
-    needs: [integration-tests]
+    needs: [integration-tests, auto-update-tests]
     uses: ./.github/workflows/go-component-reusable.yaml
     with:
       component-name: k8s-scan-server
@@ -38,7 +42,7 @@ jobs:
   # pod-scanner component
   release-pod-scanner:
     name: Release pod-scanner
-    needs: [integration-tests]
+    needs: [integration-tests, auto-update-tests]
     uses: ./.github/workflows/go-component-reusable.yaml
     with:
       component-name: pod-scanner
@@ -51,10 +55,26 @@ jobs:
       docker-push: true
       docker-platforms: linux/amd64,linux/arm64
 
+  # k8s-update-controller component
+  release-k8s-update-controller:
+    name: Release k8s-update-controller
+    needs: [integration-tests, auto-update-tests]
+    uses: ./.github/workflows/go-component-reusable.yaml
+    with:
+      component-name: k8s-update-controller
+      component-path: k8s-update-controller
+      image-name: k8s-update-controller
+      run-tests: true
+      run-lint: false
+      run-build: false
+      run-docker: true
+      docker-push: true
+      docker-platforms: linux/amd64,linux/arm64
+
   # bjorn2scan-agent component (binary release)
   release-bjorn2scan-agent:
     name: Release bjorn2scan-agent
-    needs: [integration-tests]
+    needs: [integration-tests, auto-update-tests]
     uses: ./.github/workflows/go-binary-reusable.yaml
     with:
       component-name: bjorn2scan-agent
@@ -65,7 +85,7 @@ jobs:
       attach-to-release: true
 
   helm-release:
-    needs: [release-k8s-scan-server, release-pod-scanner, release-bjorn2scan-agent]
+    needs: [release-k8s-scan-server, release-pod-scanner, release-k8s-update-controller, release-bjorn2scan-agent]
     runs-on: ubuntu-latest
 
     steps:
@@ -282,6 +302,12 @@ jobs:
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
             ghcr.io/${{ github.repository_owner }}/b2s-go/pod-scanner:${GITHUB_REF_NAME#v}
+
+          # Update controller
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ghcr.io/${{ github.repository_owner }}/b2s-go/k8s-update-controller:${GITHUB_REF_NAME#v}
           ```
 
           ## 📦 Release Assets

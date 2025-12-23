@@ -13,4 +13,9 @@ rules:
 - apiGroups: [""]
   resources: ["pods/status"]
   verbs: ["get"]
+{{- if .Values.updateController.enabled }}
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+{{- end }}
 {{- end }}

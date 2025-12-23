@@ -6,6 +6,7 @@ HELM_RELEASE?=bjorn2scan
 HELM_CHART=./helm/bjorn2scan
 SCAN_SERVER_IMAGE?=ghcr.io/bvboe/b2s-go/k8s-scan-server
 POD_SCANNER_IMAGE?=ghcr.io/bvboe/b2s-go/pod-scanner
+UPDATE_CONTROLLER_IMAGE?=ghcr.io/bvboe/b2s-go/k8s-update-controller
 # Use timestamp for local builds to ensure unique tags (evaluated once and exported)
 IMAGE_TAG:=$(if $(IMAGE_TAG),$(IMAGE_TAG),local-$(shell date +%s))
 export IMAGE_TAG
@@ -20,6 +21,7 @@ build-all: ## Build all Go binaries
 	@echo "Building all components..."
 	$(MAKE) -C k8s-scan-server build
 	$(MAKE) -C pod-scanner build
+	$(MAKE) -C k8s-update-controller build
 	$(MAKE) -C bjorn2scan-agent build
 
 test-all: ## Run tests for all components
@@ -27,6 +29,7 @@ test-all: ## Run tests for all components
 	$(MAKE) -C scanner-core test
 	$(MAKE) -C k8s-scan-server test
 	$(MAKE) -C pod-scanner test
+	$(MAKE) -C k8s-update-controller test
 	$(MAKE) -C bjorn2scan-agent test
 
 build-agent-release: ## Build bjorn2scan-agent release binaries for all platforms
@@ -37,12 +40,14 @@ docker-build-all: ## Build all Docker images
 	@echo "Building all Docker images..."
 	$(MAKE) -C k8s-scan-server docker-build IMAGE_NAME=$(SCAN_SERVER_IMAGE) IMAGE_TAG=$(IMAGE_TAG)
 	$(MAKE) -C pod-scanner docker-build IMAGE_NAME=$(POD_SCANNER_IMAGE) IMAGE_TAG=$(IMAGE_TAG)
+	$(MAKE) -C k8s-update-controller docker-build IMAGE_NAME=$(UPDATE_CONTROLLER_IMAGE) IMAGE_TAG=$(IMAGE_TAG)
 
 clean-all: ## Clean all build artifacts
 	@echo "Cleaning all build artifacts..."
 	$(MAKE) -C scanner-core clean
 	$(MAKE) -C k8s-scan-server clean
 	$(MAKE) -C pod-scanner clean
+	$(MAKE) -C k8s-update-controller clean
 	$(MAKE) -C bjorn2scan-agent clean
 
 # Helm targets
@@ -92,6 +97,7 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 	@echo "Loading images into kind cluster..."
 	kind load docker-image $(SCAN_SERVER_IMAGE):$(IMAGE_TAG)
 	kind load docker-image $(POD_SCANNER_IMAGE):$(IMAGE_TAG)
+	kind load docker-image $(UPDATE_CONTROLLER_IMAGE):$(IMAGE_TAG)
 	@if helm list -n $(NAMESPACE) | grep -q $(HELM_RELEASE); then \
 		helm upgrade $(HELM_RELEASE) $(HELM_CHART) \
 			--namespace $(NAMESPACE) \
@@ -132,6 +138,7 @@ helm-minikube-deploy: docker-build-all ## Build and deploy to minikube
 	@echo "Loading images into minikube..."
 	minikube image load $(SCAN_SERVER_IMAGE):$(IMAGE_TAG)
 	minikube image load $(POD_SCANNER_IMAGE):$(IMAGE_TAG)
+	minikube image load $(UPDATE_CONTROLLER_IMAGE):$(IMAGE_TAG)
 	@if helm list -n $(NAMESPACE) | grep -q $(HELM_RELEASE); then \
 		helm upgrade $(HELM_RELEASE) $(HELM_CHART) \
 			--namespace $(NAMESPACE) \

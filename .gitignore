@@ -21,6 +21,7 @@ pod-scanner/pod-scanner
 bjorn2scan-agent/pod-scanner
 bjorn2scan-agent/bjorn2scan-agent
 bjorn2scan-agent/bjorn2scan-agent-linux
+k8s-update-controller/k8s-update-controller
 
 # Build directories
 dist/

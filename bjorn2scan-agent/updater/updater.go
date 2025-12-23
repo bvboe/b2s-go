@@ -1,0 +1,257 @@
+package updater
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/google/go-github/v57/github"
+)
+
+// Status represents the current state of the updater
+type Status string
+
+const (
+	StatusIdle        Status = "idle"
+	StatusChecking    Status = "checking"
+	StatusDownloading Status = "downloading"
+	StatusVerifying   Status = "verifying"
+	StatusInstalling  Status = "installing"
+	StatusRestarting  Status = "restarting"
+	StatusFailed      Status = "failed"
+)
+
+// Config contains updater configuration
+type Config struct {
+	Enabled              bool
+	CheckInterval        time.Duration
+	GitHubRepo           string
+	CurrentVersion       string
+	VerifySignatures     bool
+	RollbackEnabled      bool
+	HealthCheckTimeout   time.Duration
+	VersionConstraints   *VersionConstraints
+	CosignIdentityRegexp string
+	CosignOIDCIssuer     string
+}
+
+// Updater manages the auto-update process
+type Updater struct {
+	config         *Config
+	status         Status
+	lastCheck      time.Time
+	lastUpdate     time.Time
+	latestVersion  string
+	errorMsg       string
+	mu             sync.RWMutex
+	stopChan       chan struct{}
+	pauseChan      chan bool
+	paused         bool
+	githubClient   *GitHubClient
+	versionChecker *VersionChecker
+}
+
+// New creates a new updater
+func New(config *Config) (*Updater, error) {
+	githubClient, err := NewGitHubClient(config.GitHubRepo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GitHub client: %w", err)
+	}
+
+	versionChecker := NewVersionChecker(config.VersionConstraints)
+
+	return &Updater{
+		config:         config,
+		status:         StatusIdle,
+		stopChan:       make(chan struct{}),
+		pauseChan:      make(chan bool, 1),
+		githubClient:   githubClient,
+		versionChecker: versionChecker,
+	}, nil
+}
+
+// Start begins the update checker loop
+func (u *Updater) Start() {
+	if !u.config.Enabled {
+		fmt.Println("Auto-update is disabled")
+		return
+	}
+
+	fmt.Printf("Auto-updater started (check interval: %v)\n", u.config.CheckInterval)
+
+	// Check immediately on start, then on schedule
+	u.checkForUpdate()
+
+	ticker := time.NewTicker(u.config.CheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if !u.isPaused() {
+				u.checkForUpdate()
+			}
+		case paused := <-u.pauseChan:
+			u.mu.Lock()
+			u.paused = paused
+			u.mu.Unlock()
+			if paused {
+				fmt.Println("Auto-updater paused")
+			} else {
+				fmt.Println("Auto-updater resumed")
+			}
+		case <-u.stopChan:
+			fmt.Println("Auto-updater stopped")
+			return
+		}
+	}
+}
+
+// checkForUpdate checks for and applies updates
+func (u *Updater) checkForUpdate() {
+	u.setStatus(StatusChecking, "")
+	u.mu.Lock()
+	u.lastCheck = time.Now()
+	u.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	fmt.Println("Checking for updates...")
+
+	// Get latest release
+	release, err := u.githubClient.GetLatestRelease(ctx)
+	if err != nil {
+		u.setStatus(StatusFailed, fmt.Sprintf("failed to check for updates: %v", err))
+		return
+	}
+
+	// Extract version from tag (strip 'v' prefix)
+	version := release.GetTagName()
+	if len(version) > 0 && version[0] == 'v' {
+		version = version[1:]
+	}
+
+	u.mu.Lock()
+	u.latestVersion = version
+	u.mu.Unlock()
+
+	fmt.Printf("Current version: %s, Latest version: %s\n", u.config.CurrentVersion, version)
+
+	// Check if update should be performed
+	shouldUpdate, reason := u.versionChecker.ShouldUpdate(u.config.CurrentVersion, version)
+	if !shouldUpdate {
+		fmt.Printf("No update needed: %s\n", reason)
+		u.setStatus(StatusIdle, "")
+		return
+	}
+
+	fmt.Printf("Update available: %s → %s\n", u.config.CurrentVersion, version)
+
+	// Perform update
+	if err := u.performUpdate(ctx, release); err != nil {
+		u.setStatus(StatusFailed, fmt.Sprintf("update failed: %v", err))
+		fmt.Printf("Update failed: %v\n", err)
+		return
+	}
+
+	u.mu.Lock()
+	u.lastUpdate = time.Now()
+	u.mu.Unlock()
+
+	u.setStatus(StatusIdle, "")
+	fmt.Println("Update completed successfully!")
+}
+
+// performUpdate downloads and installs an update
+func (u *Updater) performUpdate(ctx context.Context, release interface{}) error {
+	// Download
+	u.setStatus(StatusDownloading, "")
+	fmt.Println("Downloading update...")
+
+	downloader, err := NewDownloader(u.githubClient)
+	if err != nil {
+		return fmt.Errorf("failed to create downloader: %w", err)
+	}
+	defer func() { _ = downloader.Cleanup() }()
+
+	binaryPath, err := downloader.DownloadRelease(ctx, release.(*github.RepositoryRelease))
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	// Extract binary from tarball
+	fmt.Println("Extracting binary...")
+	extractedPath, err := downloader.ExtractBinary(binaryPath)
+	if err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+
+	// Verify signature
+	if u.config.VerifySignatures {
+		u.setStatus(StatusVerifying, "")
+		fmt.Println("Verifying signature...")
+
+		verifier := NewVerifier(u.config.CosignIdentityRegexp, u.config.CosignOIDCIssuer)
+		sigPath := fmt.Sprintf("%s.sig", binaryPath)
+		certPath := fmt.Sprintf("%s.cert", binaryPath)
+
+		if err := verifier.VerifySignature(extractedPath, sigPath, certPath); err != nil {
+			return fmt.Errorf("signature verification failed: %w", err)
+		}
+		fmt.Println("Signature verified ✓")
+	}
+
+	// Install
+	u.setStatus(StatusInstalling, "")
+	installer := NewInstaller("", "", u.config.HealthCheckTimeout)
+
+	if err := installer.Install(extractedPath); err != nil {
+		return fmt.Errorf("installation failed: %w", err)
+	}
+
+	return nil
+}
+
+// Stop stops the updater
+func (u *Updater) Stop() {
+	close(u.stopChan)
+}
+
+// Pause pauses automatic updates
+func (u *Updater) Pause() {
+	u.pauseChan <- true
+}
+
+// Resume resumes automatic updates
+func (u *Updater) Resume() {
+	u.pauseChan <- false
+}
+
+// TriggerCheck manually triggers an update check
+func (u *Updater) TriggerCheck() {
+	go u.checkForUpdate()
+}
+
+// GetStatus returns the current status
+func (u *Updater) GetStatus() (Status, string, time.Time, time.Time, string) {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.status, u.errorMsg, u.lastCheck, u.lastUpdate, u.latestVersion
+}
+
+// setStatus updates the current status
+func (u *Updater) setStatus(status Status, errorMsg string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.status = status
+	u.errorMsg = errorMsg
+}
+
+// isPaused checks if the updater is paused
+func (u *Updater) isPaused() bool {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.paused
+}

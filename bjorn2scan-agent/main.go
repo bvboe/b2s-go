@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/bvboe/b2s-go/bjorn2scan-agent/docker"
 	"github.com/bvboe/b2s-go/bjorn2scan-agent/syft"
+	"github.com/bvboe/b2s-go/bjorn2scan-agent/updater"
 	"github.com/bvboe/b2s-go/scanner-core/config"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
@@ -69,6 +71,76 @@ func (a *AgentInfo) GetScanContainers() bool {
 func (a *AgentInfo) GetScanNodes() bool {
 	// Agent does not scan nodes
 	return false
+}
+
+// registerUpdaterHandlers registers HTTP handlers for the updater
+func registerUpdaterHandlers(mux *http.ServeMux, u *updater.Updater) {
+	// GET /api/update/status - Get current update status
+	mux.HandleFunc("/api/update/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		status, errorMsg, lastCheck, lastUpdate, latestVersion := u.GetStatus()
+		response := map[string]interface{}{
+			"status":         status,
+			"error":          errorMsg,
+			"lastCheck":      lastCheck,
+			"lastUpdate":     lastUpdate,
+			"latestVersion":  latestVersion,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	})
+
+	// POST /api/update/trigger - Manually trigger an update check
+	mux.HandleFunc("/api/update/trigger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		u.TriggerCheck()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Update check triggered"}); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	})
+
+	// POST /api/update/pause - Pause automatic updates
+	mux.HandleFunc("/api/update/pause", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		u.Pause()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Auto-updates paused"}); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	})
+
+	// POST /api/update/resume - Resume automatic updates
+	mux.HandleFunc("/api/update/resume", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		u.Resume()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Auto-updates resumed"}); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	})
 }
 
 // setupLogging configures logging to write to both stdout and a log file
@@ -170,12 +242,51 @@ func main() {
 		log.Println("Docker not available or not accessible, container watching disabled")
 	}
 
+	// Initialize auto-updater if enabled
+	var agentUpdater *updater.Updater
+	if cfg.AutoUpdateEnabled {
+		log.Println("Initializing auto-updater...")
+		updaterConfig := &updater.Config{
+			Enabled:              cfg.AutoUpdateEnabled,
+			CheckInterval:        cfg.AutoUpdateCheckInterval,
+			GitHubRepo:           cfg.UpdateGitHubRepo,
+			CurrentVersion:       version,
+			VerifySignatures:     cfg.UpdateVerifySignatures,
+			RollbackEnabled:      cfg.UpdateRollbackEnabled,
+			HealthCheckTimeout:   cfg.UpdateHealthCheckTimeout,
+			CosignIdentityRegexp: cfg.UpdateCosignIdentityRegexp,
+			CosignOIDCIssuer:     cfg.UpdateCosignOIDCIssuer,
+			VersionConstraints: &updater.VersionConstraints{
+				AutoUpdateMinor: cfg.AutoUpdateMinorVersions,
+				AutoUpdateMajor: cfg.AutoUpdateMajorVersions,
+				PinnedVersion:   cfg.AutoUpdatePinnedVersion,
+				MinVersion:      cfg.AutoUpdateMinVersion,
+				MaxVersion:      cfg.AutoUpdateMaxVersion,
+			},
+		}
+
+		var err error
+		agentUpdater, err = updater.New(updaterConfig)
+		if err != nil {
+			log.Printf("Warning: failed to initialize updater: %v", err)
+		} else {
+			// Start updater in background
+			go agentUpdater.Start()
+			log.Println("Auto-updater started")
+		}
+	}
+
 	// Setup HTTP server
 	infoProvider := &AgentInfo{}
 	mux := http.NewServeMux()
 	handlers.RegisterHandlers(mux, infoProvider)
 	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
 	handlers.RegisterStaticHandlers(mux)
+
+	// Register updater API endpoints if updater is initialized
+	if agentUpdater != nil {
+		registerUpdaterHandlers(mux, agentUpdater)
+	}
 
 	// Register debug handlers if debug mode is enabled
 	handlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)

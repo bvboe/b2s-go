@@ -5,7 +5,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/ini.v1"
 )
@@ -15,7 +17,21 @@ type Config struct {
 	Port         string
 	DBPath       string
 	DebugEnabled bool
-	// Future: LogLevel, CacheSize, Timeouts, etc.
+
+	// Auto-update configuration
+	AutoUpdateEnabled         bool
+	AutoUpdateCheckInterval   time.Duration
+	AutoUpdateMinorVersions   bool
+	AutoUpdateMajorVersions   bool
+	AutoUpdatePinnedVersion   string
+	AutoUpdateMinVersion      string
+	AutoUpdateMaxVersion      string
+	UpdateGitHubRepo          string
+	UpdateVerifySignatures    bool
+	UpdateRollbackEnabled     bool
+	UpdateHealthCheckTimeout  time.Duration
+	UpdateCosignIdentityRegexp string
+	UpdateCosignOIDCIssuer    string
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -24,6 +40,21 @@ func defaultConfig() *Config {
 		Port:         "9999",
 		DBPath:       "/var/lib/bjorn2scan/containers.db",
 		DebugEnabled: false,
+
+		// Auto-update defaults
+		AutoUpdateEnabled:          false,
+		AutoUpdateCheckInterval:    6 * time.Hour,
+		AutoUpdateMinorVersions:    true,
+		AutoUpdateMajorVersions:    false,
+		AutoUpdatePinnedVersion:    "",
+		AutoUpdateMinVersion:       "",
+		AutoUpdateMaxVersion:       "",
+		UpdateGitHubRepo:           "bvboe/b2s-go",
+		UpdateVerifySignatures:     false, // TODO: Enable when cosign is implemented
+		UpdateRollbackEnabled:      true,
+		UpdateHealthCheckTimeout:   60 * time.Second,
+		UpdateCosignIdentityRegexp: "https://github.com/bvboe/b2s-go/*",
+		UpdateCosignOIDCIssuer:     "https://token.actions.githubusercontent.com",
 	}
 }
 
@@ -57,6 +88,58 @@ func LoadConfig(path string) (*Config, error) {
 			if section.HasKey("debug_enabled") {
 				debugStr := strings.ToLower(section.Key("debug_enabled").String())
 				cfg.DebugEnabled = debugStr == "true" || debugStr == "1" || debugStr == "yes"
+			}
+
+			// Load auto-update settings
+			if section.HasKey("auto_update_enabled") {
+				val := strings.ToLower(section.Key("auto_update_enabled").String())
+				cfg.AutoUpdateEnabled = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("auto_update_check_interval") {
+				if duration, err := time.ParseDuration(section.Key("auto_update_check_interval").String()); err == nil {
+					cfg.AutoUpdateCheckInterval = duration
+				}
+			}
+			if section.HasKey("auto_update_minor_versions") {
+				val := strings.ToLower(section.Key("auto_update_minor_versions").String())
+				cfg.AutoUpdateMinorVersions = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("auto_update_major_versions") {
+				val := strings.ToLower(section.Key("auto_update_major_versions").String())
+				cfg.AutoUpdateMajorVersions = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("auto_update_pinned_version") {
+				cfg.AutoUpdatePinnedVersion = section.Key("auto_update_pinned_version").String()
+			}
+			if section.HasKey("auto_update_min_version") {
+				cfg.AutoUpdateMinVersion = section.Key("auto_update_min_version").String()
+			}
+			if section.HasKey("auto_update_max_version") {
+				cfg.AutoUpdateMaxVersion = section.Key("auto_update_max_version").String()
+			}
+			if section.HasKey("update_github_repo") {
+				cfg.UpdateGitHubRepo = section.Key("update_github_repo").String()
+			}
+			if section.HasKey("update_verify_signatures") {
+				val := strings.ToLower(section.Key("update_verify_signatures").String())
+				cfg.UpdateVerifySignatures = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("update_rollback_enabled") {
+				val := strings.ToLower(section.Key("update_rollback_enabled").String())
+				cfg.UpdateRollbackEnabled = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("update_health_check_timeout") {
+				if duration, err := time.ParseDuration(section.Key("update_health_check_timeout").String()); err == nil {
+					cfg.UpdateHealthCheckTimeout = duration
+				} else if seconds, err := strconv.Atoi(section.Key("update_health_check_timeout").String()); err == nil {
+					cfg.UpdateHealthCheckTimeout = time.Duration(seconds) * time.Second
+				}
+			}
+			if section.HasKey("update_cosign_identity_regexp") {
+				cfg.UpdateCosignIdentityRegexp = section.Key("update_cosign_identity_regexp").String()
+			}
+			if section.HasKey("update_cosign_oidc_issuer") {
+				cfg.UpdateCosignOIDCIssuer = section.Key("update_cosign_oidc_issuer").String()
 			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read

@@ -178,6 +178,264 @@ helm upgrade bjorn2scan ./k8s-scan-server/helm/bjorn2scan \
   --namespace bjorn2scan
 ```
 
+## Auto-Update
+
+bjorn2scan supports automatic updates to reduce operational overhead and ensure you're always running the latest security fixes.
+
+### Features
+
+- ✅ **Kubernetes**: In-cluster CronJob checks GHCR for new Helm chart versions and auto-upgrades
+- ✅ **Agent**: Background service checks GitHub Releases and performs self-updates
+- ✅ **Configurable Version Policies**: Control which updates are applied (patch, minor, major)
+- ✅ **Version Pinning**: Lock to specific versions for controlled deployments
+- ✅ **Signature Verification**: Cosign-based verification of all artifacts
+- ✅ **Automatic Rollback**: Health checks with automatic rollback on failure
+- ✅ **Manual Control**: API endpoints and kubectl commands for manual operations
+
+### Quick Start
+
+#### Kubernetes Auto-Update
+
+Enable auto-update when installing or upgrading:
+
+```bash
+helm upgrade --install bjorn2scan oci://ghcr.io/bvboe/b2s-go/bjorn2scan \
+  --namespace bjorn2scan \
+  --create-namespace \
+  --set updateController.enabled=true \
+  --set updateController.schedule="0 2 * * *"
+```
+
+**Configuration example:**
+
+```yaml
+updateController:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2am UTC
+
+  config:
+    # Version policies
+    autoUpdateMinor: true   # Allow 0.1.x → 0.2.x
+    autoUpdateMajor: false  # Block 0.x.x → 1.x.x
+
+    # Optional: Pin to specific version
+    pinnedVersion: ""       # Empty = auto-update enabled
+
+    # Rollback protection
+    rollback:
+      enabled: true
+      autoRollback: true
+      healthCheckDelay: 5m
+
+    # Signature verification
+    verification:
+      enabled: true
+```
+
+**Manual control:**
+
+```bash
+# Trigger update check immediately
+kubectl create job --from=cronjob/bjorn2scan-update-controller \
+  manual-update-$(date +%s) -n bjorn2scan
+
+# Pause auto-updates
+kubectl patch cronjob bjorn2scan-update-controller \
+  -p '{"spec":{"suspend":true}}' -n bjorn2scan
+
+# Resume auto-updates
+kubectl patch cronjob bjorn2scan-update-controller \
+  -p '{"spec":{"suspend":false}}' -n bjorn2scan
+
+# View update history
+helm history bjorn2scan -n bjorn2scan
+```
+
+#### Agent Auto-Update
+
+Enable auto-update by configuring `/etc/bjorn2scan/agent.conf` or `./agent.conf`:
+
+```ini
+# Enable automatic updates
+auto_update_enabled=true
+
+# Check for updates every 6 hours
+auto_update_check_interval=6h
+
+# Version policies
+auto_update_minor_versions=true   # Allow 0.1.x → 0.2.x
+auto_update_major_versions=false  # Block 0.x.x → 1.x.x
+
+# Optional: Pin to specific version
+auto_update_pinned_version=       # Empty = auto-update enabled
+
+# Rollback protection
+update_rollback_enabled=true
+update_health_check_timeout=60s
+```
+
+**Environment variable override:**
+
+```bash
+export AUTO_UPDATE_ENABLED=true
+export AUTO_UPDATE_CHECK_INTERVAL=12h
+```
+
+**Manual control via API:**
+
+```bash
+# Check update status
+curl http://localhost:9999/api/update/status
+
+# Trigger update check
+curl -X POST http://localhost:9999/api/update/trigger
+
+# Pause auto-updates
+curl -X POST http://localhost:9999/api/update/pause
+
+# Resume auto-updates
+curl -X POST http://localhost:9999/api/update/resume
+```
+
+### Version Policies
+
+Control which updates are automatically applied:
+
+| Policy | Configuration | Updates Allowed | Use Case |
+|--------|--------------|-----------------|----------|
+| **Patch only** | `minor=false, major=false` | 0.1.34 → 0.1.35 | Maximum stability |
+| **Minor + Patch** | `minor=true, major=false` | 0.1.34 → 0.2.0 | Recommended default |
+| **All updates** | `minor=true, major=true` | 0.9.9 → 1.0.0 | Bleeding edge |
+
+**Version pinning example:**
+
+```yaml
+# Kubernetes
+updateController:
+  config:
+    pinnedVersion: "0.1.35"  # Stay on exactly v0.1.35
+
+# Agent (agent.conf)
+auto_update_pinned_version=0.1.35
+```
+
+### Security
+
+All auto-update operations include:
+
+1. **Signature Verification**: Artifacts are verified using cosign before installation
+2. **Checksum Validation**: SHA256 checksums verified for all downloads
+3. **Health Checks**: Post-update health verification ensures system stability
+4. **Automatic Rollback**: Failed updates automatically rollback to previous version
+5. **Audit Logging**: All update operations logged for compliance
+
+### Multi-Environment Strategy
+
+Recommended approach for production deployments:
+
+```yaml
+# Development
+autoUpdateMinor: true
+autoUpdateMajor: true
+schedule: "@hourly"        # Get updates quickly
+
+# Staging
+autoUpdateMinor: true
+autoUpdateMajor: false
+schedule: "0 2 * * *"      # Daily at 2am
+
+# Production
+pinnedVersion: "0.1.35"    # Manual control
+# OR for automatic:
+autoUpdateMinor: true
+autoUpdateMajor: false
+schedule: "0 2 * * 0"      # Weekly on Sunday
+maxVersion: "0.2.0"        # Cap at tested version
+```
+
+### Documentation
+
+For comprehensive documentation:
+
+- **[Auto-Update User Guide](docs/AUTO_UPDATE.md)** - Complete configuration and usage guide
+  - Detailed configuration options for Kubernetes and Agent
+  - Version policies and constraints explained
+  - Signature verification setup
+  - Troubleshooting common issues
+  - Best practices for production
+
+- **[Operational Runbooks](docs/RUNBOOKS.md)** - Step-by-step operational procedures
+  - Emergency procedures (disable updates, rollback)
+  - Routine operations (enable, configure, monitor)
+  - Incident response procedures
+  - Monitoring and health checks
+  - Disaster recovery procedures
+
+### Monitoring
+
+Set up monitoring for auto-update operations:
+
+**Kubernetes:**
+```bash
+# Check CronJob status
+kubectl get cronjob bjorn2scan-update-controller -n bjorn2scan
+
+# View recent update jobs
+kubectl get jobs -l app=bjorn2scan-update-controller -n bjorn2scan
+
+# View update logs
+kubectl logs -l app=bjorn2scan-update-controller -n bjorn2scan --tail=100
+
+# View Helm release history
+helm history bjorn2scan -n bjorn2scan
+```
+
+**Agent:**
+```bash
+# Check update status
+curl http://localhost:9999/api/update/status | jq .
+
+# View update logs
+sudo journalctl -u bjorn2scan-agent | grep -i update
+
+# Check service logs
+sudo tail -f /var/log/bjorn2scan/agent.log
+```
+
+### Emergency Procedures
+
+If an update causes issues:
+
+**Kubernetes - Immediate rollback:**
+```bash
+# Disable auto-updates
+kubectl patch cronjob bjorn2scan-update-controller \
+  -p '{"spec":{"suspend":true}}' -n bjorn2scan
+
+# Rollback to previous version
+helm rollback bjorn2scan -n bjorn2scan
+
+# Verify rollback
+helm list -n bjorn2scan
+kubectl get pods -n bjorn2scan
+```
+
+**Agent - Restore previous version:**
+```bash
+# Automatic rollback happens if health check fails
+# Manual restore if needed:
+sudo cp /tmp/bjorn2scan-agent.backup /usr/local/bin/bjorn2scan-agent
+sudo chmod +x /usr/local/bin/bjorn2scan-agent
+sudo systemctl restart bjorn2scan-agent
+```
+
+### Support
+
+For auto-update issues:
+- See troubleshooting section in [AUTO_UPDATE.md](docs/AUTO_UPDATE.md)
+- Follow procedures in [RUNBOOKS.md](docs/RUNBOOKS.md)
+- Report issues on [GitHub Issues](https://github.com/bvboe/b2s-go/issues)
+
 ## Uninstallation
 
 Remove bjorn2scan from your cluster:

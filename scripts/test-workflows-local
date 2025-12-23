@@ -100,6 +100,14 @@ else
 fi
 echo ""
 
+# Test grype-syft validation workflow
+if test_workflow "grype-syft-validation.yaml" "validate" "Grype/Syft Validation"; then
+    ((TESTS_PASSED++))
+else
+    ((TESTS_FAILED++))
+fi
+echo ""
+
 echo "==================================="
 echo "Test Results"
 echo "==================================="

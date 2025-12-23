@@ -146,3 +146,54 @@ podScanner:
 
   config:
     port: "8080"
+
+# Update Controller (CronJob)
+# Automatically checks for and applies Helm chart updates
+updateController:
+  enabled: false  # Set to true to enable automatic updates
+
+  image:
+    repository: ghcr.io/bvboe/b2s-go/k8s-update-controller
+    pullPolicy: IfNotPresent
+    tag: ""  # Defaults to chart appVersion
+
+  # Cron schedule (standard Kubernetes CronJob format)
+  # Examples: "0 2 * * *" (daily at 2am), "0 */6 * * *" (every 6 hours), "@daily"
+  schedule: "0 2 * * *"
+
+  # CronJob settings
+  concurrencyPolicy: Forbid  # Don't run multiple jobs simultaneously
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Update controller configuration
+  config:
+    enabled: true  # Can be disabled without removing CronJob
+
+    # Version constraints
+    autoUpdateMinor: true   # Allow 0.1.x → 0.2.x
+    autoUpdateMajor: false  # Block 0.x.x → 1.x.x
+    pinnedVersion: ""       # Pin to specific version (empty = auto)
+    minVersion: ""          # Minimum version (empty = no limit)
+    maxVersion: ""          # Maximum version (empty = no limit)
+
+    # Helm configuration (auto-populated from release)
+    chartRegistry: "oci://ghcr.io/bvboe/b2s-go/bjorn2scan"
+
+    # Rollback configuration
+    rollbackEnabled: true
+    healthCheckDelay: "5m"  # Wait before checking if update succeeded
+    autoRollback: true      # Automatically rollback on failure
+
+    # Signature verification
+    verificationEnabled: false  # TODO: Enable when cosign verification is implemented
+    cosignIdentityRegexp: "https://github.com/bvboe/b2s-go/*"
+    cosignOIDCIssuer: "https://token.actions.githubusercontent.com"

@@ -15,3 +15,58 @@ db_path=/var/lib/bjorn2scan/containers.db
 # WARNING: Only enable in development/testing - NOT for production
 # Environment variable: DEBUG_ENABLED
 debug_enabled=false
+
+# ============================================================================
+# AUTO-UPDATE CONFIGURATION
+# ============================================================================
+
+# Enable automatic updates (default: true)
+# When enabled, agent will periodically check for new versions and auto-update
+auto_update_enabled=true
+
+# Update check interval (default: 6h)
+# Format: Go duration string (e.g., "6h", "24h", "30m")
+auto_update_check_interval=24h
+
+# Allow automatic minor version updates (default: true)
+# Example: 0.1.x → 0.2.x
+auto_update_minor_versions=true
+
+# Allow automatic major version updates (default: false)
+# Example: 0.x.x → 1.x.x
+auto_update_major_versions=false
+
+# Pin to a specific version (default: empty = auto-update)
+# When set, only this version will be installed
+# Example: auto_update_pinned_version=0.1.35
+auto_update_pinned_version=
+
+# Minimum allowed version (default: empty = no minimum)
+# Will not downgrade below this version
+auto_update_min_version=
+
+# Maximum allowed version (default: empty = no maximum)
+# Will not upgrade above this version
+auto_update_max_version=
+
+# GitHub repository for updates (default: bvboe/b2s-go)
+# Format: owner/repo
+update_github_repo=bvboe/b2s-go
+
+# Verify signatures before installing (default: false)
+# TODO: Enable when cosign verification is implemented
+update_verify_signatures=false
+
+# Enable automatic rollback on failure (default: true)
+# If health check fails after update, automatically rollback to previous version
+update_rollback_enabled=true
+
+# Health check timeout after update (default: 60s)
+# Format: Go duration string or integer seconds
+update_health_check_timeout=60s
+
+# Cosign identity regexp for signature verification
+update_cosign_identity_regexp=https://github.com/bvboe/b2s-go/*
+
+# Cosign OIDC issuer for signature verification
+update_cosign_oidc_issuer=https://token.actions.githubusercontent.com
