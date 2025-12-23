@@ -217,7 +217,7 @@ verify_installation() {
     assert_not_empty "$cronjob_exists" "Update controller CronJob exists"
 
     # Check ConfigMap exists
-    local configmap_exists=$(kubectl get configmap bjorn2scan-update-controller -n "$NAMESPACE" -o name 2>/dev/null || echo "")
+    local configmap_exists=$(kubectl get configmap bjorn2scan-update-config -n "$NAMESPACE" -o name 2>/dev/null || echo "")
     assert_not_empty "$configmap_exists" "Update controller ConfigMap exists"
 
     # Check CronJob schedule
@@ -290,7 +290,7 @@ test_version_constraints() {
     log_info "Testing version constraints..."
 
     # Update ConfigMap to block all updates
-    kubectl patch configmap bjorn2scan-update-controller -n "$NAMESPACE" \
+    kubectl patch configmap bjorn2scan-update-config -n "$NAMESPACE" \
         --type merge \
         -p '{"data":{"autoUpdateMinor":"false","autoUpdateMajor":"false"}}'
 
@@ -306,7 +306,7 @@ test_version_constraints() {
     log_info "Version after constraint test: $current_version"
 
     # Restore settings
-    kubectl patch configmap bjorn2scan-update-controller -n "$NAMESPACE" \
+    kubectl patch configmap bjorn2scan-update-config -n "$NAMESPACE" \
         --type merge \
         -p '{"data":{"autoUpdateMinor":"true","autoUpdateMajor":"false"}}'
 }
@@ -315,7 +315,7 @@ test_version_pinning() {
     log_info "Testing version pinning..."
 
     # Pin to current version
-    kubectl patch configmap bjorn2scan-update-controller -n "$NAMESPACE" \
+    kubectl patch configmap bjorn2scan-update-config -n "$NAMESPACE" \
         --type merge \
         -p "{\"data\":{\"pinnedVersion\":\"$TEST_VERSION_OLD\"}}"
 
@@ -331,7 +331,7 @@ test_version_pinning() {
     log_info "Version after pinning test: $current_version"
 
     # Remove pin
-    kubectl patch configmap bjorn2scan-update-controller -n "$NAMESPACE" \
+    kubectl patch configmap bjorn2scan-update-config -n "$NAMESPACE" \
         --type merge \
         -p '{"data":{"pinnedVersion":""}}'
 }
@@ -372,10 +372,10 @@ test_rollback_protection() {
     log_info "Testing rollback protection configuration..."
 
     # Check rollback settings in ConfigMap
-    local rollback_enabled=$(kubectl get configmap bjorn2scan-update-controller -n "$NAMESPACE" -o jsonpath='{.data.rollbackEnabled}')
+    local rollback_enabled=$(kubectl get configmap bjorn2scan-update-config -n "$NAMESPACE" -o jsonpath='{.data.rollbackEnabled}')
     assert_equals "true" "$rollback_enabled" "Rollback protection is enabled"
 
-    local auto_rollback=$(kubectl get configmap bjorn2scan-update-controller -n "$NAMESPACE" -o jsonpath='{.data.autoRollback}')
+    local auto_rollback=$(kubectl get configmap bjorn2scan-update-config -n "$NAMESPACE" -o jsonpath='{.data.autoRollback}')
     assert_equals "true" "$auto_rollback" "Auto-rollback is enabled"
 }
 
