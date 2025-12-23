@@ -3,6 +3,19 @@ name: Auto-Update Integration Tests
 on:
   workflow_call:
   workflow_dispatch:
+
+  # Run on pushes to main that touch auto-update code
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'k8s-update-controller/**'
+      - 'bjorn2scan-agent/updater/**'
+      - 'scripts/test-k8s-update-controller.sh'
+      - 'scripts/test-agent-updater.sh'
+      - 'helm/bjorn2scan/templates/update-controller-*'
+
   # Run on PRs that touch auto-update code
   pull_request:
     paths:
