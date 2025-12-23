@@ -39,6 +39,10 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version: '1.25'
+        cache-dependency-path: |
+          k8s-scan-server/go.sum
+          pod-scanner/go.sum
+          k8s-update-controller/go.sum
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -90,6 +94,9 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version: '1.25'
+        cache-dependency-path: |
+          bjorn2scan-agent/go.sum
+          scanner-core/go.sum
 
     - name: Install dependencies
       run: |
