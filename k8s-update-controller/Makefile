@@ -6,9 +6,10 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 # Binary name
 BINARY = k8s-update-controller
 
-# Docker image
-IMAGE ?= ghcr.io/bvboe/b2s-go/k8s-update-controller
-TAG ?= $(VERSION)
+# Docker image (consistent with other components)
+IMAGE_NAME ?= k8s-update-controller
+IMAGE_TAG ?= latest
+REGISTRY ?= ghcr.io/bvboe/b2s-go
 
 # Build the binary
 build:
@@ -28,8 +29,8 @@ clean:
 
 # Build Docker image
 docker-build:
-	@echo "Building Docker image $(IMAGE):$(TAG)..."
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(TAG) .
+	@echo "Building Docker image $(IMAGE_NAME):$(IMAGE_TAG)..."
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(IMAGE_TAG) .
 
 # Run locally (requires kubeconfig)
 run: build
