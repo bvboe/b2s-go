@@ -224,9 +224,18 @@ verify_installation() {
     local schedule=$(kubectl get cronjob bjorn2scan-update-controller -n "$NAMESPACE" -o jsonpath='{.spec.schedule}')
     assert_equals "*/2 * * * *" "$schedule" "CronJob has correct schedule"
 
-    # Check CronJob is not suspended
+    # Check CronJob is not suspended (empty or false both mean not suspended)
     local suspended=$(kubectl get cronjob bjorn2scan-update-controller -n "$NAMESPACE" -o jsonpath='{.spec.suspend}')
-    assert_equals "" "$suspended" "CronJob is not suspended"
+    if [ "$suspended" != "true" ]; then
+        log_info "✓ PASS: CronJob is not suspended"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        log_error "✗ FAIL: CronJob is suspended"
+        log_error "  Expected: not suspended (empty or false)"
+        log_error "  Actual:   $suspended"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_RUN=$((TESTS_RUN + 1))
 
     # Check current version
     local current_version=$(helm list -n "$NAMESPACE" -o json | jq -r '.[0].chart' | sed 's/bjorn2scan-//')
