@@ -250,7 +250,7 @@ test_manual_trigger() {
 
     # Trigger update check manually
     kubectl create job --from=cronjob/bjorn2scan-update-controller \
-        manual-test-$(date +%s) \
+        "manual-test-$(date +%s)" \
         -n "$NAMESPACE"
 
     # Wait for job to complete
@@ -313,7 +313,7 @@ test_version_constraints() {
 
     # Trigger update check
     kubectl create job --from=cronjob/bjorn2scan-update-controller \
-        constraint-test-$(date +%s) \
+        "constraint-test-$(date +%s)" \
         -n "$NAMESPACE"
 
     sleep 15
@@ -338,7 +338,7 @@ test_version_pinning() {
 
     # Trigger update check
     kubectl create job --from=cronjob/bjorn2scan-update-controller \
-        pinned-test-$(date +%s) \
+        "pinned-test-$(date +%s)" \
         -n "$NAMESPACE"
 
     sleep 15

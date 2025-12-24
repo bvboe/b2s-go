@@ -29,10 +29,10 @@ type HelmConfig struct {
 
 // RollbackConfig defines rollback behavior
 type RollbackConfig struct {
-	Enabled              bool   `yaml:"enabled"`
-	HealthCheckDelayStr  string `yaml:"healthCheckDelay"`
-	healthCheckDelay     time.Duration
-	AutoRollback         bool   `yaml:"autoRollback"`
+	Enabled             bool   `yaml:"enabled"`
+	HealthCheckDelayStr string `yaml:"healthCheckDelay"`
+	healthCheckDelay    time.Duration
+	AutoRollback        bool `yaml:"autoRollback"`
 }
 
 // HealthCheckDelay returns the parsed duration

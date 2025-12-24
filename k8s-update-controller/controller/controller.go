@@ -10,10 +10,10 @@ import (
 
 // Controller manages the update process
 type Controller struct {
-	config          *config.Config
-	helmClient      *HelmClient
-	registryClient  *RegistryClient
-	versionChecker  *VersionChecker
+	config         *config.Config
+	helmClient     *HelmClient
+	registryClient *RegistryClient
+	versionChecker *VersionChecker
 }
 
 // UpdateResult contains the result of an update check
