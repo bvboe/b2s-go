@@ -152,7 +152,10 @@ build_test_images() {
     kind load docker-image "pod-scanner:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
     kind load docker-image "k8s-update-controller:$TEST_VERSION_OLD" --name "$CLUSTER_NAME"
 
-    assert_command_success "docker images | grep -q 'k8s-scan-server.*$TEST_VERSION_OLD'" "Images built successfully"
+    # Verify all images are present
+    assert_command_success "docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^k8s-scan-server:$TEST_VERSION_OLD$'" "k8s-scan-server image built"
+    assert_command_success "docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^pod-scanner:$TEST_VERSION_OLD$'" "pod-scanner image built"
+    assert_command_success "docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^k8s-update-controller:$TEST_VERSION_OLD$'" "k8s-update-controller image built"
 }
 
 install_bjorn2scan() {
@@ -165,18 +168,21 @@ install_bjorn2scan() {
     cat > /tmp/test-values.yaml <<EOF
 scanServer:
   image:
+    repository: k8s-scan-server
     tag: "$TEST_VERSION_OLD"
     pullPolicy: IfNotPresent
   replicaCount: 1
 
 podScanner:
   image:
+    repository: pod-scanner
     tag: "$TEST_VERSION_OLD"
     pullPolicy: IfNotPresent
 
 updateController:
   enabled: true
   image:
+    repository: k8s-update-controller
     tag: "$TEST_VERSION_OLD"
     pullPolicy: IfNotPresent
   schedule: "*/2 * * * *"  # Every 2 minutes for testing
@@ -185,24 +191,21 @@ updateController:
   config:
     autoUpdateMinor: true
     autoUpdateMajor: false
-    rollback:
-      enabled: true
-      autoRollback: true
-      healthCheckDelay: 1m
-    verification:
-      enabled: false  # Disable for testing
+    rollbackEnabled: true
+    autoRollback: true
+    healthCheckDelay: 1m
+    verificationEnabled: false  # Disable for testing
 EOF
 
-    # Install using Helm
+    # Install using Helm (without --wait to avoid CronJob pod issues)
     helm install bjorn2scan ./helm/bjorn2scan \
         -n "$NAMESPACE" \
-        -f /tmp/test-values.yaml \
-        --wait \
-        --timeout=5m
+        -f /tmp/test-values.yaml
 
-    # Wait for pods to be ready
+    # Wait for main pods to be ready (exclude CronJob pods)
     kubectl wait --for=condition=ready pod \
         -l app.kubernetes.io/name=bjorn2scan \
+        -l '!job-name' \
         -n "$NAMESPACE" \
         --timeout=300s
 
@@ -261,18 +264,23 @@ test_manual_trigger() {
     local waited=0
     while [ $waited -lt 120 ]; do
         local status=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
-        if [ "$status" = "True" ]; then
+        local failed=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || echo "")
+        if [ "$status" = "True" ] || [ "$failed" = "True" ]; then
             break
         fi
         sleep 5
         waited=$((waited + 5))
     done
 
-    assert_command_success "kubectl get job $job_name -n $NAMESPACE -o jsonpath='{.status.succeeded}' | grep -q 1" "Update job completed successfully"
-
-    # View job logs for debugging
+    # View job logs for debugging (before assertion)
     log_info "Update job logs:"
-    kubectl logs -l job-name="$job_name" -n "$NAMESPACE" --tail=50 || true
+    kubectl logs -l job-name="$job_name" -n "$NAMESPACE" --tail=100 || true
+
+    # Show job status for debugging
+    log_info "Job status:"
+    kubectl get job "$job_name" -n "$NAMESPACE" -o yaml | grep -A 20 "^status:" || true
+
+    assert_command_success "kubectl get job $job_name -n $NAMESPACE -o jsonpath='{.status.succeeded}' | grep -q 1" "Update job completed successfully"
 }
 
 test_pause_resume() {
@@ -380,11 +388,14 @@ test_job_history() {
 test_rollback_protection() {
     log_info "Testing rollback protection configuration..."
 
-    # Check rollback settings in ConfigMap
-    local rollback_enabled=$(kubectl get configmap bjorn2scan-update-config -n "$NAMESPACE" -o jsonpath='{.data.rollbackEnabled}')
+    # Check rollback settings in ConfigMap (extract from YAML config)
+    local config_yaml=$(kubectl get configmap bjorn2scan-update-config -n "$NAMESPACE" -o jsonpath='{.data.config\.yaml}')
+
+    # Use awk to extract rollback section more precisely
+    local rollback_enabled=$(echo "$config_yaml" | awk '/^rollback:/{flag=1; next} /^[a-z]/ && flag{flag=0} flag && /^  enabled:/{print $2; exit}')
     assert_equals "true" "$rollback_enabled" "Rollback protection is enabled"
 
-    local auto_rollback=$(kubectl get configmap bjorn2scan-update-config -n "$NAMESPACE" -o jsonpath='{.data.autoRollback}')
+    local auto_rollback=$(echo "$config_yaml" | awk '/^rollback:/{flag=1; next} /^[a-z]/ && flag{flag=0} flag && /^  autoRollback:/{print $2; exit}')
     assert_equals "true" "$auto_rollback" "Auto-rollback is enabled"
 }
 

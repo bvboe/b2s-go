@@ -29,9 +29,29 @@ type HelmConfig struct {
 
 // RollbackConfig defines rollback behavior
 type RollbackConfig struct {
-	Enabled          bool          `yaml:"enabled"`
-	HealthCheckDelay time.Duration `yaml:"healthCheckDelay"`
-	AutoRollback     bool          `yaml:"autoRollback"`
+	Enabled              bool   `yaml:"enabled"`
+	HealthCheckDelayStr  string `yaml:"healthCheckDelay"`
+	healthCheckDelay     time.Duration
+	AutoRollback         bool   `yaml:"autoRollback"`
+}
+
+// HealthCheckDelay returns the parsed duration
+func (r *RollbackConfig) HealthCheckDelay() time.Duration {
+	return r.healthCheckDelay
+}
+
+// ParseDurations parses string durations into time.Duration
+func (r *RollbackConfig) ParseDurations() error {
+	if r.HealthCheckDelayStr == "" {
+		r.healthCheckDelay = 5 * time.Minute // default
+		return nil
+	}
+	d, err := time.ParseDuration(r.HealthCheckDelayStr)
+	if err != nil {
+		return err
+	}
+	r.healthCheckDelay = d
+	return nil
 }
 
 // VerificationConfig defines signature verification settings

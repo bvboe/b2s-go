@@ -129,8 +129,8 @@ func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) 
 
 	// 8. Wait for health check
 	if c.config.Rollback.Enabled {
-		fmt.Printf("\nStep 7: Waiting %v for health check...\n", c.config.Rollback.HealthCheckDelay)
-		time.Sleep(c.config.Rollback.HealthCheckDelay)
+		fmt.Printf("\nStep 7: Waiting %v for health check...\n", c.config.Rollback.HealthCheckDelay())
+		time.Sleep(c.config.Rollback.HealthCheckDelay())
 
 		healthy, err := c.helmClient.IsReleaseHealthy()
 		if err != nil || !healthy {

@@ -30,6 +30,8 @@ Claude can perform these operations freely:
 - `make test`, `make build`, `make clean`
 - `npm install`, `npm run lint`, `npm test`
 - `./scripts/test-local` - Comprehensive local test suite
+- `./scripts/test-k8s-update-controller` - K8s update controller integration tests
+- `./scripts/test-agent-updater` - Agent auto-updater integration tests
 - `./scripts/test-workflows-local` - Local workflow testing
 - Any linting tools: `golangci-lint`, `yamllint`, `gofmt`
 

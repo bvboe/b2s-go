@@ -40,7 +40,7 @@ The auto-update feature has been fully integrated into the CI/CD pipeline with c
 **Auto-Update Tests** (`auto-update-test.yaml`)
 - ✅ Dedicated end-to-end test workflow
 - ✅ Tests update controller functionality
-- ✅ Runs integration test script (test-k8s-update-controller.sh)
+- ✅ Runs integration test script (test-k8s-update-controller)
 - ✅ Automated on PR changes to update controller code
 - ✅ Blocks releases if tests fail
 
@@ -55,7 +55,7 @@ The auto-update feature has been fully integrated into the CI/CD pipeline with c
 **Auto-Update Tests** (`auto-update-test.yaml`)
 - ✅ Dedicated agent updater test job
 - ✅ Tests download, verify, install, rollback functionality
-- ✅ Runs integration test script (test-agent-updater.sh)
+- ✅ Runs integration test script (test-agent-updater)
 - ✅ Automated on PR changes to updater code
 - ✅ Upload test artifacts on failure
 
@@ -73,9 +73,9 @@ Release Workflow (v0.x.x tag pushed)
 │
 ├── auto-update-tests (parallel) [NEW]
 │   ├── test-k8s-update-controller
-│   │   └── Runs scripts/test-k8s-update-controller.sh
+│   │   └── Runs scripts/test-k8s-update-controller
 │   └── test-agent-updater
-│       └── Runs scripts/test-agent-updater.sh
+│       └── Runs scripts/test-agent-updater
 │
 └── Component Releases (all depend on above tests)
     ├── release-k8s-scan-server

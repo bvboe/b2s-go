@@ -12,8 +12,8 @@ on:
     paths:
       - 'k8s-update-controller/**'
       - 'bjorn2scan-agent/updater/**'
-      - 'scripts/test-k8s-update-controller.sh'
-      - 'scripts/test-agent-updater.sh'
+      - 'scripts/test-k8s-update-controller'
+      - 'scripts/test-agent-updater'
       - 'helm/bjorn2scan/templates/update-controller-*'
 
   # Run on PRs that touch auto-update code
@@ -21,8 +21,8 @@ on:
     paths:
       - 'k8s-update-controller/**'
       - 'bjorn2scan-agent/updater/**'
-      - 'scripts/test-k8s-update-controller.sh'
-      - 'scripts/test-agent-updater.sh'
+      - 'scripts/test-k8s-update-controller'
+      - 'scripts/test-agent-updater'
       - 'helm/bjorn2scan/templates/update-controller-*'
 
 jobs:
@@ -69,8 +69,8 @@ jobs:
         TEST_VERSION_NEW: "0.1.999"
         CLEANUP: "true"
       run: |
-        chmod +x scripts/test-k8s-update-controller.sh
-        ./scripts/test-k8s-update-controller.sh
+        chmod +x scripts/test-k8s-update-controller
+        ./scripts/test-k8s-update-controller
 
     - name: Upload test logs
       if: failure()
@@ -115,8 +115,8 @@ jobs:
         TEST_DIR: "/tmp/bjorn2scan-agent-test"
         CLEANUP: "true"
       run: |
-        chmod +x scripts/test-agent-updater.sh
-        ./scripts/test-agent-updater.sh
+        chmod +x scripts/test-agent-updater
+        ./scripts/test-agent-updater
 
     - name: Upload test logs
       if: failure()

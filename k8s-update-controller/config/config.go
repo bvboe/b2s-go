@@ -57,6 +57,11 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse configuration: %w", err)
 	}
 
+	// Parse duration strings
+	if err := cfg.Rollback.ParseDurations(); err != nil {
+		return nil, fmt.Errorf("failed to parse durations: %w", err)
+	}
+
 	// Set defaults
 	setDefaults(&cfg)
 
@@ -78,9 +83,7 @@ func setDefaults(cfg *Config) {
 	if cfg.Helm.ChartRegistry == "" {
 		cfg.Helm.ChartRegistry = "oci://ghcr.io/bvboe/b2s-go/bjorn2scan"
 	}
-	if cfg.Rollback.HealthCheckDelay == 0 {
-		cfg.Rollback.HealthCheckDelay = 5 * time.Minute
-	}
+	// HealthCheckDelay default is handled in ParseDurations()
 	if cfg.Verification.CosignOIDCIssuer == "" {
 		cfg.Verification.CosignOIDCIssuer = "https://token.actions.githubusercontent.com"
 	}
