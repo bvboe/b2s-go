@@ -254,7 +254,7 @@ test_manual_trigger() {
     sleep 10
 
     # Check job status
-    local job_name=$(kubectl get jobs -n "$NAMESPACE" -l app=bjorn2scan-update-controller --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
+    local job_name=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=update-controller --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
     assert_not_empty "$job_name" "Update job was created"
 
     # Wait for job completion (with timeout)
@@ -367,7 +367,7 @@ test_job_history() {
     log_info "Testing job history..."
 
     # Get all update jobs
-    local job_count=$(kubectl get jobs -n "$NAMESPACE" -l app=bjorn2scan-update-controller -o name | wc -l)
+    local job_count=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=update-controller -o name | wc -l)
     log_info "Found $job_count update jobs"
 
     assert_command_success "[ $job_count -gt 0 ]" "At least one update job exists"
