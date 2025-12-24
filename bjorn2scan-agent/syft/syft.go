@@ -15,21 +15,19 @@ import (
 // GenerateSBOM generates an SBOM for a Docker image using syft library
 // Returns the SBOM as JSON bytes in syft JSON format
 func GenerateSBOM(ctx context.Context, image containers.ImageID) ([]byte, error) {
-	// Build the image reference
-	// Use digest if available for accuracy, otherwise use repository:tag
-	var imageRef string
-	if image.Digest != "" {
-		// Use digest for precise identification
-		imageRef = fmt.Sprintf("%s@%s", image.Repository, image.Digest)
-	} else {
-		// Fall back to tag
-		imageRef = fmt.Sprintf("%s:%s", image.Repository, image.Tag)
-	}
+	// Build the image reference using repository:tag format only
+	// We explicitly avoid digest-based references to prevent any pull attempts from registries
+	// Since we only scan locally running containers, repository:tag is always available
+	imageRef := fmt.Sprintf("%s:%s", image.Repository, image.Tag)
 
 	log.Printf("Generating SBOM for image: %s", imageRef)
 
+	// Configure source to use Docker daemon exclusively
+	// This ensures we ONLY scan locally cached images and never attempt registry pulls
+	cfg := syft.DefaultGetSourceConfig().WithSources("docker")
+
 	// Parse the image reference and create a source
-	src, err := syft.GetSource(ctx, imageRef, nil)
+	src, err := syft.GetSource(ctx, imageRef, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source for image %s: %w", imageRef, err)
 	}
