@@ -413,13 +413,17 @@ test_health_check_after_restart() {
 test_concurrent_api_calls() {
     log_info "Testing concurrent API calls..."
 
-    # Make multiple concurrent status requests
+    # Make multiple concurrent status requests and capture PIDs
+    local pids=()
     for i in {1..5}; do
         curl -sf "http://localhost:$TEST_PORT/api/update/status" &>/dev/null &
+        pids+=($!)
     done
 
-    # Wait for all requests to complete
-    wait
+    # Wait only for the curl requests, not all background jobs (agent is also background!)
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
 
     assert_command_success "curl -sf http://localhost:$TEST_PORT/api/update/status" "Agent handles concurrent requests"
 }

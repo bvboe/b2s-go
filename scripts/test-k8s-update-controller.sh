@@ -348,8 +348,8 @@ test_version_pinning() {
 test_health_check() {
     log_info "Testing health check endpoints..."
 
-    # Port forward to scan server
-    kubectl port-forward -n "$NAMESPACE" svc/bjorn2scan 18080:8080 &
+    # Port forward to scan server (service exposes port 80, not 8080)
+    kubectl port-forward -n "$NAMESPACE" svc/bjorn2scan 18080:80 &
     local pf_pid=$!
     sleep 5
 
