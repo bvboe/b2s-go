@@ -11,7 +11,14 @@
 - [ ] Node scanning
 - [ ] Agent autoupdate
 - [ ] Remote workers for increased performance?
-- [ ] Test agent on other linux distributions (alpine, raspberry pi)
+- [ ] Test bjorn2scan-agent install.sh on major Linux distributions:
+  - [ ] Ubuntu 22.04/24.04 LTS
+  - [ ] Debian 11/12
+  - [ ] Alpine Linux (BusyBox compatibility)
+  - [ ] Amazon Linux 2/2023
+  - [ ] RHEL/Rocky/AlmaLinux 8/9
+  - [ ] Fedora (latest)
+  - [ ] Raspberry Pi OS (ARM64)
 - [ ] OpenTelemetry integration
 - [ ] Database optimization
 - [ ] github.com/bvboe/b2s-go/scanner-core shows with version unknown in sbom
