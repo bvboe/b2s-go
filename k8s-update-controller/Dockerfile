@@ -3,12 +3,12 @@ FROM cgr.dev/chainguard/go:latest AS builder
 
 WORKDIR /build
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy go mod files from subdirectory (context is root)
+COPY k8s-update-controller/go.mod k8s-update-controller/go.sum ./
 RUN go mod download
 
-# Copy source code
-COPY . .
+# Copy source code from subdirectory
+COPY k8s-update-controller/ .
 
 # Build the binary
 ARG VERSION=dev
