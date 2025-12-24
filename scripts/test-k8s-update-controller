@@ -92,11 +92,14 @@ assert_command_success() {
 cleanup() {
     log_info "Cleaning up test environment..."
 
+    # Kill any background processes (port-forward, etc.)
+    jobs -p | xargs -r kill 2>/dev/null || true
+
     # Delete Helm release
     helm uninstall bjorn2scan -n "$NAMESPACE" 2>/dev/null || true
 
-    # Delete namespace
-    kubectl delete namespace "$NAMESPACE" --ignore-not-found=true --wait=false
+    # Delete namespace (suppress errors as cluster may be going down)
+    kubectl delete namespace "$NAMESPACE" --ignore-not-found=true --wait=false 2>/dev/null || true
 
     # Delete kind cluster
     if command -v kind &>/dev/null; then
