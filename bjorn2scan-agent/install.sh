@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+# Ensure standard system paths are available
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+export PATH
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -211,16 +215,50 @@ stop_service() {
     fi
 }
 
-# Create user and group
+# Check if group exists (portable across distros)
+group_exists() {
+    if command -v getent >/dev/null 2>&1; then
+        getent group "$1" >/dev/null 2>&1
+    else
+        grep -q "^${1}:" /etc/group 2>/dev/null
+    fi
+}
+
+# Check if user exists (portable across distros)
+user_exists() {
+    if command -v getent >/dev/null 2>&1; then
+        getent passwd "$1" >/dev/null 2>&1
+    else
+        grep -q "^${1}:" /etc/passwd 2>/dev/null
+    fi
+}
+
+# Create user and group (supports both GNU and BusyBox tools)
 create_user() {
-    if ! getent group "$GROUP_NAME" >/dev/null 2>&1; then
-        log_info "Creating group: $GROUP_NAME"
-        groupadd --system "$GROUP_NAME"
+    # Detect if we're on Alpine/BusyBox
+    IS_ALPINE=false
+    if [ "$DISTRO" = "alpine" ] || ! command -v groupadd >/dev/null 2>&1; then
+        IS_ALPINE=true
     fi
 
-    if ! getent passwd "$USER_NAME" >/dev/null 2>&1; then
+    # Create group
+    if ! group_exists "$GROUP_NAME"; then
+        log_info "Creating group: $GROUP_NAME"
+        if [ "$IS_ALPINE" = true ]; then
+            addgroup -S "$GROUP_NAME"
+        else
+            groupadd --system "$GROUP_NAME"
+        fi
+    fi
+
+    # Create user
+    if ! user_exists "$USER_NAME"; then
         log_info "Creating user: $USER_NAME"
-        useradd --system --gid "$GROUP_NAME" --no-create-home --shell /bin/false "$USER_NAME"
+        if [ "$IS_ALPINE" = true ]; then
+            adduser -S -D -H -G "$GROUP_NAME" -s /bin/false "$USER_NAME"
+        else
+            useradd --system --gid "$GROUP_NAME" --no-create-home --shell /bin/false "$USER_NAME"
+        fi
     fi
 }
 
