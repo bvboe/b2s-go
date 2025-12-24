@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_NAMESPACE="test-$(date +%s)"
 SCAN_SERVER_IMAGE="k8s-scan-server"
 POD_SCANNER_IMAGE="pod-scanner"
+UPDATE_CONTROLLER_IMAGE="k8s-update-controller"
 IMAGE_TAG="local-test"
 CLEANUP_ON_EXIT=true
 
@@ -130,6 +131,7 @@ echo "Test namespace: $TEST_NAMESPACE"
 echo "Test clusters: $TEST_CLUSTERS"
 echo "Scan Server Image: $SCAN_SERVER_IMAGE:$IMAGE_TAG"
 echo "Pod Scanner Image: $POD_SCANNER_IMAGE:$IMAGE_TAG"
+echo "Update Controller Image: $UPDATE_CONTROLLER_IMAGE:$IMAGE_TAG"
 echo "Agent Image: bjorn2scan-agent:$IMAGE_TAG"
 echo ""
 
@@ -153,6 +155,11 @@ print_header "1. Unit Tests - bjorn2scan-agent"
 cd "$SCRIPT_DIR/bjorn2scan-agent"
 run_test "bjorn2scan-agent: Go unit tests" go test -v ./...
 run_test "bjorn2scan-agent: Go vet" go vet ./...
+
+print_header "1. Unit Tests - k8s-update-controller"
+cd "$SCRIPT_DIR/k8s-update-controller"
+run_test "k8s-update-controller: Go unit tests" go test -v ./...
+run_test "k8s-update-controller: Go vet" go vet ./...
 
 # 2. Code Quality
 print_header "2. Code Quality - scanner-core"
@@ -186,6 +193,15 @@ print_header "2. Code Quality - bjorn2scan-agent"
 cd "$SCRIPT_DIR/bjorn2scan-agent"
 if command -v golangci-lint &> /dev/null; then
     run_test "bjorn2scan-agent: golangci-lint" golangci-lint run ./...
+else
+    print_error "golangci-lint not installed, skipping"
+    ((TESTS_FAILED++))
+fi
+
+print_header "2. Code Quality - k8s-update-controller"
+cd "$SCRIPT_DIR/k8s-update-controller"
+if command -v golangci-lint &> /dev/null; then
+    run_test "k8s-update-controller: golangci-lint" golangci-lint run ./...
 else
     print_error "golangci-lint not installed, skipping"
     ((TESTS_FAILED++))
@@ -226,6 +242,12 @@ run_test "bjorn2scan-agent: Go build" go build -v -o bjorn2scan-agent .
 cd "$SCRIPT_DIR"
 run_test "bjorn2scan-agent: Docker build" docker build -f bjorn2scan-agent/Dockerfile -t bjorn2scan-agent:$IMAGE_TAG --build-arg VERSION=local-test .
 
+print_header "3. Build Tests - k8s-update-controller"
+cd "$SCRIPT_DIR/k8s-update-controller"
+run_test "k8s-update-controller: Go build" go build -v -o k8s-update-controller .
+cd "$SCRIPT_DIR"
+run_test "k8s-update-controller: Docker build" docker build -f k8s-update-controller/Dockerfile -t "$UPDATE_CONTROLLER_IMAGE:$IMAGE_TAG" --build-arg VERSION=local-test .
+
 # 4. Helm Tests
 print_header "4. Helm Tests"
 cd "$SCRIPT_DIR"
@@ -243,6 +265,7 @@ if [ "$TEST_CLUSTERS" = "kind" ] || [ "$TEST_CLUSTERS" = "both" ]; then
         print_info "Loading images to kind..."
         kind load docker-image "$SCAN_SERVER_IMAGE:$IMAGE_TAG" --name local-test
         kind load docker-image "$POD_SCANNER_IMAGE:$IMAGE_TAG" --name local-test
+        kind load docker-image "$UPDATE_CONTROLLER_IMAGE:$IMAGE_TAG" --name local-test
 
         print_info "Creating namespace..."
         kubectl create namespace "$TEST_NAMESPACE"
@@ -290,6 +313,7 @@ if [ "$TEST_CLUSTERS" = "minikube" ] || [ "$TEST_CLUSTERS" = "both" ]; then
         print_info "Loading images to minikube..."
         minikube image load "$SCAN_SERVER_IMAGE:$IMAGE_TAG"
         minikube image load "$POD_SCANNER_IMAGE:$IMAGE_TAG"
+        minikube image load "$UPDATE_CONTROLLER_IMAGE:$IMAGE_TAG"
 
         print_info "Creating namespace..."
         kubectl create namespace "$TEST_NAMESPACE" || true

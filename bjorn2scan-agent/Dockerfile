@@ -25,6 +25,7 @@ WORKDIR /workspace/bjorn2scan-agent
 COPY bjorn2scan-agent/main.go ./
 COPY bjorn2scan-agent/docker/ ./docker/
 COPY bjorn2scan-agent/syft/ ./syft/
+COPY bjorn2scan-agent/updater/ ./updater/
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o bjorn2scan-agent .
