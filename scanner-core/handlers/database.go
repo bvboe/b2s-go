@@ -362,6 +362,11 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 		// Fallback to basic handler if provider doesn't support ExecuteReadOnlyQuery
 		mux.HandleFunc("/api/images", ImageDetailsHandler(provider))
 	}
+
+	// Register last updated endpoint for auto-refresh functionality
+	if lastUpdatedProvider, ok := provider.(LastUpdatedProvider); ok {
+		mux.HandleFunc("/api/lastupdated", LastUpdatedHandler(lastUpdatedProvider))
+	}
 	mux.HandleFunc("/api/images/", func(w http.ResponseWriter, r *http.Request) {
 		// Route to appropriate handler based on path suffix
 		path := r.URL.Path

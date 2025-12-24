@@ -509,8 +509,44 @@
             return value.toFixed(1);
         }
 
+        // Auto-refresh functionality
+        let indexCurrentTimestamp = null;
+
+        async function checkForUpdates() {
+            try {
+                const response = await fetch("/api/lastupdated");
+                if (!response.ok) {
+                    console.error("Failed to fetch last updated timestamp");
+                    return;
+                }
+
+                const newTimestamp = await response.text();
+
+                if (indexCurrentTimestamp === null) {
+                    // First time - just store the timestamp
+                    indexCurrentTimestamp = newTimestamp;
+                } else if (newTimestamp !== indexCurrentTimestamp) {
+                    // Timestamp changed - reload data
+                    console.log("Data updated, reloading...");
+                    indexCurrentTimestamp = newTimestamp;
+                    // Reload all tables
+                    await Promise.all([
+                        loadScanStatusWidget(),
+                        loadNamespaceTable(),
+                        loadDistributionTable()
+                    ]);
+                }
+            } catch (error) {
+                console.error("Error checking for updates:", error);
+            }
+        }
+
         // Initialize page when DOM is ready
-        document.addEventListener('DOMContentLoaded', initPage);
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initPage();
+            // Start polling for updates every 2 seconds
+            setInterval(checkForUpdates, 2000);
+        });
     </script>
 </body>
 </html>

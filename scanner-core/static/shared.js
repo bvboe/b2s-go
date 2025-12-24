@@ -548,6 +548,33 @@ function renderVersionFooter() {
     footer.innerHTML = `<p style="text-align: right; color: #666; font-style: italic;"><a href="https://github.com/bvboe/b2s-go" target="_blank" style="color: #666; text-decoration: underline;">bjorn2scan v${appConfig.version}</a></p>`;
 }
 
+// Auto-refresh functionality
+let currentTimestamp = null;
+
+async function checkForUpdates() {
+    try {
+        const response = await fetch("/api/lastupdated?datatype=image");
+        if (!response.ok) {
+            console.error("Failed to fetch last updated timestamp");
+            return;
+        }
+
+        const newTimestamp = await response.text();
+
+        if (currentTimestamp === null) {
+            // First time - just store the timestamp
+            currentTimestamp = newTimestamp;
+        } else if (newTimestamp !== currentTimestamp) {
+            // Timestamp changed - reload data
+            console.log("Data updated, reloading...");
+            currentTimestamp = newTimestamp;
+            loadDataTable();
+        }
+    } catch (error) {
+        console.error("Error checking for updates:", error);
+    }
+}
+
 // Initialize page
 async function initPage() {
     await loadConfig();
@@ -557,4 +584,7 @@ async function initPage() {
     loadDataTable();
     updateCSVLink();
     updateSortIndicators();
+
+    // Start polling for updates every 2 seconds
+    setInterval(checkForUpdates, 2000);
 }

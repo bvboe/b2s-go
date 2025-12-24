@@ -334,3 +334,33 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 
 	return images, nil
 }
+
+// GetLastUpdatedTimestamp returns a change signature that detects any data modifications
+// dataType parameter can be "image", "all", or empty (defaults to "all")
+// Returns a signature in format: "timestamp|count" (e.g., "2025-12-24T18:00:00Z|42")
+//
+// This signature changes when:
+// - container_images.updated_at changes (scans complete, data updated)
+// - container_instances count changes (pods added/deleted)
+//
+// Using row count is necessary to detect deletions, since deleted rows have no
+// timestamp to update.
+func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
+	var signature string
+
+	// Build a signature combining timestamp and row count
+	// This detects both data updates (timestamp) and structural changes (count)
+	query := `
+		SELECT
+			COALESCE(MAX(updated_at), datetime('now')) || '|' ||
+			(SELECT COUNT(*) FROM container_instances)
+		FROM container_images
+	`
+
+	err := db.conn.QueryRow(query).Scan(&signature)
+	if err != nil {
+		return "", fmt.Errorf("failed to get last updated signature: %w", err)
+	}
+
+	return signature, nil
+}
