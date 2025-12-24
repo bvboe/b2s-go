@@ -455,8 +455,8 @@ main() {
     exit $exit_code
 }
 
-# Handle interrupts
-trap cleanup EXIT INT TERM
+# Handle interrupts (cleanup on Ctrl+C or kill, but not normal exit since main() handles it)
+trap cleanup INT TERM
 
 # Run main
 main "$@"
