@@ -82,7 +82,7 @@ ${FILES_CHANGED}
 
 **Instructions:**
 1. Group changes into categories (Features, Bug Fixes, Performance, Tests, Documentation, etc.)
-2. Highlight the most important changes first
+2. Highlight the most important changes first, and make sure new features are mentioned.
 3. Be technical but concise - this is for developers/operators
 4. Mention breaking changes if any (look for keywords like "breaking", "remove", "deprecate")
 5. Keep the summary under 400 words
