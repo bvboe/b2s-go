@@ -166,7 +166,7 @@ jobs:
 
         # Verify update controller CronJob was created
         kubectl get cronjob -n default
-        CRONJOB_COUNT=$(kubectl get cronjob -n default -l app=bjorn2scan-update-controller -o name | wc -l)
+        CRONJOB_COUNT=$(kubectl get cronjob -n default -l app.kubernetes.io/component=update-controller -o name | wc -l)
         if [ "$CRONJOB_COUNT" -eq "0" ]; then
           echo "ERROR: Update controller CronJob not found!"
           exit 1

@@ -29,6 +29,8 @@ Claude can perform these operations freely:
 - `go build`, `go test`, `go vet`, `go mod tidy`, `go run`
 - `make test`, `make build`, `make clean`
 - `npm install`, `npm run lint`, `npm test`
+- `./scripts/test-local` - Comprehensive local test suite
+- `./scripts/test-workflows-local` - Local workflow testing
 - Any linting tools: `golangci-lint`, `yamllint`, `gofmt`
 
 ### Kubernetes

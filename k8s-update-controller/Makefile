@@ -30,7 +30,7 @@ clean:
 # Build Docker image
 docker-build:
 	@echo "Building Docker image $(IMAGE_NAME):$(IMAGE_TAG)..."
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	cd .. && docker build -f k8s-update-controller/Dockerfile --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(IMAGE_TAG) .
 
 # Run locally (requires kubeconfig)
 run: build
