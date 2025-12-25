@@ -142,20 +142,20 @@ func (db *DB) RemoveInstance(id containers.ContainerInstanceID) error {
 	return nil
 }
 
-// SetInstances replaces all instances with the given set
-func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
+// SetInstances replaces all instances with the given set and returns reconciliation statistics
+func (db *DB) SetInstances(instances []containers.ContainerInstance) (*containers.ReconciliationStats, error) {
 	// Validate all instances before starting transaction
 	for i, instance := range instances {
 		if instance.Image.Digest == "" {
-			return fmt.Errorf("instance %d has empty digest: namespace=%s, pod=%s, container=%s",
+			return nil, fmt.Errorf("instance %d has empty digest: namespace=%s, pod=%s, container=%s",
 				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 		}
 		if instance.Image.Repository == "" {
-			return fmt.Errorf("instance %d has empty repository: namespace=%s, pod=%s, container=%s",
+			return nil, fmt.Errorf("instance %d has empty repository: namespace=%s, pod=%s, container=%s",
 				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 		}
 		if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
-			return fmt.Errorf("instance %d has empty identifier: namespace=%s, pod=%s, container=%s",
+			return nil, fmt.Errorf("instance %d has empty identifier: namespace=%s, pod=%s, container=%s",
 				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 		}
 	}
@@ -163,14 +163,28 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
 	// Start a transaction to ensure atomic replacement
 	tx, err := db.conn.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Count existing instances before deletion
+	var instancesRemoved int
+	err = tx.QueryRow("SELECT COUNT(*) FROM container_instances").Scan(&instancesRemoved)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count existing instances: %w", err)
+	}
 
 	// Delete all existing instances
 	_, err = tx.Exec("DELETE FROM container_instances")
 	if err != nil {
-		return fmt.Errorf("failed to delete instances: %w", err)
+		return nil, fmt.Errorf("failed to delete instances: %w", err)
+	}
+
+	// Track statistics
+	stats := &containers.ReconciliationStats{
+		InstancesAdded:   len(instances),
+		InstancesRemoved: instancesRemoved,
+		ImagesAdded:      0,
 	}
 
 	// Add new instances
@@ -178,7 +192,11 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
 		// Get or create image (using transaction-aware helper)
 		imageID, newImage, err := db.getOrCreateImageTx(tx, instance.Image)
 		if err != nil {
-			return fmt.Errorf("failed to get/create image: %w", err)
+			return nil, fmt.Errorf("failed to get/create image: %w", err)
+		}
+
+		if newImage {
+			stats.ImagesAdded++
 		}
 
 		// Insert instance
@@ -189,21 +207,18 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) error {
 			instance.Image.Repository, instance.Image.Tag, imageID, instance.NodeName, instance.ContainerRuntime)
 
 		if err != nil {
-			return fmt.Errorf("failed to insert instance: %w", err)
-		}
-
-		if newImage {
-			log.Printf("TODO: Request SBOM for image: %s:%s", instance.Image.Repository, instance.Image.Tag)
+			return nil, fmt.Errorf("failed to insert instance: %w", err)
 		}
 	}
 
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("Set container instances in database: %d instances", len(instances))
-	return nil
+	log.Printf("Reconciliation complete: added=%d, removed=%d, new_images=%d",
+		stats.InstancesAdded, stats.InstancesRemoved, stats.ImagesAdded)
+	return stats, nil
 }
 
 // GetAllInstances returns all container instances with their image information
@@ -242,4 +257,143 @@ func (db *DB) GetAllInstances() (interface{}, error) {
 	}
 
 	return instances, nil
+}
+
+// CleanupStats holds statistics about a cleanup operation
+type CleanupStats struct {
+	ImagesRemoved        int // Number of container images deleted
+	PackagesRemoved      int // Number of package entries deleted
+	VulnerabilitiesRemoved int // Number of vulnerability entries deleted
+}
+
+// CleanupOrphanedImages removes container_images that have no associated container_instances
+// This also cascades to delete related packages and vulnerabilities
+func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
+	// Start a transaction
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Count orphaned images before deletion
+	var orphanedCount int
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM container_images img
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM container_instances ci
+			WHERE ci.image_id = img.id
+		)
+	`).Scan(&orphanedCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count orphaned images: %w", err)
+	}
+
+	if orphanedCount == 0 {
+		// No cleanup needed
+		log.Printf("Cleanup: no orphaned images found")
+		return &CleanupStats{}, nil
+	}
+
+	// Count related data before deletion
+	var packagesCount, vulnerabilitiesCount int
+
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM packages p
+		WHERE p.image_id IN (
+			SELECT img.id
+			FROM container_images img
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM container_instances ci
+				WHERE ci.image_id = img.id
+			)
+		)
+	`).Scan(&packagesCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count orphaned packages: %w", err)
+	}
+
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM vulnerabilities v
+		WHERE v.image_id IN (
+			SELECT img.id
+			FROM container_images img
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM container_instances ci
+				WHERE ci.image_id = img.id
+			)
+		)
+	`).Scan(&vulnerabilitiesCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count orphaned vulnerabilities: %w", err)
+	}
+
+	// Delete vulnerabilities for orphaned images
+	_, err = tx.Exec(`
+		DELETE FROM vulnerabilities
+		WHERE image_id IN (
+			SELECT img.id
+			FROM container_images img
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM container_instances ci
+				WHERE ci.image_id = img.id
+			)
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete vulnerabilities: %w", err)
+	}
+
+	// Delete packages for orphaned images
+	_, err = tx.Exec(`
+		DELETE FROM packages
+		WHERE image_id IN (
+			SELECT img.id
+			FROM container_images img
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM container_instances ci
+				WHERE ci.image_id = img.id
+			)
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete packages: %w", err)
+	}
+
+	// Delete orphaned images
+	_, err = tx.Exec(`
+		DELETE FROM container_images
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM container_instances ci
+			WHERE ci.image_id = container_images.id
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete orphaned images: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	stats := &CleanupStats{
+		ImagesRemoved:          orphanedCount,
+		PackagesRemoved:        packagesCount,
+		VulnerabilitiesRemoved: vulnerabilitiesCount,
+	}
+
+	log.Printf("Cleanup complete: removed %d images, %d packages, %d vulnerabilities",
+		stats.ImagesRemoved, stats.PackagesRemoved, stats.VulnerabilitiesRemoved)
+
+	return stats, nil
 }

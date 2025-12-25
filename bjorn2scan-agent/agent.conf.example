@@ -70,3 +70,51 @@ update_cosign_identity_regexp=https://github.com/bvboe/b2s-go/*
 
 # Cosign OIDC issuer for signature verification
 update_cosign_oidc_issuer=https://token.actions.githubusercontent.com
+
+# ============================================================================
+# SCHEDULED JOBS CONFIGURATION
+# ============================================================================
+
+# Enable scheduled jobs system (default: true)
+# When disabled, all jobs below will be inactive
+jobs_enabled=true
+
+# --- Refresh Images Job ---
+# Periodically reconciles running containers with the database
+# This ensures the database stays synchronized with actual workloads
+
+# Enable refresh images job (default: true)
+jobs_refresh_images_enabled=true
+
+# How often to run the refresh job (default: 6h)
+# Format: Go duration string (e.g., "6h", "12h", "24h")
+jobs_refresh_images_interval=6h
+
+# Maximum execution time for refresh job (default: 10m)
+jobs_refresh_images_timeout=10m
+
+# --- Cleanup Job ---
+# Removes orphaned container images and related data from the database
+# Keeps the database lean by cleaning up images no longer in use
+
+# Enable cleanup job (default: true)
+jobs_cleanup_enabled=true
+
+# How often to run the cleanup job (default: 24h)
+# Format: Go duration string (e.g., "24h", "48h", "7d")
+jobs_cleanup_interval=24h
+
+# Maximum execution time for cleanup job (default: 1h)
+jobs_cleanup_timeout=1h
+
+# --- Future Jobs ---
+# Additional scheduled jobs can be configured here as they are implemented
+# Examples:
+# jobs_rescan_database_enabled=false
+# jobs_rescan_database_interval=1h
+# jobs_rescan_database_timeout=30m
+#
+# jobs_telemetry_enabled=false
+# jobs_telemetry_interval=5m
+# jobs_telemetry_jitter=2m
+# jobs_telemetry_timeout=30s

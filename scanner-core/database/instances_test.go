@@ -376,9 +376,12 @@ func TestSetInstances(t *testing.T) {
 		},
 	}
 
-	err = db.SetInstances(newInstances)
+	stats, err := db.SetInstances(newInstances)
 	if err != nil {
 		t.Fatalf("Failed to set instances: %v", err)
+	}
+	if stats == nil {
+		t.Fatal("Expected stats, got nil")
 	}
 
 	// Verify new instances
@@ -455,7 +458,7 @@ func TestSetInstancesValidation(t *testing.T) {
 		},
 	}
 
-	err = db.SetInstances(instances)
+	_, err = db.SetInstances(instances)
 	if err == nil {
 		t.Error("Expected error when setting instances with invalid data")
 	}

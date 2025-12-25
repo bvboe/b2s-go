@@ -5,11 +5,18 @@ import (
 	"sync"
 )
 
+// ReconciliationStats holds statistics about a reconciliation operation
+type ReconciliationStats struct {
+	InstancesAdded   int // Number of new container instances added
+	InstancesRemoved int // Number of container instances removed
+	ImagesAdded      int // Number of new container images discovered
+}
+
 // DatabaseInterface defines the interface for database operations
 type DatabaseInterface interface {
 	AddInstance(instance ContainerInstance) (bool, error)
 	RemoveInstance(id ContainerInstanceID) error
-	SetInstances(instances []ContainerInstance) error
+	SetInstances(instances []ContainerInstance) (*ReconciliationStats, error)
 	GetImageScanStatus(digest string) (string, error)
 	IsScanDataComplete(digest string) (bool, error)
 }
@@ -18,6 +25,14 @@ type DatabaseInterface interface {
 type ScanQueueInterface interface {
 	EnqueueScan(image ImageID, nodeName string, containerRuntime string)
 	EnqueueForceScan(image ImageID, nodeName string, containerRuntime string)
+}
+
+// RefreshTrigger defines the interface for triggering container instance refreshes
+// This is implemented by the agent or k8s-scan-server to provide running container data
+type RefreshTrigger interface {
+	// TriggerRefresh signals that scanner-core wants updated container instance data
+	// The implementation should gather current container data and call SetContainerInstances
+	TriggerRefresh() error
 }
 
 // Manager handles container instance lifecycle management
@@ -150,9 +165,16 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 
 	// Update database if configured
 	if m.db != nil {
-		if err := m.db.SetInstances(instances); err != nil {
+		stats, err := m.db.SetInstances(instances)
+		if err != nil {
 			log.Printf("Error setting instances in database: %v", err)
 			return
+		}
+
+		// Log reconciliation summary
+		if stats != nil {
+			log.Printf("Reconciliation summary: %d instances added, %d instances removed, %d new images discovered",
+				stats.InstancesAdded, stats.InstancesRemoved, stats.ImagesAdded)
 		}
 
 		// Enqueue scan jobs for images that need scanning or retrying
