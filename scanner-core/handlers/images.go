@@ -289,8 +289,10 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 
 	mainQuery := selectClause + whereClause + groupBy
 
-	// Add sorting
-	// IMPORTANT: Always sort by status.sort_order first to ensure completed scans appear at top
+	// Add sorting with multi-level hierarchy:
+	// 1. status.sort_order (always first - groups by scan status priority)
+	// 2. User-selected column (if any)
+	// 3. image (always last - for consistent tie-breaking)
 	validSortColumns := map[string]bool{
 		"image": true, "instance_count": true, "critical_count": true,
 		"high_count": true, "medium_count": true, "low_count": true,
@@ -300,6 +302,10 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 
 	if sortBy != "" && validSortColumns[sortBy] {
 		mainQuery += fmt.Sprintf(" ORDER BY status.sort_order ASC, %s %s", sortBy, sortOrder)
+		// Add image as tertiary sort (for tie-breaking), unless it's the secondary sort
+		if sortBy != "image" {
+			mainQuery += ", image ASC"
+		}
 	} else {
 		mainQuery += " ORDER BY status.sort_order ASC, image ASC"
 	}
@@ -519,9 +525,10 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 
 	mainQuery := selectClause + whereClause
 
-	// Add sorting
-	// IMPORTANT: Always sort by status.sort_order first to ensure completed scans appear at top
-	// Then sort by user's chosen column, then by namespace/pod/container for stable ordering
+	// Add sorting with multi-level hierarchy:
+	// 1. status.sort_order (always first - groups by scan status priority)
+	// 2. User-selected column (if any)
+	// 3. namespace/pod/container (always last - for consistent tie-breaking, avoiding duplicates)
 	validSortColumns := map[string]bool{
 		"namespace": true, "pod": true, "container": true,
 		"critical_count": true, "high_count": true, "medium_count": true,
@@ -531,7 +538,18 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 	}
 
 	if sortBy != "" && validSortColumns[sortBy] {
-		mainQuery += fmt.Sprintf(" ORDER BY status.sort_order ASC, %s %s, instances.namespace ASC, instances.pod ASC, instances.container ASC", sortBy, sortOrder)
+		mainQuery += fmt.Sprintf(" ORDER BY status.sort_order ASC, %s %s", sortBy, sortOrder)
+
+		// Add namespace/pod/container as tie-breakers, skipping any already used
+		if sortBy != "namespace" {
+			mainQuery += ", instances.namespace ASC"
+		}
+		if sortBy != "pod" {
+			mainQuery += ", instances.pod ASC"
+		}
+		if sortBy != "container" {
+			mainQuery += ", instances.container ASC"
+		}
 	} else {
 		mainQuery += " ORDER BY status.sort_order ASC, instances.namespace ASC, instances.pod ASC, instances.container ASC"
 	}
@@ -884,27 +902,36 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 		"vulnerability_count": true,
 	}
 
-	// Always sort by severity order first
-	mainQuery += `
-ORDER BY
-    CASE v.severity
+	// Build multi-level sort:
+	// 1. User-selected column (if any, and not severity/vulnerability)
+	// 2. Severity (always, using CASE for proper priority)
+	// 3. Vulnerability ID (always, for consistent tie-breaking)
+
+	mainQuery += "\nORDER BY\n"
+
+	severityCase := `    CASE v.severity
         WHEN 'Critical' THEN 1
         WHEN 'High' THEN 2
         WHEN 'Medium' THEN 3
         WHEN 'Low' THEN 4
         WHEN 'Negligible' THEN 5
         ELSE 6
-    END ASC`
+    END`
 
-	// Add secondary sort if specified
 	if sortBy != "" && validSortColumns[sortBy] {
 		// Map UI column names to database columns
 		dbColumn := sortBy
 		switch sortBy {
 		case "vulnerability_severity":
-			// Already sorted by severity, skip
+			// User clicked severity - it becomes primary, vulnerability becomes secondary
+			mainQuery += severityCase + " " + sortOrder + ",\n"
+			mainQuery += "    v.cve_id ASC"
+			return mainQuery + fmt.Sprintf("\nLIMIT %d OFFSET %d", limit, offset), countQuery
 		case "vulnerability_id":
-			dbColumn = "v.cve_id"
+			// User clicked vulnerability - it becomes primary, severity becomes secondary
+			mainQuery += "    v.cve_id " + sortOrder + ",\n"
+			mainQuery += severityCase + " ASC"
+			return mainQuery + fmt.Sprintf("\nLIMIT %d OFFSET %d", limit, offset), countQuery
 		case "artifact_name":
 			dbColumn = "v.package_name"
 		case "artifact_version":
@@ -922,9 +949,15 @@ ORDER BY
 		case "vulnerability_count":
 			dbColumn = "v.count"
 		}
-		if dbColumn != "vulnerability_severity" {
-			mainQuery += fmt.Sprintf(", %s %s", dbColumn, sortOrder)
-		}
+
+		// User clicked a column: [column], severity, vulnerability
+		mainQuery += fmt.Sprintf("    %s %s,\n", dbColumn, sortOrder)
+		mainQuery += severityCase + " ASC,\n"
+		mainQuery += "    v.cve_id ASC"
+	} else {
+		// Default: severity, vulnerability
+		mainQuery += severityCase + " ASC,\n"
+		mainQuery += "    v.cve_id ASC"
 	}
 
 	// Add pagination
@@ -1123,7 +1156,9 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
 	mainQuery := selectClause + baseQuery
 
-	// Add sorting
+	// Add sorting with multi-level sort:
+	// Default: name, version, type
+	// User clicks column: that column, name, version, type (avoiding duplicates)
 	validSortColumns := map[string]bool{
 		"name": true, "version": true, "type": true, "count": true,
 	}
@@ -1134,8 +1169,19 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 			dbColumn = "p.number_of_instances"
 		}
 		mainQuery += fmt.Sprintf(" ORDER BY %s %s", dbColumn, sortOrder)
+
+		// Add tie-breakers (avoiding duplicates)
+		if sortBy != "name" {
+			mainQuery += ", p.name ASC"
+		}
+		if sortBy != "version" {
+			mainQuery += ", p.version ASC"
+		}
+		if sortBy != "type" {
+			mainQuery += ", p.type ASC"
+		}
 	} else {
-		mainQuery += " ORDER BY p.name ASC"
+		mainQuery += " ORDER BY p.name ASC, p.version ASC, p.type ASC"
 	}
 
 	// Add pagination

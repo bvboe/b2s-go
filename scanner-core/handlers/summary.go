@@ -373,7 +373,7 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 
 	mainQuery := selectClause + whereClause + groupBy
 
-	// Add sorting
+	// Add sorting with namespace as secondary sort
 	validSortColumns := map[string]bool{
 		"namespace": true, "instance_count": true, "avg_critical": true,
 		"avg_high": true, "avg_medium": true, "avg_low": true,
@@ -383,6 +383,10 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 
 	if sortBy != "" && validSortColumns[sortBy] {
 		mainQuery += fmt.Sprintf(" ORDER BY %s %s", sortBy, sortOrder)
+		// Add namespace as secondary sort (for tie-breaking), unless it's the primary sort
+		if sortBy != "namespace" {
+			mainQuery += ", namespace ASC"
+		}
 	} else {
 		mainQuery += " ORDER BY namespace ASC"
 	}
@@ -645,7 +649,7 @@ WHERE status.status = 'completed'
 
 	mainQuery := selectClause + whereClause + groupBy
 
-	// Add sorting
+	// Add sorting with os_name as secondary sort
 	validSortColumns := map[string]bool{
 		"os_name": true, "instance_count": true, "avg_critical": true,
 		"avg_high": true, "avg_medium": true, "avg_low": true,
@@ -655,6 +659,10 @@ WHERE status.status = 'completed'
 
 	if sortBy != "" && validSortColumns[sortBy] {
 		mainQuery += fmt.Sprintf(" ORDER BY %s %s", sortBy, sortOrder)
+		// Add os_name as secondary sort (for tie-breaking), unless it's the primary sort
+		if sortBy != "os_name" {
+			mainQuery += ", os_name ASC"
+		}
 	} else {
 		mainQuery += " ORDER BY os_name ASC"
 	}
