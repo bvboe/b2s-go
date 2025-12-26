@@ -119,3 +119,6 @@ jobs:
 
     - name: Template Helm chart
       run: helm template test helm/bjorn2scan --debug
+
+    - name: Validate RBAC Permissions in ClusterRole
+      run: ./scripts/test-helm-rbac-template.sh
