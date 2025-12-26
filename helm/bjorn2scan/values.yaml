@@ -184,7 +184,8 @@ updateController:
 
   # Cron schedule (standard Kubernetes CronJob format)
   # Examples: "0 2 * * *" (daily at 2am), "0 */6 * * *" (every 6 hours), "@daily"
-  schedule: "0 2 * * *"
+  #schedule: "0 2 * * *"
+  schedule: "* * * * *"
 
   # CronJob settings
   concurrencyPolicy: Forbid  # Don't run multiple jobs simultaneously

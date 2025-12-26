@@ -11,6 +11,9 @@ UPDATE_CONTROLLER_IMAGE?=ghcr.io/bvboe/b2s-go/k8s-update-controller
 IMAGE_TAG:=$(if $(IMAGE_TAG),$(IMAGE_TAG),local-$(shell date +%s))
 export IMAGE_TAG
 
+# Enable Docker BuildKit for faster builds with cache mounts
+export DOCKER_BUILDKIT=1
+
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''

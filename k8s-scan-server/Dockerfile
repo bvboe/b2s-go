@@ -12,10 +12,12 @@ COPY k8s-scan-server/go.mod k8s-scan-server/go.sum* ./k8s-scan-server/
 
 # Download dependencies (cached unless go.mod/go.sum changes)
 WORKDIR /workspace/scanner-core
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 WORKDIR /workspace/k8s-scan-server
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Now copy source code (after dependency layers are cached)
 WORKDIR /workspace
@@ -28,7 +30,9 @@ COPY k8s-scan-server/podscanner/ ./podscanner/
 COPY k8s-scan-server/handlers/ ./handlers/
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o k8s-scan-server .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o k8s-scan-server .
 
 # Runtime stage
 #FROM cgr.dev/chainguard/static:latest

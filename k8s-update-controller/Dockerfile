@@ -5,14 +5,17 @@ WORKDIR /build
 
 # Copy go mod files from subdirectory (context is root)
 COPY k8s-update-controller/go.mod k8s-update-controller/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source code from subdirectory
 COPY k8s-update-controller/ .
 
 # Build the binary
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s -X main.version=${VERSION}" \
     -o k8s-update-controller \
     .
