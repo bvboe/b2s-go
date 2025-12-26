@@ -107,6 +107,7 @@ spec:
           helm upgrade $RELEASE_NAME /chart \
             --namespace $NAMESPACE \
             --values /values/values.yaml \
+            --reuse-values \
             --wait \
             --timeout 2m \
             --debug
