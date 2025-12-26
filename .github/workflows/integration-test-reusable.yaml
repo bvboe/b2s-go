@@ -173,6 +173,13 @@ jobs:
         fi
         echo "✓ Update controller CronJob created successfully"
 
+    - name: Test Helm Upgrade with RBAC Permissions
+      run: ./scripts/test-helm-upgrade-rbac
+      env:
+        TEST_NAMESPACE: default
+        RELEASE_NAME: bjorn2scan
+        SERVICE_ACCOUNT: bjorn2scan
+
     - name: Port forward service
       run: |
         kubectl port-forward -n default svc/bjorn2scan 8080:80 &

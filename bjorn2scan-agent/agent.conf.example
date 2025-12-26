@@ -26,7 +26,7 @@ auto_update_enabled=true
 
 # Update check interval (default: 6h)
 # Format: Go duration string (e.g., "6h", "24h", "30m")
-auto_update_check_interval=24h
+auto_update_check_interval=1h
 
 # Allow automatic minor version updates (default: true)
 # Example: 0.1.x → 0.2.x
