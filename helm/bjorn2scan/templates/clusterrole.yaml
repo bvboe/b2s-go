@@ -3,6 +3,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "bjorn2scan.fullname" . }}-scan-server
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     {{- include "bjorn2scan.labels" . | nindent 4 }}
     app.kubernetes.io/component: scan-server

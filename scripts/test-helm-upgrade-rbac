@@ -2,6 +2,15 @@
 # Functional test for Helm upgrade with restricted RBAC permissions
 # This test validates that the bjorn2scan ServiceAccount has sufficient permissions
 # to perform a Helm upgrade, which is what the update-controller does.
+#
+# Configuration via environment variables:
+#   TEST_NAMESPACE     - Kubernetes namespace (default: default)
+#   RELEASE_NAME       - Helm release name (default: bjorn2scan)
+#   SERVICE_ACCOUNT    - ServiceAccount to test (default: bjorn2scan)
+#   CHART_PATH         - Path to Helm chart (default: ./helm/bjorn2scan)
+#
+# Example:
+#   TEST_NAMESPACE=b2sv2 ./scripts/test-helm-upgrade-rbac
 
 set -e
 
@@ -28,7 +37,18 @@ echo ""
 # Verify chart is already deployed
 if ! helm status "$RELEASE_NAME" -n "$NAMESPACE" &>/dev/null; then
     echo -e "${RED}ERROR: Helm release '$RELEASE_NAME' not found in namespace '$NAMESPACE'${NC}"
+    echo ""
     echo "This test requires the chart to be already deployed."
+    echo ""
+    echo "Options:"
+    echo "  1. Deploy the chart first:"
+    echo "     helm install $RELEASE_NAME $CHART_PATH --namespace $NAMESPACE --create-namespace"
+    echo ""
+    echo "  2. If using a different namespace/release, set environment variables:"
+    echo "     TEST_NAMESPACE=your-namespace RELEASE_NAME=your-release $0"
+    echo ""
+    echo "  3. List existing releases:"
+    echo "     helm list --all-namespaces"
     exit 1
 fi
 
@@ -56,7 +76,7 @@ data:
     scanServer:
       image:
         tag: "$CURRENT_IMAGE_TAG"
-      annotations:
+      podAnnotations:
         test-upgrade: "$UPGRADE_TIMESTAMP"
     podScanner:
       image:
@@ -103,8 +123,13 @@ spec:
           kubectl auth can-i --list --namespace=$NAMESPACE || true
           echo ""
 
+          echo "Extracting chart..."
+          mkdir -p /tmp/chart
+          tar -xzf /chart/chart.tgz -C /tmp/chart --strip-components=1
+          echo ""
+
           echo "Attempting Helm upgrade..."
-          helm upgrade $RELEASE_NAME /chart \
+          helm upgrade $RELEASE_NAME /tmp/chart \
             --namespace $NAMESPACE \
             --values /values/values.yaml \
             --reuse-values \
@@ -139,14 +164,9 @@ TEMP_DIR=$(mktemp -d)
 helm package "$CHART_PATH" -d "$TEMP_DIR"
 CHART_TGZ=$(ls "$TEMP_DIR"/*.tgz)
 
-# Extract chart to a directory
-EXTRACT_DIR="$TEMP_DIR/chart"
-mkdir -p "$EXTRACT_DIR"
-tar -xzf "$CHART_TGZ" -C "$EXTRACT_DIR" --strip-components=1
-
-# Create ConfigMap with chart files
+# Create ConfigMap with packaged chart
 kubectl create configmap helm-upgrade-test-chart -n "$NAMESPACE" \
-  --from-file="$EXTRACT_DIR" \
+  --from-file=chart.tgz="$CHART_TGZ" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 rm -rf "$TEMP_DIR"

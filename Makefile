@@ -72,7 +72,8 @@ helm-install: helm-lint ## Install the Helm chart
 		--set scanServer.image.pullPolicy=IfNotPresent \
 		--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
 		--set podScanner.image.tag=$(IMAGE_TAG) \
-		--set podScanner.image.pullPolicy=IfNotPresent
+		--set podScanner.image.pullPolicy=IfNotPresent \
+		--set updateController.image.tag=$(IMAGE_TAG)
 
 helm-upgrade: ## Upgrade the Helm release
 	@echo "Upgrading Helm release $(HELM_RELEASE) in namespace $(NAMESPACE)..."
@@ -83,7 +84,8 @@ helm-upgrade: ## Upgrade the Helm release
 		--set scanServer.image.pullPolicy=IfNotPresent \
 		--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
 		--set podScanner.image.tag=$(IMAGE_TAG) \
-		--set podScanner.image.pullPolicy=IfNotPresent
+		--set podScanner.image.pullPolicy=IfNotPresent \
+		--set updateController.image.tag=$(IMAGE_TAG)
 	@echo "Rolling out restart to pick up new images..."
 	kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(NAMESPACE)
 	kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(NAMESPACE)
@@ -110,6 +112,7 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 			--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
 			--set podScanner.image.tag=$(IMAGE_TAG) \
 			--set podScanner.image.pullPolicy=IfNotPresent \
+			--set updateController.image.tag=$(IMAGE_TAG) \
 			--set clusterName="Kind Cluster"; \
 		kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(NAMESPACE); \
 		kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(NAMESPACE); \
@@ -123,6 +126,7 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 			--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
 			--set podScanner.image.tag=$(IMAGE_TAG) \
 			--set podScanner.image.pullPolicy=IfNotPresent \
+			--set updateController.image.tag=$(IMAGE_TAG) \
 			--set clusterName="Kind Cluster"; \
 	fi
 	@echo "============================================"
@@ -151,6 +155,7 @@ helm-minikube-deploy: docker-build-all ## Build and deploy to minikube
 			--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
 			--set podScanner.image.tag=$(IMAGE_TAG) \
 			--set podScanner.image.pullPolicy=IfNotPresent \
+			--set updateController.image.tag=$(IMAGE_TAG) \
 			--set clusterName="Minikube Cluster"; \
 		kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(NAMESPACE); \
 		kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(NAMESPACE); \
@@ -164,6 +169,7 @@ helm-minikube-deploy: docker-build-all ## Build and deploy to minikube
 			--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
 			--set podScanner.image.tag=$(IMAGE_TAG) \
 			--set podScanner.image.pullPolicy=IfNotPresent \
+			--set updateController.image.tag=$(IMAGE_TAG) \
 			--set clusterName="Minikube Cluster"; \
 	fi
 	@echo "============================================"
