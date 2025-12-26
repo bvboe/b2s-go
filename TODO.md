@@ -14,7 +14,7 @@
   - [ ] Add --show-config flag to display current configuration
 - [ ] Test sorting on all tables
 - [ ] Node scanning
-- [ ] Agent autoupdate
+- [x] Agent autoupdate (API already implemented: POST /api/update/trigger)
 - [ ] Remote workers for increased performance?
 - [ ] Test bjorn2scan-agent install.sh on major Linux distributions:
   - [ ] Ubuntu 22.04/24.04 LTS
@@ -43,6 +43,7 @@
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil)
 
 ## Recently Completed
+- [x] [2025-12-26] Researched update trigger API feasibility (agent: ✅ exists, k8s: ⚠️ complex, documented in docs/)
 - [x] [2025-12-26] Comprehensive test suite for bjorn2scan-agent/updater package (2,408 lines, 117 test cases)
 - [x] [2025-12-26] Improved test coverage from ~20% to 46.8% for agent updater
 - [x] [2025-12-26] Fixed agent Makefile to create tarballs with correct binary name (fixes extraction bug)

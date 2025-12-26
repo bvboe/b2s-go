@@ -43,7 +43,8 @@ func defaultConfig() *Config {
 
 		// Auto-update defaults
 		AutoUpdateEnabled:          true,
-		AutoUpdateCheckInterval:    6 * time.Hour,
+		//Todo - revert back to something more reasonable
+		AutoUpdateCheckInterval:    1 * time.Hour,
 		AutoUpdateMinorVersions:    true,
 		AutoUpdateMajorVersions:    false,
 		AutoUpdatePinnedVersion:    "",
