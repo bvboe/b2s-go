@@ -14,16 +14,16 @@ rules:
   resources: ["pods/status"]
   verbs: ["get"]
 {{- if .Values.updateController.enabled }}
-# Update controller needs to read config and Helm releases
+# Update controller needs to manage config and Helm releases
 - apiGroups: [""]
   resources: ["configmaps"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 # Update controller needs to manage resources during Helm upgrade
 - apiGroups: ["apps"]
-  resources: ["deployments", "daemonsets"]
+  resources: ["deployments", "daemonsets", "replicasets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: [""]
   resources: ["services", "serviceaccounts", "persistentvolumeclaims"]

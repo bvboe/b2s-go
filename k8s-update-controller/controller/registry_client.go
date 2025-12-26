@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
@@ -36,7 +35,7 @@ func (rc *RegistryClient) ListVersions(ctx context.Context) ([]string, error) {
 	}
 
 	// List tags
-	tags, err := crane.ListTags(ref.Context().Name())
+	tags, err := remote.List(ref.Context())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tags: %w", err)
 	}
@@ -73,18 +72,47 @@ func (rc *RegistryClient) DownloadChart(ctx context.Context, version string) (st
 		return "", fmt.Errorf("invalid chart reference: %w", err)
 	}
 
-	// Pull image
+	// Pull OCI artifact (Helm chart)
 	img, err := remote.Image(ref)
 	if err != nil {
 		_ = os.RemoveAll(tmpDir) // Best effort cleanup
 		return "", fmt.Errorf("failed to pull chart: %w", err)
 	}
 
-	// Export to tar
-	chartPath := filepath.Join(tmpDir, "chart.tgz")
-	if err := crane.Save(img, chartRef, chartPath); err != nil {
+	// Get the layers - Helm charts are stored as a single layer
+	layers, err := img.Layers()
+	if err != nil {
 		_ = os.RemoveAll(tmpDir) // Best effort cleanup
-		return "", fmt.Errorf("failed to save chart: %w", err)
+		return "", fmt.Errorf("failed to get image layers: %w", err)
+	}
+
+	if len(layers) == 0 {
+		_ = os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("chart image has no layers")
+	}
+
+	// Extract the first layer (contains the chart.tgz)
+	layer := layers[0]
+	layerReader, err := layer.Compressed()
+	if err != nil {
+		_ = os.RemoveAll(tmpDir) // Best effort cleanup
+		return "", fmt.Errorf("failed to read layer: %w", err)
+	}
+	defer func() { _ = layerReader.Close() }()
+
+	// Write layer content to file
+	chartPath := filepath.Join(tmpDir, "chart.tgz")
+	chartFile, err := os.Create(chartPath)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir) // Best effort cleanup
+		return "", fmt.Errorf("failed to create chart file: %w", err)
+	}
+	defer func() { _ = chartFile.Close() }()
+
+	// Copy layer content to file
+	if _, err := chartFile.ReadFrom(layerReader); err != nil {
+		_ = os.RemoveAll(tmpDir) // Best effort cleanup
+		return "", fmt.Errorf("failed to write chart file: %w", err)
 	}
 
 	return chartPath, nil
