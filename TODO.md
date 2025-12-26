@@ -37,6 +37,7 @@
 - [ ] Trigger rescan of all container_images whenever the database for grype is updated
 - [ ] Sending data using opentelemetry to a remove opentelemetry server
 - [ ] Do proper autoupdate testing (in progress)
+- [ ] Make sure auto updates verify signatures
 
 ## Recently Completed
 - [x] [2025-12-22] Created deep-scan-test script for validating syft/grype integration
