@@ -36,10 +36,18 @@
 - [ ] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done. I think)
 - [ ] Trigger rescan of all container_images whenever the database for grype is updated
 - [ ] Sending data using opentelemetry to a remove opentelemetry server
-- [ ] Do proper autoupdate testing (in progress)
-- [ ] Make sure auto updates verify signatures
+- [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
+- [ ] Fix input validation bug in github_client.go NewGitHubClient() - allow empty owner/repo parts
+- [ ] Add GitHub API rate limiting handling to github_client.go
+- [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
+- [ ] Implement cosign signature verification in verifier.go (currently just returns nil)
 
 ## Recently Completed
+- [x] [2025-12-26] Comprehensive test suite for bjorn2scan-agent/updater package (2,408 lines, 117 test cases)
+- [x] [2025-12-26] Improved test coverage from ~20% to 46.8% for agent updater
+- [x] [2025-12-26] Fixed agent Makefile to create tarballs with correct binary name (fixes extraction bug)
+- [x] [2025-12-26] Added tests that would have caught the platform-specific binary name bug
+- [x] [2025-12-26] Fixed all linting issues (18 errcheck and staticcheck warnings)
 - [x] [2025-12-22] Created deep-scan-test script for validating syft/grype integration
 - [x] [2025-12-22] Added GitHub Actions caching to all reusable workflows
 - [x] [2025-12-22] Added cache monitoring/reporting to workflows
