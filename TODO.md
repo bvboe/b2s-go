@@ -36,7 +36,7 @@
 - [ ] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done. I think)
 - [ ] Trigger rescan of all container_images whenever the database for grype is updated
 - [ ] Sending data using opentelemetry to a remove opentelemetry server
-- [ ] Do proper autoupdate testing (work in progress)
+- [ ] Do proper autoupdate testing (in progress)
 
 ## Recently Completed
 - [x] [2025-12-22] Created deep-scan-test script for validating syft/grype integration
