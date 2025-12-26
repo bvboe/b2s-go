@@ -42,7 +42,7 @@ func defaultConfig() *Config {
 		DebugEnabled: false,
 
 		// Auto-update defaults
-		AutoUpdateEnabled:          false,
+		AutoUpdateEnabled:          true,
 		AutoUpdateCheckInterval:    6 * time.Hour,
 		AutoUpdateMinorVersions:    true,
 		AutoUpdateMajorVersions:    false,
