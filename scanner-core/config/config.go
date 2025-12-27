@@ -19,19 +19,20 @@ type Config struct {
 	DebugEnabled bool
 
 	// Auto-update configuration
-	AutoUpdateEnabled         bool
-	AutoUpdateCheckInterval   time.Duration
-	AutoUpdateMinorVersions   bool
-	AutoUpdateMajorVersions   bool
-	AutoUpdatePinnedVersion   string
-	AutoUpdateMinVersion      string
-	AutoUpdateMaxVersion      string
-	UpdateGitHubRepo          string
-	UpdateVerifySignatures    bool
-	UpdateRollbackEnabled     bool
-	UpdateHealthCheckTimeout  time.Duration
+	AutoUpdateEnabled          bool
+	AutoUpdateCheckInterval    time.Duration
+	AutoUpdateMinorVersions    bool
+	AutoUpdateMajorVersions    bool
+	AutoUpdatePinnedVersion    string
+	AutoUpdateMinVersion       string
+	AutoUpdateMaxVersion       string
+	UpdateFeedURL              string
+	UpdateAssetBaseURL         string
+	UpdateVerifySignatures     bool
+	UpdateRollbackEnabled      bool
+	UpdateHealthCheckTimeout   time.Duration
 	UpdateCosignIdentityRegexp string
-	UpdateCosignOIDCIssuer    string
+	UpdateCosignOIDCIssuer     string
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -50,7 +51,8 @@ func defaultConfig() *Config {
 		AutoUpdatePinnedVersion:    "",
 		AutoUpdateMinVersion:       "",
 		AutoUpdateMaxVersion:       "",
-		UpdateGitHubRepo:           "bvboe/b2s-go",
+		UpdateFeedURL:              "https://github.com/bvboe/b2s-go/releases.atom",
+		UpdateAssetBaseURL:         "https://github.com/bvboe/b2s-go/releases/download",
 		UpdateVerifySignatures:     false, // TODO: Enable when cosign is implemented
 		UpdateRollbackEnabled:      true,
 		UpdateHealthCheckTimeout:   60 * time.Second,
@@ -118,8 +120,11 @@ func LoadConfig(path string) (*Config, error) {
 			if section.HasKey("auto_update_max_version") {
 				cfg.AutoUpdateMaxVersion = section.Key("auto_update_max_version").String()
 			}
-			if section.HasKey("update_github_repo") {
-				cfg.UpdateGitHubRepo = section.Key("update_github_repo").String()
+			if section.HasKey("update_feed_url") {
+				cfg.UpdateFeedURL = section.Key("update_feed_url").String()
+			}
+			if section.HasKey("update_asset_base_url") {
+				cfg.UpdateAssetBaseURL = section.Key("update_asset_base_url").String()
 			}
 			if section.HasKey("update_verify_signatures") {
 				val := strings.ToLower(section.Key("update_verify_signatures").String())

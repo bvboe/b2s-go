@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/google/go-github/v57/github"
 )
 
 // Status represents the current state of the updater
@@ -26,7 +24,8 @@ const (
 type Config struct {
 	Enabled              bool
 	CheckInterval        time.Duration
-	GitHubRepo           string
+	FeedURL              string
+	AssetBaseURL         string
 	CurrentVersion       string
 	VerifySignatures     bool
 	RollbackEnabled      bool
@@ -48,17 +47,20 @@ type Updater struct {
 	stopChan       chan struct{}
 	pauseChan      chan bool
 	paused         bool
-	githubClient   *GitHubClient
+	feedParser     *FeedParser
 	versionChecker *VersionChecker
 }
 
 // New creates a new updater
 func New(config *Config) (*Updater, error) {
-	githubClient, err := NewGitHubClient(config.GitHubRepo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create GitHub client: %w", err)
+	if config.FeedURL == "" {
+		return nil, fmt.Errorf("feed URL is required")
+	}
+	if config.AssetBaseURL == "" {
+		return nil, fmt.Errorf("asset base URL is required")
 	}
 
+	feedParser := NewFeedParser(config.FeedURL)
 	versionChecker := NewVersionChecker(config.VersionConstraints)
 
 	return &Updater{
@@ -66,7 +68,7 @@ func New(config *Config) (*Updater, error) {
 		status:         StatusIdle,
 		stopChan:       make(chan struct{}),
 		pauseChan:      make(chan bool, 1),
-		githubClient:   githubClient,
+		feedParser:     feedParser,
 		versionChecker: versionChecker,
 	}, nil
 }
@@ -120,18 +122,14 @@ func (u *Updater) checkForUpdate() {
 
 	fmt.Println("Checking for updates...")
 
-	// Get latest release
-	release, err := u.githubClient.GetLatestRelease(ctx)
+	// Get latest release from feed
+	release, err := u.feedParser.GetLatestRelease(ctx)
 	if err != nil {
 		u.setStatus(StatusFailed, fmt.Sprintf("failed to check for updates: %v", err))
 		return
 	}
 
-	// Extract version from tag (strip 'v' prefix)
-	version := release.GetTagName()
-	if len(version) > 0 && version[0] == 'v' {
-		version = version[1:]
-	}
+	version := release.Version
 
 	u.mu.Lock()
 	u.latestVersion = version
@@ -165,18 +163,19 @@ func (u *Updater) checkForUpdate() {
 }
 
 // performUpdate downloads and installs an update
-func (u *Updater) performUpdate(ctx context.Context, release interface{}) error {
+func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 	// Download
 	u.setStatus(StatusDownloading, "")
 	fmt.Println("Downloading update...")
 
-	downloader, err := NewDownloader(u.githubClient)
+	downloader, err := NewDownloader(u.config.AssetBaseURL)
 	if err != nil {
 		return fmt.Errorf("failed to create downloader: %w", err)
 	}
 	defer func() { _ = downloader.Cleanup() }()
 
-	binaryPath, err := downloader.DownloadRelease(ctx, release.(*github.RepositoryRelease))
+	// Use tag for download (includes 'v' prefix if present)
+	binaryPath, err := downloader.DownloadRelease(ctx, release.Tag)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}

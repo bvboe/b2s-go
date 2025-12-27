@@ -18,7 +18,8 @@ func TestNew(t *testing.T) {
 			config: &Config{
 				Enabled:        true,
 				CheckInterval:  1 * time.Hour,
-				GitHubRepo:     "bvboe/b2s-go",
+				FeedURL:        "http://localhost:8080/releases.atom",
+				AssetBaseURL:   "http://localhost:8080/download",
 				CurrentVersion: "0.1.0",
 			},
 			wantErr: false,
@@ -26,30 +27,32 @@ func TestNew(t *testing.T) {
 		{
 			name: "Minimal configuration",
 			config: &Config{
-				GitHubRepo: "owner/repo",
+				FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 			},
 			wantErr: false,
 		},
 		{
-			name: "Invalid GitHub repo",
+			name: "Missing feed URL",
 			config: &Config{
-				GitHubRepo: "invalid",
+				AssetBaseURL: "http://localhost:8080/download",
 			},
 			wantErr: true,
-			errMsg:  "failed to create GitHub client",
+			errMsg:  "feed URL is required",
 		},
 		{
-			name: "Empty GitHub repo",
+			name: "Missing asset base URL",
 			config: &Config{
-				GitHubRepo: "",
+				FeedURL: "http://localhost:8080/releases.atom",
 			},
 			wantErr: true,
-			errMsg:  "failed to create GitHub client",
+			errMsg:  "asset base URL is required",
 		},
 		{
 			name: "With version constraints",
 			config: &Config{
-				GitHubRepo: "owner/repo",
+				FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 				VersionConstraints: &VersionConstraints{
 					AutoUpdateMinor: true,
 					AutoUpdateMajor: false,
@@ -62,7 +65,8 @@ func TestNew(t *testing.T) {
 		{
 			name: "With signature verification",
 			config: &Config{
-				GitHubRepo:           "owner/repo",
+				FeedURL:              "http://localhost:8080/releases.atom",
+				AssetBaseURL:         "http://localhost:8080/download",
 				VerifySignatures:     true,
 				CosignIdentityRegexp: "https://github.com/*",
 				CosignOIDCIssuer:     "https://token.actions.githubusercontent.com",
@@ -107,8 +111,8 @@ func TestNew(t *testing.T) {
 				t.Errorf("Initial status = %v, want %v", updater.status, StatusIdle)
 			}
 
-			if updater.githubClient == nil {
-				t.Error("GitHub client not initialized")
+			if updater.feedParser == nil {
+				t.Error("Feed parser not initialized")
 			}
 
 			if updater.versionChecker == nil {
@@ -128,7 +132,8 @@ func TestNew(t *testing.T) {
 
 func TestUpdater_StatusManagement(t *testing.T) {
 	config := &Config{
-		GitHubRepo: "owner/repo",
+		FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -212,7 +217,8 @@ func TestUpdater_StatusManagement(t *testing.T) {
 
 func TestUpdater_StatusThreadSafety(t *testing.T) {
 	config := &Config{
-		GitHubRepo: "owner/repo",
+		FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -262,7 +268,8 @@ func TestUpdater_StatusThreadSafety(t *testing.T) {
 
 func TestUpdater_PauseResume(t *testing.T) {
 	config := &Config{
-		GitHubRepo: "owner/repo",
+		FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -294,7 +301,8 @@ func TestUpdater_PauseResume(t *testing.T) {
 
 func TestUpdater_IsPausedThreadSafety(t *testing.T) {
 	config := &Config{
-		GitHubRepo: "owner/repo",
+		FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -372,7 +380,8 @@ func TestConfig_Structure(t *testing.T) {
 	config := &Config{
 		Enabled:              true,
 		CheckInterval:        6 * time.Hour,
-		GitHubRepo:           "bvboe/b2s-go",
+		FeedURL:              "https://github.com/bvboe/b2s-go/releases.atom",
+		AssetBaseURL:         "https://github.com/bvboe/b2s-go/releases/download",
 		CurrentVersion:       "0.1.38",
 		VerifySignatures:     true,
 		RollbackEnabled:      true,
@@ -396,8 +405,12 @@ func TestConfig_Structure(t *testing.T) {
 		t.Errorf("CheckInterval = %v, want %v", config.CheckInterval, 6*time.Hour)
 	}
 
-	if config.GitHubRepo != "bvboe/b2s-go" {
-		t.Errorf("GitHubRepo = %q, want %q", config.GitHubRepo, "bvboe/b2s-go")
+	if config.FeedURL != "https://github.com/bvboe/b2s-go/releases.atom" {
+		t.Errorf("FeedURL = %q, want %q", config.FeedURL, "https://github.com/bvboe/b2s-go/releases.atom")
+	}
+
+	if config.AssetBaseURL != "https://github.com/bvboe/b2s-go/releases/download" {
+		t.Errorf("AssetBaseURL = %q, want %q", config.AssetBaseURL, "https://github.com/bvboe/b2s-go/releases/download")
 	}
 
 	if config.CurrentVersion != "0.1.38" {
@@ -423,7 +436,8 @@ func TestConfig_Structure(t *testing.T) {
 
 func TestUpdater_StopChannel(t *testing.T) {
 	config := &Config{
-		GitHubRepo: "owner/repo",
+		FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -452,7 +466,8 @@ func TestUpdater_StopChannel(t *testing.T) {
 
 func TestUpdater_PauseChannel(t *testing.T) {
 	config := &Config{
-		GitHubRepo: "owner/repo",
+		FeedURL:      "http://localhost:8080/releases.atom",
+				AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -482,7 +497,8 @@ func TestUpdater_PauseChannel(t *testing.T) {
 
 func TestUpdater_TriggerCheck(t *testing.T) {
 	config := &Config{
-		GitHubRepo:     "owner/repo",
+		FeedURL:        "http://localhost:8080/releases.atom",
+		AssetBaseURL:   "http://localhost:8080/download",
 		CurrentVersion: "0.1.0",
 	}
 

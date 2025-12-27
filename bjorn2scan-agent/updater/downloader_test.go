@@ -12,16 +12,16 @@ import (
 )
 
 func TestNewDownloader(t *testing.T) {
-	githubClient := &GitHubClient{}
+	assetBaseURL := "http://localhost:8080/download"
 
-	downloader, err := NewDownloader(githubClient)
+	downloader, err := NewDownloader(assetBaseURL)
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
 	defer func() { _ = downloader.Cleanup() }()
 
-	if downloader.githubClient != githubClient {
-		t.Error("GitHubClient not set correctly")
+	if downloader.httpDownloader == nil {
+		t.Error("HTTPDownloader not set correctly")
 	}
 
 	if downloader.workDir == "" {
@@ -35,7 +35,7 @@ func TestNewDownloader(t *testing.T) {
 }
 
 func TestDownloader_GetWorkDir(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestDownloader_GetWorkDir(t *testing.T) {
 }
 
 func TestDownloader_Cleanup(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -114,7 +114,7 @@ func createTestTarball(t *testing.T, binaryName string, content []byte) string {
 }
 
 func TestDownloader_ExtractBinary_Success(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -153,7 +153,7 @@ func TestDownloader_ExtractBinary_Success(t *testing.T) {
 func TestDownloader_ExtractBinary_PlatformSpecificName(t *testing.T) {
 	// This test catches the bug where tarball contains "bjorn2scan-agent-linux-amd64"
 	// but downloader expects "bjorn2scan-agent"
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -173,7 +173,7 @@ func TestDownloader_ExtractBinary_PlatformSpecificName(t *testing.T) {
 }
 
 func TestDownloader_ExtractBinary_EmptyTarball(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -205,7 +205,7 @@ func TestDownloader_ExtractBinary_EmptyTarball(t *testing.T) {
 }
 
 func TestDownloader_ExtractBinary_WrongFileName(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -225,7 +225,7 @@ func TestDownloader_ExtractBinary_WrongFileName(t *testing.T) {
 }
 
 func TestDownloader_ExtractBinary_InvalidTarball(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -245,7 +245,7 @@ func TestDownloader_ExtractBinary_InvalidTarball(t *testing.T) {
 }
 
 func TestDownloader_ExtractBinary_NonexistentFile(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -263,7 +263,7 @@ func TestDownloader_ExtractBinary_NonexistentFile(t *testing.T) {
 
 func TestDownloader_ExtractBinary_PathInTarball(t *testing.T) {
 	// Test that we can extract binary even if it has a path prefix
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -290,7 +290,7 @@ func TestDownloader_ExtractBinary_PathInTarball(t *testing.T) {
 }
 
 func TestDownloader_VerifyChecksum_Success(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -322,7 +322,7 @@ func TestDownloader_VerifyChecksum_Success(t *testing.T) {
 }
 
 func TestDownloader_VerifyChecksum_Mismatch(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -354,7 +354,7 @@ func TestDownloader_VerifyChecksum_Mismatch(t *testing.T) {
 }
 
 func TestDownloader_VerifyChecksum_InvalidFormat(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -385,7 +385,7 @@ func TestDownloader_VerifyChecksum_InvalidFormat(t *testing.T) {
 }
 
 func TestDownloader_VerifyChecksum_NonexistentFile(t *testing.T) {
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}
@@ -399,7 +399,7 @@ func TestDownloader_VerifyChecksum_NonexistentFile(t *testing.T) {
 
 func TestDownloader_VerifyChecksum_OnlyHashInFile(t *testing.T) {
 	// Test checksum file with only the hash (no filename)
-	downloader, err := NewDownloader(&GitHubClient{})
+	downloader, err := NewDownloader("http://localhost:8080/download")
 	if err != nil {
 		t.Fatalf("NewDownloader() error = %v", err)
 	}

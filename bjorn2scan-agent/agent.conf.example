@@ -49,9 +49,14 @@ auto_update_min_version=
 # Will not upgrade above this version
 auto_update_max_version=
 
-# GitHub repository for updates (default: bvboe/b2s-go)
-# Format: owner/repo
-update_github_repo=bvboe/b2s-go
+# Release feed URL (default: https://github.com/bvboe/b2s-go/releases.atom)
+# Atom/RSS feed containing release information
+update_feed_url=https://github.com/bvboe/b2s-go/releases.atom
+
+# Asset download base URL (default: https://github.com/bvboe/b2s-go/releases/download)
+# Base URL for downloading release assets
+# Assets are downloaded from: {base_url}/{version}/{filename}
+update_asset_base_url=https://github.com/bvboe/b2s-go/releases/download
 
 # Verify signatures before installing (default: false)
 # TODO: Enable when cosign verification is implemented

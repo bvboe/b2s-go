@@ -249,7 +249,8 @@ func main() {
 		updaterConfig := &updater.Config{
 			Enabled:              cfg.AutoUpdateEnabled,
 			CheckInterval:        cfg.AutoUpdateCheckInterval,
-			GitHubRepo:           cfg.UpdateGitHubRepo,
+			FeedURL:              cfg.UpdateFeedURL,
+			AssetBaseURL:         cfg.UpdateAssetBaseURL,
 			CurrentVersion:       version,
 			VerifySignatures:     cfg.UpdateVerifySignatures,
 			RollbackEnabled:      cfg.UpdateRollbackEnabled,
