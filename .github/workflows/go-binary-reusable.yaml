@@ -165,7 +165,7 @@ jobs:
 
           # Create tarballs for Linux binaries (for install script)
           if [ "${GOOS}" = "linux" ]; then
-            tar -czf dist/${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz -C dist ${{ inputs.component-name }}-${GOOS}-${GOARCH}
+            tar -czf dist/${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz --transform='s/-${GOOS}-${GOARCH}$//' -C dist ${{ inputs.component-name }}-${GOOS}-${GOARCH}
             cd dist && sha256sum ${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz > ${{ inputs.component-name }}-${GOOS}-${GOARCH}.tar.gz.sha256 && cd ..
           fi
         done

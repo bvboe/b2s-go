@@ -266,7 +266,8 @@ create_user() {
 install_binary() {
     log_info "Installing binary to $INSTALL_DIR..."
 
-    install -m 755 "${BINARY_NAME}-${OS}-${ARCH}" "${INSTALL_DIR}/${BINARY_NAME}"
+    # After extraction, the binary is named generically (without platform suffix)
+    install -m 755 "${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 
     log_success "Binary installed"
 }

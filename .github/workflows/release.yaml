@@ -257,7 +257,7 @@ jobs:
           Extract and install:
           ```bash
           tar -xzf bjorn2scan-agent-linux-amd64.tar.gz
-          sudo install -m 755 bjorn2scan-agent-linux-amd64 /usr/local/bin/bjorn2scan-agent
+          sudo install -m 755 bjorn2scan-agent /usr/local/bin/bjorn2scan-agent
           ```
 
           **Verify installation:**
