@@ -38,7 +38,7 @@ type Config struct {
 func defaultConfig() *Config {
 	return &Config{
 		Port:         "9999",
-		DBPath:       "/var/lib/bjorn2scan/containers.db",
+		DBPath:       "/var/lib/bjorn2scan/data/containers.db",
 		DebugEnabled: false,
 
 		// Auto-update defaults

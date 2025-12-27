@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultBinaryPath = "/usr/local/bin/bjorn2scan-agent"
+	defaultBinaryPath = "/var/lib/bjorn2scan/bin/bjorn2scan-agent"
 	backupSuffix      = ".backup"
 	rollbackMarker    = "/tmp/bjorn2scan-update-rollback"
 )

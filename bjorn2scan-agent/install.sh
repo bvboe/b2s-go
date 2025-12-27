@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Constants
 BINARY_NAME="bjorn2scan-agent"
 SERVICE_NAME="bjorn2scan-agent.service"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="/var/lib/bjorn2scan/bin"
 SERVICE_DIR="/etc/systemd/system"
 CONFIG_DIR="/etc/bjorn2scan"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
@@ -266,6 +266,9 @@ create_user() {
 install_binary() {
     log_info "Installing binary to $INSTALL_DIR..."
 
+    # Create binary directory
+    mkdir -p "$INSTALL_DIR"
+
     # After extraction, the binary is named generically (without platform suffix)
     install -m 755 "${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -361,9 +364,17 @@ install_service() {
 
     # Create required directories for the service
     # Note: Service runs as root, but these directories need to exist for systemd mount namespacing
-    mkdir -p /var/lib/bjorn2scan
+    mkdir -p /var/lib/bjorn2scan/bin
+    mkdir -p /var/lib/bjorn2scan/data
+    mkdir -p /var/lib/bjorn2scan/cache
     mkdir -p /var/log/bjorn2scan
-    chmod 755 /var/lib/bjorn2scan /var/log/bjorn2scan
+    mkdir -p /etc/bjorn2scan
+
+    # Create symlinks for convenience (config and logs accessible from /var/lib/bjorn2scan)
+    ln -sf /etc/bjorn2scan /var/lib/bjorn2scan/config
+    ln -sf /var/log/bjorn2scan /var/lib/bjorn2scan/log
+
+    chmod 755 /var/lib/bjorn2scan /var/log/bjorn2scan /etc/bjorn2scan
 
     # Install logrotate configuration
     LOGROTATE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/logrotate.conf"

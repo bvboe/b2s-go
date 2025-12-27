@@ -74,8 +74,8 @@ func TestInstaller_GetBackupPath(t *testing.T) {
 	}{
 		{
 			name:       "Standard path",
-			binaryPath: "/usr/local/bin/bjorn2scan-agent",
-			want:       "/usr/local/bin/bjorn2scan-agent.backup",
+			binaryPath: "/var/lib/bjorn2scan/bin/bjorn2scan-agent",
+			want:       "/var/lib/bjorn2scan/bin/bjorn2scan-agent.backup",
 		},
 		{
 			name:       "Custom path",

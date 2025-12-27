@@ -13,7 +13,7 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default port 9999, got %s", cfg.Port)
 	}
 
-	if cfg.DBPath != "/var/lib/bjorn2scan/containers.db" {
+	if cfg.DBPath != "/var/lib/bjorn2scan/data/containers.db" {
 		t.Errorf("Expected default db path, got %s", cfg.DBPath)
 	}
 

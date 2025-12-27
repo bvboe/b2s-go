@@ -209,9 +209,9 @@ func main() {
 		return syft.GenerateSBOM(ctx, image)
 	}
 
-	// Configure Grype to store vulnerability database in /var/lib/bjorn2scan
+	// Configure Grype to store vulnerability database in /var/lib/bjorn2scan/cache
 	grypeCfg := grype.Config{
-		DBRootDir: "/var/lib/bjorn2scan",
+		DBRootDir: "/var/lib/bjorn2scan/cache",
 	}
 
 	// Initialize scan queue with SBOM and vulnerability scanning

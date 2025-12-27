@@ -6,9 +6,9 @@
 # Environment variable: PORT
 port=9999
 
-# Database path (default: /var/lib/bjorn2scan/containers.db)
+# Database path (default: /var/lib/bjorn2scan/data/containers.db)
 # Environment variable: DB_PATH
-db_path=/var/lib/bjorn2scan/containers.db
+db_path=/var/lib/bjorn2scan/data/containers.db
 
 # Enable debug mode (default: false)
 # When enabled, adds /debug/sql and /debug/metrics endpoints
