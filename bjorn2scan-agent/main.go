@@ -270,6 +270,22 @@ func main() {
 		if err != nil {
 			log.Printf("Warning: failed to initialize updater: %v", err)
 		} else {
+			// Check if there's a pending update from previous run
+			// This must be done BEFORE starting the HTTP server and before starting the updater
+			installer := updater.NewInstaller("", "", cfg.UpdateHealthCheckTimeout)
+			if installer.ShouldCheckRollback() {
+				log.Println("Pending update detected from previous run")
+				// Perform health check in background after server starts
+				// We can't do it now because the server isn't running yet
+				go func() {
+					// Wait for server to be ready
+					time.Sleep(3 * time.Second)
+					if err := installer.PerformPostUpdateHealthCheck(); err != nil {
+						log.Printf("Post-update verification failed: %v", err)
+					}
+				}()
+			}
+
 			// Start updater in background
 			go agentUpdater.Start()
 			log.Println("Auto-updater started")

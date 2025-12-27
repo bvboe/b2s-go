@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -41,7 +40,8 @@ func NewInstaller(binaryPath, healthURL string, healthTimeout time.Duration) *In
 	}
 }
 
-// Install performs atomic binary replacement and restarts the service
+// Install performs atomic binary replacement and exits for restart
+// The health check and rollback decision happen on the next startup
 func (i *Installer) Install(newBinaryPath string) error {
 	fmt.Println("Starting installation...")
 
@@ -52,8 +52,8 @@ func (i *Installer) Install(newBinaryPath string) error {
 		return fmt.Errorf("failed to backup binary: %w", err)
 	}
 
-	// 2. Create rollback marker
-	if err := os.WriteFile(rollbackMarker, []byte("rollback"), 0644); err != nil {
+	// 2. Create rollback marker (will be checked on next startup)
+	if err := os.WriteFile(rollbackMarker, []byte("pending"), 0644); err != nil {
 		return fmt.Errorf("failed to create rollback marker: %w", err)
 	}
 
@@ -78,41 +78,17 @@ func (i *Installer) Install(newBinaryPath string) error {
 	}
 
 	fmt.Println("Binary installed successfully ✓")
+	fmt.Println("Update installed, exiting for restart...")
+	fmt.Println("New version will be verified on startup")
 
-	// 4. Restart service
-	fmt.Println("Restarting service...")
-	if err := i.restartService(); err != nil {
-		// Try to rollback
-		fmt.Printf("Service restart failed: %v\n", err)
-		if rbErr := i.Rollback(); rbErr != nil {
-			return fmt.Errorf("restart failed and rollback failed: %v (original error: %w)", rbErr, err)
-		}
-		return fmt.Errorf("service restart failed, rolled back to previous version: %w", err)
-	}
+	// Exit gracefully - systemd will restart the service with Restart=on-failure
+	// The new binary will run, perform health check, and either commit or rollback
+	os.Exit(0)
 
-	// 5. Wait for service to start and perform health check
-	fmt.Printf("Waiting for service to start (timeout: %v)...\n", i.healthTimeout)
-	time.Sleep(5 * time.Second) // Give service time to start
-
-	if err := i.checkHealth(); err != nil {
-		fmt.Printf("Health check failed: %v\n", err)
-		if rbErr := i.Rollback(); rbErr != nil {
-			return fmt.Errorf("health check failed and rollback failed: %v (original error: %w)", rbErr, err)
-		}
-		return fmt.Errorf("health check failed, rolled back to previous version: %w", err)
-	}
-
-	fmt.Println("Health check passed ✓")
-
-	// 6. Remove rollback marker and backup
-	_ = os.Remove(rollbackMarker) // Best effort cleanup
-	_ = os.Remove(backupPath)     // Best effort cleanup
-
-	fmt.Println("Installation completed successfully!")
-	return nil
+	return nil // Never reached, but required for compilation
 }
 
-// Rollback restores the previous binary and restarts the service
+// Rollback restores the previous binary and exits for restart
 func (i *Installer) Rollback() error {
 	fmt.Println("Performing rollback...")
 
@@ -126,24 +102,52 @@ func (i *Installer) Rollback() error {
 		return fmt.Errorf("failed to restore backup: %w", err)
 	}
 
-	// Restart service
-	if err := i.restartService(); err != nil {
-		return fmt.Errorf("failed to restart service after rollback: %w", err)
-	}
-
 	// Remove rollback marker
 	_ = os.Remove(rollbackMarker) // Best effort cleanup
 
-	fmt.Println("Rollback completed")
-	return nil
+	fmt.Println("Rollback completed, exiting for restart...")
+
+	// Exit - systemd will restart with the old version
+	os.Exit(1)
+
+	return nil // Never reached
 }
 
-// restartService restarts the bjorn2scan-agent service
-func (i *Installer) restartService() error {
-	cmd := exec.Command("systemctl", "restart", "bjorn2scan-agent")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("systemctl restart failed: %w", err)
+// PerformPostUpdateHealthCheck checks if update was successful and commits or rolls back
+// This should be called on startup if ShouldCheckRollback() returns true
+func (i *Installer) PerformPostUpdateHealthCheck() error {
+	fmt.Println("Pending update detected, performing health check...")
+
+	// Give the service a moment to fully start
+	time.Sleep(2 * time.Second)
+
+	// Perform health check
+	if err := i.checkHealth(); err != nil {
+		fmt.Printf("Health check failed: %v\n", err)
+		fmt.Println("Rolling back to previous version...")
+		return i.Rollback()
 	}
+
+	// Health check passed - commit the update
+	fmt.Println("Health check passed ✓")
+	return i.CommitUpdate()
+}
+
+// CommitUpdate removes the rollback marker and backup after successful update
+func (i *Installer) CommitUpdate() error {
+	backupPath := i.binaryPath + backupSuffix
+
+	// Remove rollback marker
+	if err := os.Remove(rollbackMarker); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove rollback marker: %w", err)
+	}
+
+	// Remove backup
+	if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove backup: %w", err)
+	}
+
+	fmt.Println("Update committed successfully!")
 	return nil
 }
 
