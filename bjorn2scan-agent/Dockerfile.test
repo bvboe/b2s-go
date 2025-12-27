@@ -1,0 +1,124 @@
+# Testing container for bjorn2scan-agent with systemd + Docker support
+# This is NOT for production - it's for realistic testing of the agent
+
+# =============================================================================
+# Stage 1: Build the agent binary
+# =============================================================================
+FROM cgr.dev/chainguard/go:latest-dev AS builder
+
+WORKDIR /build
+
+# Copy the entire project (agent + scanner-core) to handle replace directives
+# NOTE: Build context should be the parent directory (b2s-go)
+COPY . .
+
+# Build the agent binary from bjorn2scan-agent directory
+WORKDIR /build/bjorn2scan-agent
+
+# Download dependencies (replace directives will use ../scanner-core)
+RUN go mod download
+
+# Detect build architecture
+ARG TARGETARCH
+RUN echo "Building for architecture: ${TARGETARCH}"
+
+# Build the agent binary (static binary) for the target architecture
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -ldflags "-X main.version=test-local -w -s" \
+    -o bjorn2scan-agent .
+
+# Create tarball (matching the format that install.sh expects)
+RUN tar -czf bjorn2scan-agent-linux-${TARGETARCH}.tar.gz bjorn2scan-agent
+
+# =============================================================================
+# Stage 2: Runtime with systemd + Docker
+# =============================================================================
+# Note: Wolfi-base doesn't include systemd, so we use Ubuntu for full systemd support
+FROM ubuntu:22.04
+
+# Install systemd, Docker, and required tools
+RUN apt-get update && \
+    apt-get install -y \
+        systemd \
+        systemd-sysv \
+        docker.io \
+        curl \
+        wget \
+        ca-certificates \
+        iproute2 \
+        iptables \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Remove unnecessary systemd services for container
+RUN cd /lib/systemd/system/sysinit.target.wants/ && \
+    ls | grep -v systemd-tmpfiles-setup | xargs rm -f && \
+    rm -f /lib/systemd/system/multi-user.target.wants/* \
+          /etc/systemd/system/*.wants/* \
+          /lib/systemd/system/local-fs.target.wants/* \
+          /lib/systemd/system/sockets.target.wants/*udev* \
+          /lib/systemd/system/sockets.target.wants/*initctl* \
+          /lib/systemd/system/basic.target.wants/* \
+          /lib/systemd/system/anaconda.target.wants/* \
+          /lib/systemd/system/plymouth* \
+          /lib/systemd/system/systemd-update-utmp*
+
+# Copy built agent binary and install script to a persistent location (not /tmp which gets cleared)
+ARG TARGETARCH
+RUN mkdir -p /opt/install
+COPY --from=builder /build/bjorn2scan-agent/bjorn2scan-agent-linux-${TARGETARCH}.tar.gz /opt/install/agent-binary.tar.gz
+COPY --from=builder /build/bjorn2scan-agent/install.sh /opt/install/install.sh
+RUN chmod +x /opt/install/install.sh
+
+# Create a systemd oneshot service to install the agent after boot
+RUN cat > /etc/systemd/system/agent-install.service << 'EOF'
+[Unit]
+Description=Install bjorn2scan-agent on first boot
+After=docker.service
+Wants=docker.service
+ConditionPathExists=!/var/lib/bjorn2scan/.installed
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/bash -c 'echo "=========================================="'
+ExecStartPre=/bin/bash -c 'echo "Installing bjorn2scan-agent..."'
+ExecStartPre=/bin/bash -c 'echo "=========================================="'
+ExecStart=/bin/bash -c 'LOCAL_BINARY_PATH=/opt/install/agent-binary.tar.gz /opt/install/install.sh'
+ExecStartPost=/bin/bash -c 'touch /var/lib/bjorn2scan/.installed'
+ExecStartPost=/bin/bash -c 'echo ""'
+ExecStartPost=/bin/bash -c 'echo "=========================================="'
+ExecStartPost=/bin/bash -c 'echo "Agent installed successfully!"'
+ExecStartPost=/bin/bash -c 'echo "=========================================="'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable Docker and agent install services
+RUN systemctl enable docker agent-install
+
+# Create entrypoint script that just starts systemd
+RUN cat > /entrypoint.sh << 'EOF'
+#!/bin/bash
+echo "=========================================="
+echo "Starting test container for bjorn2scan-agent"
+echo "=========================================="
+echo "systemd will start Docker and install the agent..."
+echo ""
+exec /lib/systemd/systemd
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+# Expose agent port
+EXPOSE 9999
+
+# Use systemd as init system
+STOPSIGNAL SIGRTMIN+3
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:9999/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

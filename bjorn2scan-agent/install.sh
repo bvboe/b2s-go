@@ -49,6 +49,9 @@ USAGE:
     # Install specific version
     curl -sSfL https://github.com/${GITHUB_REPO}/releases/download/v0.1.54/install.sh | sudo sh
 
+    # Install from local binary (for testing)
+    LOCAL_BINARY_PATH=/path/to/bjorn2scan-agent-linux-amd64.tar.gz sudo -E sh install.sh
+
     # Uninstall
     curl -sSfL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh | sudo sh -s uninstall
 
@@ -147,17 +150,37 @@ check_systemd() {
     return 0
 }
 
-# Download binary
+# Download binary (or use local if specified)
 download_binary() {
     log_info "Installing version: ${VERSION}"
 
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR"
+
+    # Use local binary if specified
+    if [ -n "$LOCAL_BINARY_PATH" ]; then
+        if [ ! -f "$LOCAL_BINARY_PATH" ]; then
+            log_error "Local binary not found: $LOCAL_BINARY_PATH"
+            exit 1
+        fi
+
+        log_info "Using local binary: $LOCAL_BINARY_PATH"
+        cp "$LOCAL_BINARY_PATH" "${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
+
+        # Also copy checksum if it exists
+        if [ -f "${LOCAL_BINARY_PATH}.sha256" ]; then
+            cp "${LOCAL_BINARY_PATH}.sha256" "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256"
+        fi
+
+        log_success "Local binary copied"
+        return 0
+    fi
+
+    # Download from GitHub
     DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
     CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
     log_info "Downloading from: $DOWNLOAD_URL"
-
-    TMP_DIR=$(mktemp -d)
-    cd "$TMP_DIR"
 
     if command -v curl >/dev/null 2>&1; then
         curl -sSfL "$DOWNLOAD_URL" -o "${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
@@ -173,6 +196,12 @@ download_binary() {
 # Verify checksum
 verify_checksum() {
     log_info "Verifying checksum..."
+
+    # Skip if checksum file doesn't exist (e.g., when using local binary for testing)
+    if [ ! -f "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256" ]; then
+        log_warning "Checksum file not found, skipping verification (local binary mode)"
+        return
+    fi
 
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum -c "${BINARY_NAME}-${OS}-${ARCH}.tar.gz.sha256"

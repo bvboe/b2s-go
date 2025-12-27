@@ -9,13 +9,13 @@
 ## Backlog
 - [ ] Negligible CVES!
 - [ ] Proper test container for the agent!
-- [ ] Refactor k8s updater to use ATOM feed
+- [X] Refactor k8s updater to use ATOM feed
 - [ ] Clean up agent configuration management:
   - [ ] Make defaults.conf the single source of truth (embed in binary at compile time)
   - [ ] Move defaults from scanner-core to component-specific (agent, k8s-scan-server)
   - [ ] Ensure agent.conf.example matches actual code defaults
   - [ ] Add --show-config flag to display current configuration
-- [ ] Test sorting on all tables
+- [X] Test sorting on all tables
 - [ ] Node scanning
 - [x] Agent autoupdate (API already implemented: POST /api/update/trigger)
 - [ ] Auto-update improvements:
