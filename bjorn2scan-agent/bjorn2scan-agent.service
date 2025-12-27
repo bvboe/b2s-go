@@ -9,7 +9,7 @@ Type=simple
 User=root
 Group=root
 ExecStart=/var/lib/bjorn2scan/bin/bjorn2scan-agent
-Restart=on-failure
+Restart=always
 RestartSec=5s
 
 # Filesystem access - read-only root with selective write access

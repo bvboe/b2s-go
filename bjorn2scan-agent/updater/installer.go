@@ -81,7 +81,7 @@ func (i *Installer) Install(newBinaryPath string) error {
 	fmt.Println("Update installed, exiting for restart...")
 	fmt.Println("New version will be verified on startup")
 
-	// Exit gracefully - systemd will restart the service with Restart=on-failure
+	// Exit gracefully - systemd will restart the service with Restart=always
 	// The new binary will run, perform health check, and either commit or rollback
 	os.Exit(0)
 

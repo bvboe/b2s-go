@@ -7,7 +7,8 @@
 - [ ] None currently
 
 ## Backlog
-- [ ] Negligible CVES1
+- [ ] Negligible CVES!
+- [ ] Proper test container for the agent!
 - [ ] Clean up agent configuration management:
   - [ ] Make defaults.conf the single source of truth (embed in binary at compile time)
   - [ ] Move defaults from scanner-core to component-specific (agent, k8s-scan-server)

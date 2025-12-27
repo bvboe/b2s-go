@@ -1,0 +1,9 @@
+version: "2"
+
+run:
+  skip-dirs:
+    - updater/integration_test
+
+issues:
+  exclude-dirs:
+    - updater/integration_test

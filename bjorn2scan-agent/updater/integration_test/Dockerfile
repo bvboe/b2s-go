@@ -11,13 +11,13 @@ WORKDIR /build/bjorn2scan-agent
 RUN go mod download
 
 # Build mock server (static binary)
-RUN cd updater/integration_test && CGO_ENABLED=0 go build -o /mock-server mock-server.go
+RUN cd updater/integration_test && CGO_ENABLED=0 go build -tags integration -o /mock-server mock-server.go
 
 # Build test driver (static binary)
-RUN cd updater/integration_test && CGO_ENABLED=0 go build -o /test-driver test-driver.go
+RUN cd updater/integration_test && CGO_ENABLED=0 go build -tags integration -o /test-driver test-driver.go
 
 # Build health check helper (static binary)
-RUN cd updater/integration_test && CGO_ENABLED=0 go build -o /health-check health-check.go
+RUN cd updater/integration_test && CGO_ENABLED=0 go build -tags integration -o /health-check health-check.go
 
 # Build test agent (static binary)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bjorn2scan-agent-test
