@@ -170,6 +170,22 @@ jobs:
           fi
         done
 
+    - name: Prepare version-stamped install script
+      if: github.ref_type == 'tag'
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+
+        # Only create install.sh for bjorn2scan-agent component
+        if [ "${{ inputs.component-name }}" = "bjorn2scan-agent" ] && [ -f "install.sh" ]; then
+          echo "Creating version-stamped install.sh for version ${VERSION}"
+
+          # Replace __VERSION__ placeholder with actual version
+          sed "s/__VERSION__/${VERSION}/g" install.sh > dist/install.sh
+          chmod +x dist/install.sh
+
+          echo "Version-stamped install.sh created"
+        fi
+
     - name: Install cosign
       if: github.ref_type == 'tag'
       uses: sigstore/cosign-installer@v3

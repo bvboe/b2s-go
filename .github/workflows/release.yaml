@@ -245,7 +245,11 @@ jobs:
           **One-liner installation (Linux):**
 
           ```bash
-          curl -sSfL https://raw.githubusercontent.com/${{ github.repository }}/main/bjorn2scan-agent/install.sh | sudo sh
+          # Install latest version
+          curl -sSfL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sudo sh
+
+          # Install this specific version (${GITHUB_REF_NAME})
+          curl -sSfL https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/install.sh | sudo sh
           ```
 
           **Manual installation:**
@@ -312,6 +316,7 @@ jobs:
 
           ## 📦 Release Assets
 
+          - **install.sh** - Installation script for agent (version-stamped for this release)
           - **bjorn2scan-*.tgz** - Helm chart package for offline installation
           - **bjorn2scan-agent-linux-*.tar.gz** - Agent binaries for standalone deployment
           - **bjorn2scan-agent-linux-*.tar.gz.sig** - Cosign signatures for agent binaries

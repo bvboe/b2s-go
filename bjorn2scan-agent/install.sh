@@ -5,6 +5,9 @@ set -e
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 export PATH
 
+# Version - injected during release build (or set to "latest" for development)
+VERSION="__VERSION__"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,14 +43,17 @@ DESCRIPTION:
     for the Bjorn2Scan v2 platform.
 
 USAGE:
-    # Install
-    curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh | sudo sh
+    # Install latest version
+    curl -sSfL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh | sudo sh
+
+    # Install specific version
+    curl -sSfL https://github.com/${GITHUB_REPO}/releases/download/v0.1.54/install.sh | sudo sh
 
     # Uninstall
-    curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
+    curl -sSfL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh | sudo sh -s uninstall
 
     # Show help (download first)
-    curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh -o install.sh
+    curl -sSfL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh -o install.sh
     sh install.sh --help
 
 WHAT IT DOES:
@@ -94,7 +100,7 @@ EOF
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
         log_error "This script must be run as root"
-        log_info "Try: curl -sSfL https://raw.githubusercontent.com/${GITHUB_REPO}/main/bjorn2scan-agent/install.sh | sudo sh"
+        log_info "Try: curl -sSfL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh | sudo sh"
         exit 1
     fi
 }
@@ -141,29 +147,10 @@ check_systemd() {
     return 0
 }
 
-# Get latest version from GitHub
-get_latest_version() {
-    log_info "Fetching latest version..."
-
-    if command -v curl >/dev/null 2>&1; then
-        VERSION=$(curl -sSfL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    elif command -v wget >/dev/null 2>&1; then
-        VERSION=$(wget -qO- "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    else
-        log_error "Neither curl nor wget found. Please install one of them."
-        exit 1
-    fi
-
-    if [ -z "$VERSION" ]; then
-        log_error "Failed to get latest version"
-        exit 1
-    fi
-
-    log_success "Latest version: $VERSION"
-}
-
 # Download binary
 download_binary() {
+    log_info "Installing version: ${VERSION}"
+
     DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${OS}-${ARCH}.tar.gz"
     CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
@@ -474,7 +461,6 @@ main() {
     detect_arch
     detect_distro
     show_directories
-    get_latest_version
     download_binary
     verify_checksum
     extract_binary
