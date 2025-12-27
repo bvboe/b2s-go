@@ -38,11 +38,12 @@
 - [ ] OpenTelemetry integration
 - [ ] Database optimization
 - [ ] github.com/bvboe/b2s-go/scanner-core shows with version unknown in sbom
-- [ ] K3s testing
-- [ ] Microk8s testing
-- [ ] GKE
-- [ ] EKS
-- [ ] AKS
+- [ ] Other K8s distributions
+  - [ ] K3s testing
+  - [ ] Microk8s testing
+  - [ ] GKE
+  - [ ] EKS
+  - [ ] AKS
 - [ ] Scheduled tasks (rescan, clean up data, delete old data)
 - [ ] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done - I think)
 - [ ] Trigger rescan of all container_images whenever the database for grype is updated
