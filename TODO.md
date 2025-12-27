@@ -51,7 +51,7 @@
 - [ ] Fix input validation bug in github_client.go NewGitHubClient() - allow empty owner/repo parts
 - [ ] Add GitHub API rate limiting handling to github_client.go
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
-- [ ] Implement cosign signature verification in verifier.go (currently just returns nil)
+- [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
 
 ## Recently Completed
 - [x] [2025-12-26] Fixed GitHub Actions workflow tarball extraction bug (binary name mismatch)
