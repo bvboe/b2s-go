@@ -33,7 +33,7 @@
 - [ ] EKS
 - [ ] AKS
 - [ ] Scheduled tasks (rescan, clean up data, delete old data)
-- [ ] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done. I think)
+- [ ] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done - I think)
 - [ ] Trigger rescan of all container_images whenever the database for grype is updated
 - [ ] Sending data using opentelemetry to a remove opentelemetry server
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
