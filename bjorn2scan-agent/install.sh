@@ -132,9 +132,13 @@ detect_arch() {
 # Detect Linux distribution (for systemd check)
 detect_distro() {
     if [ -f /etc/os-release ]; then
+        # Save VERSION before sourcing (os-release may contain a VERSION variable)
+        _SAVED_VERSION="$VERSION"
         . /etc/os-release
         DISTRO="$ID"
         DISTRO_VERSION="$VERSION_ID"
+        # Restore our VERSION variable
+        VERSION="$_SAVED_VERSION"
         log_info "Detected distribution: $DISTRO $DISTRO_VERSION"
     else
         log_warning "Could not detect Linux distribution"
