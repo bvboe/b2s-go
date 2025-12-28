@@ -71,29 +71,27 @@ COPY --from=builder /build/bjorn2scan-agent/install.sh /opt/install/install.sh
 RUN chmod +x /opt/install/install.sh
 
 # Create a systemd oneshot service to install the agent after boot
-RUN cat > /etc/systemd/system/agent-install.service << 'EOF'
-[Unit]
-Description=Install bjorn2scan-agent on first boot
-After=docker.service
-Wants=docker.service
-ConditionPathExists=!/var/lib/bjorn2scan/.installed
-
-[Service]
-Type=oneshot
-ExecStartPre=/bin/bash -c 'echo "=========================================="'
-ExecStartPre=/bin/bash -c 'echo "Installing bjorn2scan-agent..."'
-ExecStartPre=/bin/bash -c 'echo "=========================================="'
-ExecStart=/bin/bash -c 'LOCAL_BINARY_PATH=/opt/install/agent-binary.tar.gz /opt/install/install.sh'
-ExecStartPost=/bin/bash -c 'touch /var/lib/bjorn2scan/.installed'
-ExecStartPost=/bin/bash -c 'echo ""'
-ExecStartPost=/bin/bash -c 'echo "=========================================="'
-ExecStartPost=/bin/bash -c 'echo "Agent installed successfully!"'
-ExecStartPost=/bin/bash -c 'echo "=========================================="'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
+RUN printf '[Unit]\n\
+Description=Install bjorn2scan-agent on first boot\n\
+After=docker.service\n\
+Wants=docker.service\n\
+ConditionPathExists=!/var/lib/bjorn2scan/.installed\n\
+\n\
+[Service]\n\
+Type=oneshot\n\
+ExecStartPre=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
+ExecStartPre=/bin/bash -c '"'"'echo "Installing bjorn2scan-agent..."'"'"'\n\
+ExecStartPre=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
+ExecStart=/bin/bash -c '"'"'LOCAL_BINARY_PATH=/opt/install/agent-binary.tar.gz /opt/install/install.sh'"'"'\n\
+ExecStartPost=/bin/bash -c '"'"'touch /var/lib/bjorn2scan/.installed'"'"'\n\
+ExecStartPost=/bin/bash -c '"'"'echo ""'"'"'\n\
+ExecStartPost=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
+ExecStartPost=/bin/bash -c '"'"'echo "Agent installed successfully!"'"'"'\n\
+ExecStartPost=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
+RemainAfterExit=yes\n\
+\n\
+[Install]\n\
+WantedBy=multi-user.target\n' > /etc/systemd/system/agent-install.service
 
 # Enable Docker and agent install services
 RUN systemctl enable docker agent-install
