@@ -9,7 +9,6 @@
 ## Backlog
 - [ ] Negligible CVES!
 - [ ] Proper test container for the agent!
-- [X] Refactor k8s updater to use ATOM feed
 - [ ] Clean up agent configuration management:
   - [ ] Make defaults.conf the single source of truth (embed in binary at compile time)
   - [ ] Move defaults from scanner-core to component-specific (agent, k8s-scan-server)
@@ -19,10 +18,6 @@
 - [ ] Node scanning
 - [x] Agent autoupdate (API already implemented: POST /api/update/trigger)
 - [ ] Auto-update improvements:
-  - [ ] Replace GitHub API calls with Atom feed parsing (avoids 60 req/hour rate limit)
-    - Current: 3-5 API calls per update check (GetLatestRelease + 2-4 DownloadAsset)
-    - Proposed: Parse https://github.com/bvboe/b2s-go/releases.atom (no rate limits)
-    - Still use direct download URLs for assets (no API needed)
   - [ ] Fix release workflow to prevent incomplete releases
     - Issue: Component jobs attach assets as they complete, creating release before all assets ready
     - Current: First job to finish creates release, others update it (race condition)
@@ -52,12 +47,15 @@
 - [ ] Trigger rescan of all container_images whenever the database for grype is updated
 - [ ] Sending data using opentelemetry to a remove opentelemetry server
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
-- [ ] Fix input validation bug in github_client.go NewGitHubClient() - allow empty owner/repo parts
-- [ ] Add GitHub API rate limiting handling to github_client.go
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
 
 ## Recently Completed
+- [x] [2025-12-27] Removed stale TODO items for non-existent github_client.go
+- [x] [2025-12-27] Confirmed agent updater uses Atom feed (no GitHub API)
+- [x] [2025-12-27] Confirmed k8s updater uses OCI registry (no GitHub API)
+- [x] [2025-12-26] Refactored k8s updater to use OCI registry
+- [x] [2025-12-26] Replaced GitHub API calls with Atom feed parsing in agent updater
 - [x] [2025-12-26] Fixed GitHub Actions workflow tarball extraction bug (binary name mismatch)
 - [x] [2025-12-26] Updated install.sh to work with new tarball format (generic binary name)
 - [x] [2025-12-26] Researched GitHub API rate limiting and Atom feed alternative
