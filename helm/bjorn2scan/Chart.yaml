@@ -2,8 +2,8 @@ apiVersion: v2
 name: bjorn2scan
 description: A Helm chart for bjorn2scan v2 - Kubernetes container and workload scanner
 type: application
-version: 0.1.55
-appVersion: "0.1.55"
+version: 0.1.56
+appVersion: "0.1.56"
 keywords:
   - security
   - scanning
