@@ -188,18 +188,22 @@ func main() {
 			log.Printf("Warning: failed to create feed checker: %v", err)
 		} else {
 			rescanJob := jobs.NewRescanDatabaseJob(feedChecker, db, scanQueue)
-			sched.AddJob(
+			if err := sched.AddJob(
 				rescanJob,
 				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
 				scheduler.JobConfig{
 					Enabled: true,
 					Timeout: cfg.JobsRescanDatabaseTimeout,
 				},
-			)
+			); err != nil {
+				log.Fatalf("Failed to add rescan database job: %v", err)
+			}
 			log.Printf("Scheduled rescan database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
 
 			// Start scheduler
-			sched.Start(ctx)
+			if err := sched.Start(ctx); err != nil {
+				log.Fatalf("Failed to start scheduler: %v", err)
+			}
 			log.Println("Scheduler started")
 		}
 	}
