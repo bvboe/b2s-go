@@ -206,12 +206,9 @@ func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 	u.setStatus(StatusInstalling, "")
 	installer := NewInstaller("", "", u.config.HealthCheckTimeout)
 
-	// Cleanup before install since Install() calls os.Exit() and defers won't run
-	if err := downloader.Cleanup(); err != nil {
-		fmt.Printf("Warning: failed to cleanup temp directory: %v\n", err)
-	}
-
-	if err := installer.Install(extractedPath); err != nil {
+	// Pass cleanup function to Install() - it will cleanup after copying the binary but before exit
+	// The defer cleanup (line 175) will still run on error paths
+	if err := installer.Install(extractedPath, downloader.Cleanup); err != nil {
 		return fmt.Errorf("installation failed: %w", err)
 	}
 

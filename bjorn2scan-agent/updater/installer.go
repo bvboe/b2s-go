@@ -42,7 +42,8 @@ func NewInstaller(binaryPath, healthURL string, healthTimeout time.Duration) *In
 
 // Install performs atomic binary replacement and exits for restart
 // The health check and rollback decision happen on the next startup
-func (i *Installer) Install(newBinaryPath string) error {
+// The cleanup function is called after the binary is copied but before exit
+func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
 	fmt.Println("Starting installation...")
 
 	// 1. Backup current binary
@@ -78,6 +79,15 @@ func (i *Installer) Install(newBinaryPath string) error {
 	}
 
 	fmt.Println("Binary installed successfully ✓")
+
+	// 4. Cleanup temp directory (binary has been copied, no longer needed)
+	if cleanup != nil {
+		if err := cleanup(); err != nil {
+			fmt.Printf("Warning: failed to cleanup temp directory: %v\n", err)
+			// Continue anyway - cleanup failure shouldn't block the update
+		}
+	}
+
 	fmt.Println("Update installed, exiting for restart...")
 	fmt.Println("New version will be verified on startup")
 

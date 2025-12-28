@@ -8,10 +8,10 @@ import (
 
 func TestNew(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    *Config
-		wantErr   bool
-		errMsg    string
+		name    string
+		config  *Config
+		wantErr bool
+		errMsg  string
 	}{
 		{
 			name: "Valid configuration",
@@ -133,7 +133,7 @@ func TestNew(t *testing.T) {
 func TestUpdater_StatusManagement(t *testing.T) {
 	config := &Config{
 		FeedURL:      "http://localhost:8080/releases.atom",
-				AssetBaseURL: "http://localhost:8080/download",
+		AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -218,7 +218,7 @@ func TestUpdater_StatusManagement(t *testing.T) {
 func TestUpdater_StatusThreadSafety(t *testing.T) {
 	config := &Config{
 		FeedURL:      "http://localhost:8080/releases.atom",
-				AssetBaseURL: "http://localhost:8080/download",
+		AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -269,7 +269,7 @@ func TestUpdater_StatusThreadSafety(t *testing.T) {
 func TestUpdater_PauseResume(t *testing.T) {
 	config := &Config{
 		FeedURL:      "http://localhost:8080/releases.atom",
-				AssetBaseURL: "http://localhost:8080/download",
+		AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -302,7 +302,7 @@ func TestUpdater_PauseResume(t *testing.T) {
 func TestUpdater_IsPausedThreadSafety(t *testing.T) {
 	config := &Config{
 		FeedURL:      "http://localhost:8080/releases.atom",
-				AssetBaseURL: "http://localhost:8080/download",
+		AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -437,7 +437,7 @@ func TestConfig_Structure(t *testing.T) {
 func TestUpdater_StopChannel(t *testing.T) {
 	config := &Config{
 		FeedURL:      "http://localhost:8080/releases.atom",
-				AssetBaseURL: "http://localhost:8080/download",
+		AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
@@ -467,7 +467,7 @@ func TestUpdater_StopChannel(t *testing.T) {
 func TestUpdater_PauseChannel(t *testing.T) {
 	config := &Config{
 		FeedURL:      "http://localhost:8080/releases.atom",
-				AssetBaseURL: "http://localhost:8080/download",
+		AssetBaseURL: "http://localhost:8080/download",
 	}
 
 	updater, err := New(config)
