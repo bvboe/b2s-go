@@ -7,8 +7,9 @@
 - [ ] None currently
 
 ## Backlog
-- [ ] Negligible CVES!
-- [ ] Proper test container for the agent!
+- [X] Negligible CVES!
+- [X] Proper test container for the agent!
+- [ ] Proper agent update testing
 - [ ] Clean up agent configuration management:
   - [ ] Make defaults.conf the single source of truth (embed in binary at compile time)
   - [ ] Move defaults from scanner-core to component-specific (agent, k8s-scan-server)
@@ -42,10 +43,10 @@
   - [ ] GKE
   - [ ] EKS
   - [ ] AKS
-- [ ] Scheduled tasks (rescan, clean up data, delete old data)
-- [ ] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done - I think)
-- [ ] Trigger rescan of all container_images whenever the database for grype is updated
-- [ ] Sending data using opentelemetry to a remove opentelemetry server
+- [X] Scheduled tasks (rescan, clean up data, delete old data)
+- [X] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done - I think)
+- [X] Trigger rescan of all container_images whenever the database for grype is updated
+- [ ] Sending data using opentelemetry to a remote opentelemetry server
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
