@@ -21,10 +21,10 @@ The bjorn2scan-agent runs directly on Linux hosts (not in Kubernetes) and provid
 
 #### Latest Version (Recommended)
 
-Install the latest release by downloading the install script from the main branch:
+Install the latest release:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh
+curl -sSfL https://github.com/bvboe/b2s-go/releases/latest/download/install.sh | sudo sh
 ```
 
 #### Specific Version (Pinned)
@@ -144,7 +144,7 @@ make docker-test
 ## Uninstall
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
+curl -sSfL https://github.com/bvboe/b2s-go/releases/latest/download/install.sh | sudo sh -s uninstall
 ```
 
 This will completely remove:

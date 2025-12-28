@@ -30,7 +30,7 @@ For scanning Linux hosts outside of Kubernetes, install the bjorn2scan-agent:
 
 **Latest version (recommended):**
 ```bash
-curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh
+curl -sSfL https://github.com/bvboe/b2s-go/releases/latest/download/install.sh | sudo sh
 ```
 
 **Specific version (pinned):**
@@ -78,7 +78,7 @@ journalctl -u bjorn2scan-agent -f
 systemctl restart bjorn2scan-agent
 
 # Uninstall (removes all data, logs, and configuration)
-curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
+curl -sSfL https://github.com/bvboe/b2s-go/releases/latest/download/install.sh | sudo sh -s uninstall
 ```
 
 **Note:** Uninstall completely removes the agent including all data and logs. Back up any data you need first.
