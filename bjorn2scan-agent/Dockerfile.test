@@ -97,15 +97,13 @@ WantedBy=multi-user.target\n' > /etc/systemd/system/agent-install.service
 RUN systemctl enable docker agent-install
 
 # Create entrypoint script that just starts systemd
-RUN cat > /entrypoint.sh << 'EOF'
-#!/bin/bash
-echo "=========================================="
-echo "Starting test container for bjorn2scan-agent"
-echo "=========================================="
-echo "systemd will start Docker and install the agent..."
-echo ""
-exec /lib/systemd/systemd
-EOF
+RUN printf '#!/bin/bash\n\
+echo "=========================================="\n\
+echo "Starting test container for bjorn2scan-agent"\n\
+echo "=========================================="\n\
+echo "systemd will start Docker and install the agent..."\n\
+echo ""\n\
+exec /lib/systemd/systemd\n' > /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 
