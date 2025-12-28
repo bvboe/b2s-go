@@ -71,39 +71,43 @@ COPY --from=builder /build/bjorn2scan-agent/install.sh /opt/install/install.sh
 RUN chmod +x /opt/install/install.sh
 
 # Create a systemd oneshot service to install the agent after boot
-RUN printf '[Unit]\n\
-Description=Install bjorn2scan-agent on first boot\n\
-After=docker.service\n\
-Wants=docker.service\n\
-ConditionPathExists=!/var/lib/bjorn2scan/.installed\n\
-\n\
-[Service]\n\
-Type=oneshot\n\
-ExecStartPre=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
-ExecStartPre=/bin/bash -c '"'"'echo "Installing bjorn2scan-agent..."'"'"'\n\
-ExecStartPre=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
-ExecStart=/bin/bash -c '"'"'LOCAL_BINARY_PATH=/opt/install/agent-binary.tar.gz /opt/install/install.sh'"'"'\n\
-ExecStartPost=/bin/bash -c '"'"'touch /var/lib/bjorn2scan/.installed'"'"'\n\
-ExecStartPost=/bin/bash -c '"'"'echo ""'"'"'\n\
-ExecStartPost=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
-ExecStartPost=/bin/bash -c '"'"'echo "Agent installed successfully!"'"'"'\n\
-ExecStartPost=/bin/bash -c '"'"'echo "=========================================='"'"'\n\
-RemainAfterExit=yes\n\
-\n\
-[Install]\n\
-WantedBy=multi-user.target\n' > /etc/systemd/system/agent-install.service
+RUN { \
+    echo '[Unit]'; \
+    echo 'Description=Install bjorn2scan-agent on first boot'; \
+    echo 'After=docker.service'; \
+    echo 'Wants=docker.service'; \
+    echo 'ConditionPathExists=!/var/lib/bjorn2scan/.installed'; \
+    echo ''; \
+    echo '[Service]'; \
+    echo 'Type=oneshot'; \
+    echo 'ExecStartPre=/bin/bash -c '"'"'echo "=========================================="'"'"''; \
+    echo 'ExecStartPre=/bin/bash -c '"'"'echo "Installing bjorn2scan-agent..."'"'"''; \
+    echo 'ExecStartPre=/bin/bash -c '"'"'echo "=========================================="'"'"''; \
+    echo 'ExecStart=/bin/bash -c '"'"'LOCAL_BINARY_PATH=/opt/install/agent-binary.tar.gz /opt/install/install.sh'"'"''; \
+    echo 'ExecStartPost=/bin/bash -c '"'"'touch /var/lib/bjorn2scan/.installed'"'"''; \
+    echo 'ExecStartPost=/bin/bash -c '"'"'echo ""'"'"''; \
+    echo 'ExecStartPost=/bin/bash -c '"'"'echo "=========================================="'"'"''; \
+    echo 'ExecStartPost=/bin/bash -c '"'"'echo "Agent installed successfully!"'"'"''; \
+    echo 'ExecStartPost=/bin/bash -c '"'"'echo "=========================================="'"'"''; \
+    echo 'RemainAfterExit=yes'; \
+    echo ''; \
+    echo '[Install]'; \
+    echo 'WantedBy=multi-user.target'; \
+} > /etc/systemd/system/agent-install.service
 
 # Enable Docker and agent install services
 RUN systemctl enable docker agent-install
 
 # Create entrypoint script that just starts systemd
-RUN printf '#!/bin/bash\n\
-echo "=========================================="\n\
-echo "Starting test container for bjorn2scan-agent"\n\
-echo "=========================================="\n\
-echo "systemd will start Docker and install the agent..."\n\
-echo ""\n\
-exec /lib/systemd/systemd\n' > /entrypoint.sh
+RUN { \
+    echo '#!/bin/bash'; \
+    echo 'echo "=========================================="'; \
+    echo 'echo "Starting test container for bjorn2scan-agent"'; \
+    echo 'echo "=========================================="'; \
+    echo 'echo "systemd will start Docker and install the agent..."'; \
+    echo 'echo ""'; \
+    echo 'exec /lib/systemd/systemd'; \
+} > /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 
