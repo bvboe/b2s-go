@@ -28,13 +28,22 @@ For scanning Linux hosts outside of Kubernetes, install the bjorn2scan-agent:
 
 #### One-Liner Installation
 
+**Latest version (recommended):**
 ```bash
 curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh
 ```
 
-This will:
-- Download the latest release for your platform (amd64 or arm64)
-- Verify checksums
+**Specific version (pinned):**
+```bash
+# Install version 0.1.35 specifically
+curl -sSfL https://github.com/bvboe/b2s-go/releases/download/v0.1.35/install.sh | sudo sh
+```
+
+Each release includes a version-stamped `install.sh` that defaults to installing that specific version. Use this for reproducible installations or to match a specific release.
+
+**What the installer does:**
+- Download the release binary for your platform (amd64 or arm64)
+- Verify SHA256 checksums
 - Install the binary to `/usr/local/bin/bjorn2scan-agent`
 - Create a systemd service
 - Start the agent automatically
@@ -68,9 +77,11 @@ journalctl -u bjorn2scan-agent -f
 # Restart agent
 systemctl restart bjorn2scan-agent
 
-# Uninstall
+# Uninstall (removes all data, logs, and configuration)
 curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
 ```
+
+**Note:** Uninstall completely removes the agent including all data and logs. Back up any data you need first.
 
 See [bjorn2scan-agent/README.md](bjorn2scan-agent/README.md) for detailed documentation.
 

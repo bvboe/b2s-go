@@ -19,16 +19,31 @@ The bjorn2scan-agent runs directly on Linux hosts (not in Kubernetes) and provid
 
 ### One-liner Installation (Linux)
 
+#### Latest Version (Recommended)
+
+Install the latest release by downloading the install script from the main branch:
+
 ```bash
 curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh
 ```
 
-This will:
-- Download the latest release
-- Verify checksums
-- Install the binary to `/usr/local/bin`
+#### Specific Version (Pinned)
+
+For reproducible installations or to match a specific release, download the version-stamped install script from a GitHub release:
+
+```bash
+# Install version 0.1.35 specifically
+curl -sSfL https://github.com/bvboe/b2s-go/releases/download/v0.1.35/install.sh | sudo sh
+```
+
+Replace `v0.1.35` with your desired version. Each release includes a version-stamped `install.sh` that defaults to installing that specific version.
+
+**What the installer does:**
+- Download the release binary for your platform (amd64 or arm64)
+- Verify SHA256 checksums
+- Install the binary to `/usr/local/bin/bjorn2scan-agent`
 - Create systemd service
-- Start the service
+- Start the service automatically
 
 ### Manual Installation
 
@@ -131,6 +146,14 @@ make docker-test
 ```bash
 curl -sSfL https://raw.githubusercontent.com/bvboe/b2s-go/main/bjorn2scan-agent/install.sh | sudo sh -s uninstall
 ```
+
+This will completely remove:
+- The agent binary and service
+- All data, cache, and configuration files
+- All log files
+- The systemd service configuration
+
+**Warning:** Uninstall removes all data and logs. Back up any data you need before uninstalling.
 
 ## Architecture
 

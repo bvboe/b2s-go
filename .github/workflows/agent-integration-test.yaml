@@ -1,24 +1,27 @@
-name: Integration Tests
+name: Agent Integration Test
 
 on:
-  workflow_call:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bjorn2scan-agent/**'
+      - 'scanner-core/**'
+      - 'scripts/agent-integration-test'
+      - 'scripts/test-cases.txt'
+      - '.github/workflows/agent-integration-test.yaml'
+  pull_request:
+    paths:
+      - 'bjorn2scan-agent/**'
+      - 'scanner-core/**'
+      - 'scripts/agent-integration-test'
+      - 'scripts/test-cases.txt'
+      - '.github/workflows/agent-integration-test.yaml'
 
 jobs:
-  test-on-kind:
-    name: kind
-    uses: ./.github/workflows/integration-test-reusable.yaml
-    with:
-      cluster_type: kind
-
-  test-on-minikube:
-    name: minikube
-    uses: ./.github/workflows/integration-test-reusable.yaml
-    with:
-      cluster_type: minikube
-
-  agent-integration-test:
-    name: agent
+  test:
+    name: Agent Integration Test
     runs-on: ubuntu-latest
 
     steps:
@@ -36,21 +39,33 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Cache Docker layers
+      uses: actions/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-agent-${{ hashFiles('bjorn2scan-agent/go.sum', 'scanner-core/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-agent-
+
     - name: Build agent test container
       working-directory: bjorn2scan-agent
-      run: ./test-container.sh build
+      run: |
+        ./test-container.sh build
 
     - name: Install Syft
-      run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
 
     - name: Install Grype
-      run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
 
     - name: Verify tools installation
       run: |
         syft version
         grype version
         jq --version
+        docker version
 
     - name: Run agent integration test
       run: |

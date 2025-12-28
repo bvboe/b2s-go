@@ -520,7 +520,11 @@ uninstall() {
         systemctl daemon-reload
     fi
 
+    # Remove binary and directories
     rm -f "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -rf /var/lib/bjorn2scan
+    rm -rf /var/log/bjorn2scan
+    rm -rf /etc/bjorn2scan
     rm -f /etc/logrotate.d/bjorn2scan-agent
 
     log_success "Uninstall complete"
