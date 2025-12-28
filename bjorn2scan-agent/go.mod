@@ -6,7 +6,6 @@ require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/anchore/syft v1.38.2
 	github.com/bvboe/b2s-go/scanner-core v0.0.0
-	github.com/google/go-github/v57 v57.0.0
 )
 
 require (
@@ -141,7 +140,6 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.20.7 // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/licensecheck v0.3.1 // indirect
 	github.com/google/pprof v0.0.0-20250630185457-6e76a2b096b5 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect

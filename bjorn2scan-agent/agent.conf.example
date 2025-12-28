@@ -112,12 +112,27 @@ jobs_cleanup_interval=24h
 # Maximum execution time for cleanup job (default: 1h)
 jobs_cleanup_timeout=1h
 
+# --- Rescan Database Job ---
+# Monitors Grype vulnerability database for updates and rescans all images
+# This ensures vulnerability data stays current as new CVEs are discovered
+# When the database updates, all images are rescanned using their existing SBOMs
+# (no need to regenerate SBOMs, only vulnerability scanning is repeated)
+
+# Enable rescan database job (default: true)
+jobs_rescan_database_enabled=true
+
+# How often to check for database updates (default: 30m)
+# Format: Go duration string (e.g., "30m", "1h", "2h")
+# Grype's vulnerability database typically updates daily
+jobs_rescan_database_interval=30m
+
+# Maximum execution time for rescan job (default: 30m)
+# Should be long enough to scan all images in your environment
+jobs_rescan_database_timeout=30m
+
 # --- Future Jobs ---
 # Additional scheduled jobs can be configured here as they are implemented
 # Examples:
-# jobs_rescan_database_enabled=false
-# jobs_rescan_database_interval=1h
-# jobs_rescan_database_timeout=30m
 #
 # jobs_telemetry_enabled=false
 # jobs_telemetry_interval=5m

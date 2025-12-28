@@ -22,7 +22,10 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/debug"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
+	"github.com/bvboe/b2s-go/scanner-core/jobs"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
+	"github.com/bvboe/b2s-go/scanner-core/scheduler"
+	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
 
 // version is set at build time via ldflags
@@ -84,11 +87,11 @@ func registerUpdaterHandlers(mux *http.ServeMux, u *updater.Updater) {
 
 		status, errorMsg, lastCheck, lastUpdate, latestVersion := u.GetStatus()
 		response := map[string]interface{}{
-			"status":         status,
-			"error":          errorMsg,
-			"lastCheck":      lastCheck,
-			"lastUpdate":     lastUpdate,
-			"latestVersion":  latestVersion,
+			"status":        status,
+			"error":         errorMsg,
+			"lastCheck":     lastCheck,
+			"lastUpdate":    lastUpdate,
+			"latestVersion": latestVersion,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -290,6 +293,33 @@ func main() {
 			// Start updater in background
 			go agentUpdater.Start()
 			log.Println("Auto-updater started")
+		}
+	}
+
+	// Initialize scheduler for periodic jobs
+	if cfg.JobsEnabled && cfg.JobsRescanDatabaseEnabled {
+		log.Println("Initializing scheduled jobs...")
+		sched := scheduler.New()
+
+		// Add rescan database job
+		feedChecker, err := vulndb.NewFeedChecker(grypeCfg.DBRootDir)
+		if err != nil {
+			log.Printf("Warning: failed to create feed checker: %v", err)
+		} else {
+			rescanJob := jobs.NewRescanDatabaseJob(feedChecker, db, scanQueue)
+			sched.AddJob(
+				rescanJob,
+				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
+				scheduler.JobConfig{
+					Enabled: true,
+					Timeout: cfg.JobsRescanDatabaseTimeout,
+				},
+			)
+			log.Printf("Scheduled rescan database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
+
+			// Start scheduler
+			sched.Start(ctx)
+			log.Println("Scheduler started")
 		}
 	}
 

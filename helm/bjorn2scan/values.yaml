@@ -94,11 +94,15 @@ scanServer:
         interval: "24h"   # How often to cleanup (e.g., 24h, 7d)
         timeout: "1h"     # Maximum execution time
 
+      # Rescan Database Job - Monitors vulnerability database for updates
+      # Automatically rescans all images when Grype's database updates
+      # Uses existing SBOMs, only runs vulnerability scanning
+      rescanDatabase:
+        enabled: true
+        interval: "30m"   # How often to check for database updates
+        timeout: "30m"    # Maximum execution time for rescanning all images
+
       # Future jobs can be added here:
-      # rescanDatabase:
-      #   enabled: false
-      #   interval: "1h"
-      #   timeout: "30m"
       # telemetry:
       #   enabled: false
       #   interval: "5m"

@@ -13,12 +13,16 @@ import (
 	"github.com/bvboe/b2s-go/k8s-scan-server/handlers"
 	"github.com/bvboe/b2s-go/k8s-scan-server/k8s"
 	"github.com/bvboe/b2s-go/k8s-scan-server/podscanner"
+	scannerconfig "github.com/bvboe/b2s-go/scanner-core/config"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/debug"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
+	"github.com/bvboe/b2s-go/scanner-core/jobs"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
+	"github.com/bvboe/b2s-go/scanner-core/scheduler"
+	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 	// SQLite driver is registered by Grype's dependencies
 
 	"k8s.io/client-go/kubernetes"
@@ -124,6 +128,12 @@ func main() {
 	}
 	defer func() { _ = database.Close(db) }()
 
+	// Load configuration with environment variable overrides from Helm values
+	cfg, err := scannerconfig.LoadConfig("")
+	if err != nil {
+		log.Fatalf("Error loading configuration: %v", err)
+	}
+
 	// Connect database to manager
 	manager.SetDatabase(db)
 
@@ -166,6 +176,33 @@ func main() {
 
 	// Connect scan queue to manager
 	manager.SetScanQueue(scanQueue)
+
+	// Initialize scheduler for periodic jobs
+	if cfg.JobsEnabled && cfg.JobsRescanDatabaseEnabled {
+		log.Println("Initializing scheduled jobs...")
+		sched := scheduler.New()
+
+		// Add rescan database job
+		feedChecker, err := vulndb.NewFeedChecker(grypeCfg.DBRootDir)
+		if err != nil {
+			log.Printf("Warning: failed to create feed checker: %v", err)
+		} else {
+			rescanJob := jobs.NewRescanDatabaseJob(feedChecker, db, scanQueue)
+			sched.AddJob(
+				rescanJob,
+				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
+				scheduler.JobConfig{
+					Enabled: true,
+					Timeout: cfg.JobsRescanDatabaseTimeout,
+				},
+			)
+			log.Printf("Scheduled rescan database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
+
+			// Start scheduler
+			sched.Start(ctx)
+			log.Println("Scheduler started")
+		}
+	}
 
 	// Setup HTTP server
 	infoProvider := &K8sScanServerInfo{}

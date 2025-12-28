@@ -42,27 +42,6 @@ func (j *RefreshImagesJob) Run(ctx context.Context) error {
 	return nil
 }
 
-// RescanDatabaseJob triggers a rescan when the vulnerability database is updated
-type RescanDatabaseJob struct {
-	// Add dependencies here
-}
-
-func NewRescanDatabaseJob() *RescanDatabaseJob {
-	return &RescanDatabaseJob{}
-}
-
-func (j *RescanDatabaseJob) Name() string {
-	return "rescan-database"
-}
-
-func (j *RescanDatabaseJob) Run(ctx context.Context) error {
-	// TODO: Implement logic to:
-	// 1. Check if grype database has been updated
-	// 2. If yes, trigger rescan of all container_images
-	log.Printf("[rescan-database] Job execution - implementation pending")
-	return nil
-}
-
 // CleanupOrphanedImagesJob deletes container images that have no associated container instances
 // This also removes related packages and vulnerabilities to keep the database clean
 type CleanupOrphanedImagesJob struct {
