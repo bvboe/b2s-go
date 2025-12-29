@@ -150,7 +150,7 @@ func (c *Client) IsPodScannerScheduledOnNode(ctx context.Context, clientset kube
 			// Pod is scheduled on this node
 			// Check if it's in a transitional state (Pending, ContainerCreating, etc.)
 			if pod.Status.Phase == corev1.PodPending ||
-			   (pod.Status.Phase == corev1.PodRunning && pod.Status.PodIP == "") {
+				(pod.Status.Phase == corev1.PodRunning && pod.Status.PodIP == "") {
 				return true, nil
 			}
 		}

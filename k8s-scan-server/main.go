@@ -122,6 +122,7 @@ func main() {
 		log.Println("Debug mode ENABLED - /debug endpoints available")
 	}
 
+	// Initialize database (will auto-delete and recreate if corrupted)
 	db, err := database.New(dbPath)
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)

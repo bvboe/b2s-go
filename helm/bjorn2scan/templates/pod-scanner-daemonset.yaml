@@ -6,6 +6,10 @@ metadata:
     {{- include "bjorn2scan.labels" . | nindent 4 }}
     app.kubernetes.io/component: pod-scanner
 spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 100%  # Update all nodes simultaneously (Recreate-like behavior)
   selector:
     matchLabels:
       {{- include "bjorn2scan.selectorLabels" . | nindent 6 }}

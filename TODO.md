@@ -50,6 +50,12 @@
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
+- [ ] Implement proper version compatibility checking between scan-server and pod-scanner:
+  - Current implementation just logs warnings and continues (non-blocking)
+  - Should implement semantic version comparison (major.minor.patch)
+  - Should fail/retry if version is incompatible (e.g., major version mismatch)
+  - Should allow newer minor/patch versions (backward compatible)
+  - Should have configurable strictness level
 
 ## Recently Completed
 - [x] [2025-12-27] Removed stale TODO items for non-existent github_client.go

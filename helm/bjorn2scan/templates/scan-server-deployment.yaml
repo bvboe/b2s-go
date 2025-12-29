@@ -55,6 +55,12 @@ spec:
           value: "{{ .Values.scanServer.persistence.mountPath }}/containers.db"
         - name: DEBUG_ENABLED
           value: {{ .Values.scanServer.config.debugEnabled | quote }}
+        - name: JOBS_RESCAN_DATABASE_ENABLED
+          value: {{ .Values.scanServer.config.jobs.rescanDatabase.enabled | quote }}
+        - name: JOBS_RESCAN_DATABASE_INTERVAL
+          value: {{ .Values.scanServer.config.jobs.rescanDatabase.interval | quote }}
+        - name: JOBS_RESCAN_DATABASE_TIMEOUT
+          value: {{ .Values.scanServer.config.jobs.rescanDatabase.timeout | quote }}
         volumeMounts:
         - name: data
           mountPath: {{ .Values.scanServer.persistence.mountPath }}
