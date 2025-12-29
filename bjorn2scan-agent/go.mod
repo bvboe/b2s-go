@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/anchore/syft v1.39.0
-	github.com/bvboe/b2s-go/scanner-core v0.0.0
+	github.com/bvboe/b2s-go/scanner-core v0.0.0-20251229133410-246b755cc828
 )
 
 require (
@@ -50,7 +50,7 @@ require (
 	github.com/anchore/go-struct-converter v0.0.0-20250211213226-cce56d595160 // indirect
 	github.com/anchore/go-sync v0.0.0-20250714163430-add63db73ad1 // indirect
 	github.com/anchore/go-version v1.2.2-0.20210903204242-51efa5b487c4 // indirect
-	github.com/anchore/grype v0.104.2 // indirect
+	github.com/anchore/grype v0.104.3 // indirect
 	github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115 // indirect
 	github.com/anchore/stereoscope v0.1.16 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
@@ -123,7 +123,7 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/fgprof v0.9.5 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.11 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/github/go-spdx/v2 v2.3.5 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
 	github.com/glebarez/sqlite v1.11.0 // indirect

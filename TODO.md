@@ -7,6 +7,7 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Click from index.html namespace to images doesn't work - problem in images(?)
 - [X] Negligible CVES!
 - [X] Proper test container for the agent!
 - [ ] Proper agent update testing
@@ -50,7 +51,7 @@
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
-- [ ] Implement proper version compatibility checking between scan-server and pod-scanner:
+- [X] Implement proper version compatibility checking between scan-server and pod-scanner:
   - Current implementation just logs warnings and continues (non-blocking)
   - Should implement semantic version comparison (major.minor.patch)
   - Should fail/retry if version is incompatible (e.g., major version mismatch)
