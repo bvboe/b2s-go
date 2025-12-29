@@ -149,6 +149,44 @@ curl http://localhost:8080/health
 curl http://localhost:8080/info
 ```
 
+### K3s and MicroK8s Support
+
+bjorn2scan automatically detects and supports K3s, MicroK8s, and other Kubernetes distributions. The pod-scanner component auto-detects the containerd socket location:
+
+- **Standard Kubernetes**: `/run/containerd/containerd.sock`
+- **K3s**: `/run/k3s/containerd/containerd.sock`
+- **MicroK8s**: `/var/snap/microk8s/common/run/containerd.sock`
+
+**No additional configuration required** - the Helm chart automatically mounts all socket locations and the pod-scanner selects the correct one.
+
+#### Verify Socket Detection
+
+Check which socket was detected:
+
+```bash
+# Standard Kubernetes
+kubectl logs -l app.kubernetes.io/component=pod-scanner -n bjorn2scan | grep "Detected containerd socket"
+
+# K3s
+kubectl logs -l app.kubernetes.io/component=pod-scanner -n bjorn2scan | grep "Detected containerd socket"
+
+# MicroK8s
+microk8s kubectl logs -l app.kubernetes.io/component=pod-scanner -n bjorn2scan | grep "Detected containerd socket"
+```
+
+#### Custom Distributions
+
+If your distribution uses a non-standard containerd socket path:
+
+```bash
+helm install bjorn2scan ./helm/bjorn2scan \
+  --set podScanner.config.containerdSocket="/custom/path/containerd.sock" \
+  --namespace bjorn2scan \
+  --create-namespace
+```
+
+See [helm/bjorn2scan/README.md](helm/bjorn2scan/README.md) for detailed pod-scanner configuration.
+
 ## Configuration
 
 Customize your installation by providing your own values:

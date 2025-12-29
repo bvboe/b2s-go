@@ -22,10 +22,18 @@ import (
 )
 
 const (
-	// ContainerD default socket path
-	containerdSocket = "/run/containerd/containerd.sock"
 	// Default namespace for Kubernetes
 	k8sNamespace = "k8s.io"
+)
+
+var (
+	// Known containerd socket locations for different Kubernetes distributions
+	containerdSocketPaths = []string{
+		"/run/containerd/containerd.sock",               // Standard Kubernetes
+		"/run/k3s/containerd/containerd.sock",           // K3s
+		"/var/snap/microk8s/common/run/containerd.sock", // MicroK8s
+		"/run/dockershim.sock",                          // Legacy dockershim
+	}
 )
 
 // computeChainID computes the chain ID from a list of diff IDs
@@ -75,17 +83,49 @@ func containsPlatformSuffix(name string) bool {
 
 // ContainerDClient implements RuntimeClient for ContainerD daemon
 type ContainerDClient struct {
-	client *containerd.Client
+	client     *containerd.Client
+	socketPath string
+}
+
+// detectContainerdSocket finds the first accessible containerd socket
+// Checks CONTAINERD_SOCKET env var first, then probes known locations
+func detectContainerdSocket() string {
+	// Check environment variable override
+	if socketPath := os.Getenv("CONTAINERD_SOCKET"); socketPath != "" {
+		if _, err := os.Stat(socketPath); err == nil {
+			log.Printf("Using containerd socket from CONTAINERD_SOCKET: %s", socketPath)
+			return socketPath
+		} else {
+			log.Printf("Warning: CONTAINERD_SOCKET set to %s but file not accessible: %v", socketPath, err)
+		}
+	}
+
+	// Probe known socket locations
+	for _, path := range containerdSocketPaths {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("Detected containerd socket: %s", path)
+			return path
+		}
+	}
+
+	// Fallback to standard location (will likely fail, but provides clear error)
+	log.Printf("Warning: No containerd socket found in known locations, using default")
+	return "/run/containerd/containerd.sock"
 }
 
 // NewContainerDClient creates a new ContainerD runtime client
+// Auto-detects socket location for K3s, MicroK8s, and standard Kubernetes
 func NewContainerDClient() *ContainerDClient {
-	client, err := containerd.New(containerdSocket)
+	socketPath := detectContainerdSocket()
+
+	client, err := containerd.New(socketPath)
 	if err != nil {
-		log.Printf("Failed to create ContainerD client: %v", err)
-		return &ContainerDClient{client: nil}
+		log.Printf("Failed to create ContainerD client with socket %s: %v", socketPath, err)
+		return &ContainerDClient{client: nil, socketPath: socketPath}
 	}
-	return &ContainerDClient{client: client}
+
+	log.Printf("Successfully created ContainerD client using socket: %s", socketPath)
+	return &ContainerDClient{client: client, socketPath: socketPath}
 }
 
 // IsAvailable checks if ContainerD daemon is accessible
@@ -171,8 +211,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 					fallbackRef = img.Name // Use as fallback
 				}
 				// Check if this is a platform-specific image name
-				if len(img.Name) > 6 && (
-					(len(img.Name) >= 10 && img.Name[len(img.Name)-10:] == "-arm64:") ||
+				if len(img.Name) > 6 && ((len(img.Name) >= 10 && img.Name[len(img.Name)-10:] == "-arm64:") ||
 					(len(img.Name) >= 10 && img.Name[len(img.Name)-10:] == "-amd64:") ||
 					containsPlatformSuffix(img.Name)) {
 					log.Printf("Found platform-specific named reference: %s", img.Name)

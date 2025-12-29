@@ -119,7 +119,8 @@ scanServer:
     mountPath: /var/lib/bjorn2scan
 
 # Pod Scanner (DaemonSet)
-# Runs on every node to scan local pods
+# Runs on every node to scan local pods using the container runtime API
+# Supports standard Kubernetes, K3s, MicroK8s, and custom distributions
 podScanner:
   enabled: true
 
@@ -137,6 +138,10 @@ podScanner:
     # fsGroup: 2000
 
   # Privileged security context required for container runtime socket access
+  # The pod-scanner needs access to the containerd/Docker socket to:
+  # - List container images on the node
+  # - Extract layer information (DiffIDs, ChainID)
+  # - Mount containerd snapshots for SBOM generation
   securityContext:
     privileged: true
     runAsUser: 0  # Run as root to access container runtime sockets
@@ -175,6 +180,26 @@ podScanner:
 
   config:
     port: "8080"
+
+    # Container Runtime Configuration
+    # ==============================
+    # The pod-scanner auto-detects the containerd socket location by probing:
+    #   1. /run/containerd/containerd.sock          (Standard Kubernetes)
+    #   2. /run/k3s/containerd/containerd.sock      (K3s)
+    #   3. /var/snap/microk8s/common/run/containerd.sock (MicroK8s)
+    #   4. /run/dockershim.sock                     (Legacy)
+    #
+    # Override only if your distribution uses a non-standard path.
+    #
+    # Examples:
+    #   containerdSocket: ""                                    # Auto-detect (recommended)
+    #   containerdSocket: "/run/containerd/containerd.sock"     # Force standard path
+    #   containerdSocket: "/run/k3s/containerd/containerd.sock" # Force K3s path
+    #   containerdSocket: "/custom/path/containerd.sock"        # Custom distribution
+    #
+    # If set to a path that doesn't exist, pod-scanner will fail to start.
+    # Check pod-scanner logs for: "Detected containerd socket: <path>"
+    containerdSocket: ""
 
 # Update Controller (CronJob)
 # Automatically checks for and applies Helm chart updates

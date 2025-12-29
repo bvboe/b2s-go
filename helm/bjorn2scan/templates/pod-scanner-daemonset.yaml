@@ -48,6 +48,10 @@ spec:
               fieldPath: metadata.namespace
         - name: PORT
           value: {{ .Values.podScanner.config.port | quote }}
+        {{- if .Values.podScanner.config.containerdSocket }}
+        - name: CONTAINERD_SOCKET
+          value: {{ .Values.podScanner.config.containerdSocket | quote }}
+        {{- end }}
         livenessProbe:
           {{- toYaml .Values.podScanner.livenessProbe | nindent 10 }}
         readinessProbe:
@@ -59,8 +63,18 @@ spec:
           mountPath: /var/run/docker.sock
         - name: containerd-sock
           mountPath: /run/containerd/containerd.sock
+        - name: k3s-containerd-sock
+          mountPath: /run/k3s/containerd/containerd.sock
+        - name: microk8s-containerd-sock
+          mountPath: /var/snap/microk8s/common/run/containerd.sock
         - name: containerd-data
           mountPath: /var/lib/containerd
+          readOnly: true
+        - name: k3s-containerd-data
+          mountPath: /var/lib/rancher/k3s
+          readOnly: true
+        - name: microk8s-containerd-data
+          mountPath: /var/snap/microk8s/common/var/lib/containerd
           readOnly: true
         - name: tmp
           mountPath: /tmp
@@ -71,9 +85,21 @@ spec:
       - name: containerd-sock
         hostPath:
           path: /run/containerd/containerd.sock
+      - name: k3s-containerd-sock
+        hostPath:
+          path: /run/k3s/containerd/containerd.sock
+      - name: microk8s-containerd-sock
+        hostPath:
+          path: /var/snap/microk8s/common/run/containerd.sock
       - name: containerd-data
         hostPath:
           path: /var/lib/containerd
+      - name: k3s-containerd-data
+        hostPath:
+          path: /var/lib/rancher/k3s
+      - name: microk8s-containerd-data
+        hostPath:
+          path: /var/snap/microk8s/common/var/lib/containerd
       - name: tmp
         emptyDir: {}
       {{- with .Values.podScanner.nodeSelector }}
