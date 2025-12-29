@@ -46,12 +46,16 @@ helm install bjorn2scan ./helm/bjorn2scan \
 
 ### Container Runtime Socket
 
-The pod-scanner component automatically detects the containerd socket location by probing:
+The pod-scanner component automatically detects the containerd socket location by:
 
-1. `/run/containerd/containerd.sock` (Standard Kubernetes)
-2. `/run/k3s/containerd/containerd.sock` (K3s)
-3. `/var/snap/microk8s/common/run/containerd.sock` (MicroK8s)
-4. `/run/dockershim.sock` (Legacy)
+1. Checking the `CONTAINERD_SOCKET` environment variable (if set)
+2. Testing each known socket location in order:
+   - `/run/containerd/containerd.sock` (Standard Kubernetes)
+   - `/run/k3s/containerd/containerd.sock` (K3s)
+   - `/var/snap/microk8s/common/run/containerd.sock` (MicroK8s)
+   - `/run/dockershim.sock` (Legacy)
+3. **Verifying the connection works** by calling the containerd API
+4. Using the first socket that responds successfully
 
 You can override the auto-detection in `values.yaml`:
 

@@ -87,45 +87,64 @@ type ContainerDClient struct {
 	socketPath string
 }
 
-// detectContainerdSocket finds the first accessible containerd socket
-// Checks CONTAINERD_SOCKET env var first, then probes known locations
-func detectContainerdSocket() string {
-	// Check environment variable override
-	if socketPath := os.Getenv("CONTAINERD_SOCKET"); socketPath != "" {
-		if _, err := os.Stat(socketPath); err == nil {
-			log.Printf("Using containerd socket from CONTAINERD_SOCKET: %s", socketPath)
-			return socketPath
-		} else {
-			log.Printf("Warning: CONTAINERD_SOCKET set to %s but file not accessible: %v", socketPath, err)
-		}
+// tryContainerdSocket attempts to create a working containerd client for the given socket
+// Returns the client if successful, nil if the socket doesn't work
+func tryContainerdSocket(socketPath string) (*containerd.Client, error) {
+	// Check if socket file exists first
+	if _, err := os.Stat(socketPath); err != nil {
+		return nil, fmt.Errorf("socket file not found: %w", err)
 	}
 
-	// Probe known socket locations
-	for _, path := range containerdSocketPaths {
-		if _, err := os.Stat(path); err == nil {
-			log.Printf("Detected containerd socket: %s", path)
-			return path
-		}
+	// Try to create containerd client
+	client, err := containerd.New(socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Fallback to standard location (will likely fail, but provides clear error)
-	log.Printf("Warning: No containerd socket found in known locations, using default")
-	return "/run/containerd/containerd.sock"
+	// Verify the connection actually works by calling Version()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err = client.Version(ctx)
+	if err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("connection test failed: %w", err)
+	}
+
+	return client, nil
 }
 
 // NewContainerDClient creates a new ContainerD runtime client
 // Auto-detects socket location for K3s, MicroK8s, and standard Kubernetes
+// Tries each socket and verifies the connection works
 func NewContainerDClient() *ContainerDClient {
-	socketPath := detectContainerdSocket()
+	var socketPaths []string
 
-	client, err := containerd.New(socketPath)
-	if err != nil {
-		log.Printf("Failed to create ContainerD client with socket %s: %v", socketPath, err)
-		return &ContainerDClient{client: nil, socketPath: socketPath}
+	// Check environment variable override first
+	if envSocket := os.Getenv("CONTAINERD_SOCKET"); envSocket != "" {
+		log.Printf("CONTAINERD_SOCKET set to: %s", envSocket)
+		socketPaths = append(socketPaths, envSocket)
 	}
 
-	log.Printf("Successfully created ContainerD client using socket: %s", socketPath)
-	return &ContainerDClient{client: client, socketPath: socketPath}
+	// Add known socket locations
+	socketPaths = append(socketPaths, containerdSocketPaths...)
+
+	// Try each socket until we find one that works
+	for _, socketPath := range socketPaths {
+		log.Printf("Trying containerd socket: %s", socketPath)
+		client, err := tryContainerdSocket(socketPath)
+		if err != nil {
+			log.Printf("  Socket %s not usable: %v", socketPath, err)
+			continue
+		}
+
+		log.Printf("Successfully connected to containerd via: %s", socketPath)
+		return &ContainerDClient{client: client, socketPath: socketPath}
+	}
+
+	// No working socket found
+	log.Printf("Failed to find any working containerd socket (tried: %v)", socketPaths)
+	return &ContainerDClient{client: nil, socketPath: ""}
 }
 
 // IsAvailable checks if ContainerD daemon is accessible
