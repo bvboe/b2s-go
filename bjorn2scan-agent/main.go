@@ -250,16 +250,18 @@ func main() {
 	if cfg.AutoUpdateEnabled {
 		log.Println("Initializing auto-updater...")
 		updaterConfig := &updater.Config{
-			Enabled:              cfg.AutoUpdateEnabled,
-			CheckInterval:        cfg.AutoUpdateCheckInterval,
-			FeedURL:              cfg.UpdateFeedURL,
-			AssetBaseURL:         cfg.UpdateAssetBaseURL,
-			CurrentVersion:       version,
-			VerifySignatures:     cfg.UpdateVerifySignatures,
-			RollbackEnabled:      cfg.UpdateRollbackEnabled,
-			HealthCheckTimeout:   cfg.UpdateHealthCheckTimeout,
-			CosignIdentityRegexp: cfg.UpdateCosignIdentityRegexp,
-			CosignOIDCIssuer:     cfg.UpdateCosignOIDCIssuer,
+			Enabled:                cfg.AutoUpdateEnabled,
+			CheckInterval:          cfg.AutoUpdateCheckInterval,
+			FeedURL:                cfg.UpdateFeedURL,
+			AssetBaseURL:           cfg.UpdateAssetBaseURL,
+			CurrentVersion:         version,
+			VerifySignatures:       cfg.UpdateVerifySignatures,
+			RollbackEnabled:        cfg.UpdateRollbackEnabled,
+			HealthCheckTimeout:     cfg.UpdateHealthCheckTimeout,
+			CosignIdentityRegexp:   cfg.UpdateCosignIdentityRegexp,
+			CosignOIDCIssuer:       cfg.UpdateCosignOIDCIssuer,
+			DownloadMaxRetries:     cfg.UpdateDownloadMaxRetries,
+			DownloadValidateAssets: cfg.UpdateDownloadValidateAssets,
 			VersionConstraints: &updater.VersionConstraints{
 				AutoUpdateMinor: cfg.AutoUpdateMinorVersions,
 				AutoUpdateMajor: cfg.AutoUpdateMajorVersions,

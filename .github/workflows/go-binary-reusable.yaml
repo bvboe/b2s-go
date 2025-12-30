@@ -26,11 +26,6 @@ on:
         required: false
         type: string
         default: 'linux/amd64,linux/arm64'
-      attach-to-release:
-        description: 'Whether to attach binaries to GitHub release'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   test:
@@ -208,11 +203,7 @@ jobs:
       with:
         name: ${{ inputs.component-name }}-binaries
         path: ${{ inputs.component-path }}/dist/*
+        retention-days: 7
 
-    - name: Attach to release
-      if: inputs.attach-to-release && github.ref_type == 'tag'
-      uses: softprops/action-gh-release@v2
-      with:
-        files: ${{ inputs.component-path }}/dist/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Note: Assets are now attached to release in the helm-release job
+    # This ensures atomic release creation with all assets available simultaneously

@@ -22,17 +22,19 @@ const (
 
 // Config contains updater configuration
 type Config struct {
-	Enabled              bool
-	CheckInterval        time.Duration
-	FeedURL              string
-	AssetBaseURL         string
-	CurrentVersion       string
-	VerifySignatures     bool
-	RollbackEnabled      bool
-	HealthCheckTimeout   time.Duration
-	VersionConstraints   *VersionConstraints
-	CosignIdentityRegexp string
-	CosignOIDCIssuer     string
+	Enabled                bool
+	CheckInterval          time.Duration
+	FeedURL                string
+	AssetBaseURL           string
+	CurrentVersion         string
+	VerifySignatures       bool
+	RollbackEnabled        bool
+	HealthCheckTimeout     time.Duration
+	VersionConstraints     *VersionConstraints
+	CosignIdentityRegexp   string
+	CosignOIDCIssuer       string
+	DownloadMaxRetries     int
+	DownloadValidateAssets bool
 }
 
 // Updater manages the auto-update process
@@ -168,7 +170,14 @@ func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 	u.setStatus(StatusDownloading, "")
 	fmt.Println("Downloading update...")
 
-	downloader, err := NewDownloader(u.config.AssetBaseURL)
+	// Configure downloader with retry and validation settings
+	downloaderConfig := &DownloaderConfig{
+		AssetBaseURL:     u.config.AssetBaseURL,
+		MaxRetries:       u.config.DownloadMaxRetries,
+		EnableValidation: u.config.DownloadValidateAssets,
+	}
+
+	downloader, err := NewDownloaderWithConfig(downloaderConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create downloader: %w", err)
 	}

@@ -76,6 +76,17 @@ update_cosign_identity_regexp=https://github.com/bvboe/b2s-go/*
 # Cosign OIDC issuer for signature verification
 update_cosign_oidc_issuer=https://token.actions.githubusercontent.com
 
+# Maximum download retry attempts (default: 3)
+# Number of times to retry downloading release assets on failure
+# Uses exponential backoff: 2s, 4s, 8s, up to 30s max
+update_download_max_retries=3
+
+# Validate asset availability before download (default: true)
+# When enabled, performs HEAD request to check assets exist before downloading
+# Provides faster failure detection and clearer error messages
+# Helps avoid partial downloads during incomplete releases
+update_download_validate_assets=true
+
 # ============================================================================
 # SCHEDULED JOBS CONFIGURATION
 # ============================================================================

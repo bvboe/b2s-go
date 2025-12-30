@@ -82,7 +82,7 @@ jobs:
       run-tests: true
       run-lint: false
       platforms: linux/amd64,linux/arm64
-      attach-to-release: true
+      # Note: Binaries are attached to release in helm-release job for atomic release creation
 
   helm-release:
     needs: [release-k8s-scan-server, release-pod-scanner, release-k8s-update-controller, release-bjorn2scan-agent]
@@ -177,6 +177,12 @@ jobs:
         pattern: sbom-*
         path: sboms
 
+    - name: Download agent binaries
+      uses: actions/download-artifact@v7
+      with:
+        name: bjorn2scan-agent-binaries
+        path: agent-binaries
+
     - name: Extract tag message
       id: tag-message
       run: |
@@ -211,6 +217,7 @@ jobs:
       with:
         files: |
           bjorn2scan-*.tgz
+          agent-binaries/*
           sboms/**/*.spdx.json
         body: |
           ${{ steps.tag-message.outputs.message }}

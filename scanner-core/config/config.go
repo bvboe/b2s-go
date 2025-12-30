@@ -19,20 +19,22 @@ type Config struct {
 	DebugEnabled bool
 
 	// Auto-update configuration
-	AutoUpdateEnabled          bool
-	AutoUpdateCheckInterval    time.Duration
-	AutoUpdateMinorVersions    bool
-	AutoUpdateMajorVersions    bool
-	AutoUpdatePinnedVersion    string
-	AutoUpdateMinVersion       string
-	AutoUpdateMaxVersion       string
-	UpdateFeedURL              string
-	UpdateAssetBaseURL         string
-	UpdateVerifySignatures     bool
-	UpdateRollbackEnabled      bool
-	UpdateHealthCheckTimeout   time.Duration
-	UpdateCosignIdentityRegexp string
-	UpdateCosignOIDCIssuer     string
+	AutoUpdateEnabled            bool
+	AutoUpdateCheckInterval      time.Duration
+	AutoUpdateMinorVersions      bool
+	AutoUpdateMajorVersions      bool
+	AutoUpdatePinnedVersion      string
+	AutoUpdateMinVersion         string
+	AutoUpdateMaxVersion         string
+	UpdateFeedURL                string
+	UpdateAssetBaseURL           string
+	UpdateVerifySignatures       bool
+	UpdateRollbackEnabled        bool
+	UpdateHealthCheckTimeout     time.Duration
+	UpdateCosignIdentityRegexp   string
+	UpdateCosignOIDCIssuer       string
+	UpdateDownloadMaxRetries     int
+	UpdateDownloadValidateAssets bool
 
 	// Scheduled jobs configuration
 	JobsEnabled bool
@@ -63,19 +65,21 @@ func defaultConfig() *Config {
 		// Auto-update defaults
 		AutoUpdateEnabled: true,
 		//Todo - revert back to something more reasonable
-		AutoUpdateCheckInterval:    1 * time.Hour,
-		AutoUpdateMinorVersions:    true,
-		AutoUpdateMajorVersions:    false,
-		AutoUpdatePinnedVersion:    "",
-		AutoUpdateMinVersion:       "",
-		AutoUpdateMaxVersion:       "",
-		UpdateFeedURL:              "https://github.com/bvboe/b2s-go/releases.atom",
-		UpdateAssetBaseURL:         "https://github.com/bvboe/b2s-go/releases/download",
-		UpdateVerifySignatures:     false, // TODO: Enable when cosign is implemented
-		UpdateRollbackEnabled:      true,
-		UpdateHealthCheckTimeout:   60 * time.Second,
-		UpdateCosignIdentityRegexp: "https://github.com/bvboe/b2s-go/*",
-		UpdateCosignOIDCIssuer:     "https://token.actions.githubusercontent.com",
+		AutoUpdateCheckInterval:      1 * time.Hour,
+		AutoUpdateMinorVersions:      true,
+		AutoUpdateMajorVersions:      false,
+		AutoUpdatePinnedVersion:      "",
+		AutoUpdateMinVersion:         "",
+		AutoUpdateMaxVersion:         "",
+		UpdateFeedURL:                "https://github.com/bvboe/b2s-go/releases.atom",
+		UpdateAssetBaseURL:           "https://github.com/bvboe/b2s-go/releases/download",
+		UpdateVerifySignatures:       false, // TODO: Enable when cosign is implemented
+		UpdateRollbackEnabled:        true,
+		UpdateHealthCheckTimeout:     60 * time.Second,
+		UpdateCosignIdentityRegexp:   "https://github.com/bvboe/b2s-go/*",
+		UpdateCosignOIDCIssuer:       "https://token.actions.githubusercontent.com",
+		UpdateDownloadMaxRetries:     3,
+		UpdateDownloadValidateAssets: true,
 
 		// Jobs enabled by default
 		JobsEnabled: true,
@@ -182,6 +186,15 @@ func LoadConfig(path string) (*Config, error) {
 			}
 			if section.HasKey("update_cosign_oidc_issuer") {
 				cfg.UpdateCosignOIDCIssuer = section.Key("update_cosign_oidc_issuer").String()
+			}
+			if section.HasKey("update_download_max_retries") {
+				if retries, err := strconv.Atoi(section.Key("update_download_max_retries").String()); err == nil && retries >= 0 {
+					cfg.UpdateDownloadMaxRetries = retries
+				}
+			}
+			if section.HasKey("update_download_validate_assets") {
+				val := strings.ToLower(section.Key("update_download_validate_assets").String())
+				cfg.UpdateDownloadValidateAssets = val == "true" || val == "1" || val == "yes"
 			}
 
 			// Load jobs configuration

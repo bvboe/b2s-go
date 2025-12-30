@@ -7,18 +7,14 @@
 - [ ] None currently
 
 ## Backlog
-- [ ] Click from index.html namespace to images doesn't work - problem in images(?)
-- [X] Negligible CVES!
-- [X] Proper test container for the agent!
 - [ ] Proper agent update testing
+- [ ] Pick up node tags!
 - [ ] Clean up agent configuration management:
   - [ ] Make defaults.conf the single source of truth (embed in binary at compile time)
   - [ ] Move defaults from scanner-core to component-specific (agent, k8s-scan-server)
   - [ ] Ensure agent.conf.example matches actual code defaults
   - [ ] Add --show-config flag to display current configuration
-- [X] Test sorting on all tables
 - [ ] Node scanning
-- [x] Agent autoupdate (API already implemented: POST /api/update/trigger)
 - [ ] Auto-update improvements:
   - [ ] Fix release workflow to prevent incomplete releases
     - Issue: Component jobs attach assets as they complete, creating release before all assets ready
@@ -37,28 +33,23 @@
   - [ ] Raspberry Pi OS (ARM64)
 - [ ] OpenTelemetry integration
 - [ ] Database optimization
-- [ ] github.com/bvboe/b2s-go/scanner-core shows with version unknown in sbom
 - [ ] Other K8s distributions
-  - [X] K3s testing
-  - [X] Microk8s testing
   - [ ] GKE
   - [ ] EKS
   - [ ] AKS
-- [X] Scheduled tasks (rescan, clean up data, delete old data)
-- [X] Delete all data in container_instances and related tables, if there are no container_instances depending on that information. (done - I think)
-- [X] Trigger rescan of all container_images whenever the database for grype is updated
 - [ ] Sending data using opentelemetry to a remote opentelemetry server
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
-- [X] Implement proper version compatibility checking between scan-server and pod-scanner:
-  - Current implementation just logs warnings and continues (non-blocking)
-  - Should implement semantic version comparison (major.minor.patch)
-  - Should fail/retry if version is incompatible (e.g., major version mismatch)
-  - Should allow newer minor/patch versions (backward compatible)
-  - Should have configurable strictness level
 
 ## Recently Completed
+- [x] [2025-12-29] Fixed URL filter parameter application in shared.js (namespaces, vulnStatuses, packageTypes, osNames)
+- [x] [2025-12-29] Added click functionality to Container Distribution Summary table (navigates to pods.html)
+- [x] [2025-12-29] Updated Namespace Summary table to navigate to pods.html
+- [x] [2025-12-29] Implemented filter preservation in sidebar navigation (Images/Pods links carry current filters)
+- [x] [2025-12-29] Fixed agent systemd service to work without Docker installed (removed SupplementaryGroups=docker)
+- [x] [2025-12-29] Made Docker socket binding optional in agent service file (BindReadOnlyPaths=-/var/run/docker.sock)
+- [x] [2025-12-29] Removed CVEs and SBOM links from sidebar navigation
 - [x] [2025-12-27] Removed stale TODO items for non-existent github_client.go
 - [x] [2025-12-27] Confirmed agent updater uses Atom feed (no GitHub API)
 - [x] [2025-12-27] Confirmed k8s updater uses OCI registry (no GitHub API)

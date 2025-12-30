@@ -20,16 +20,36 @@ type Downloader struct {
 	workDir        string
 }
 
+// DownloaderConfig contains configuration for the downloader
+type DownloaderConfig struct {
+	AssetBaseURL     string
+	MaxRetries       int
+	EnableValidation bool
+}
+
 // NewDownloader creates a new downloader
 func NewDownloader(assetBaseURL string) (*Downloader, error) {
+	return NewDownloaderWithConfig(&DownloaderConfig{
+		AssetBaseURL:     assetBaseURL,
+		MaxRetries:       3,
+		EnableValidation: true,
+	})
+}
+
+// NewDownloaderWithConfig creates a new downloader with custom configuration
+func NewDownloaderWithConfig(config *DownloaderConfig) (*Downloader, error) {
 	// Create temporary work directory
 	workDir, err := os.MkdirTemp("", "bjorn2scan-update-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create work directory: %w", err)
 	}
 
+	httpDownloader := NewHTTPDownloader(config.AssetBaseURL)
+	httpDownloader.SetMaxRetries(config.MaxRetries)
+	httpDownloader.SetValidation(config.EnableValidation)
+
 	return &Downloader{
-		httpDownloader: NewHTTPDownloader(assetBaseURL),
+		httpDownloader: httpDownloader,
 		workDir:        workDir,
 	}, nil
 }
