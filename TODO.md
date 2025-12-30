@@ -39,8 +39,8 @@
 - [ ] Database optimization
 - [ ] github.com/bvboe/b2s-go/scanner-core shows with version unknown in sbom
 - [ ] Other K8s distributions
-  - [ ] K3s testing
-  - [ ] Microk8s testing
+  - [X] K3s testing
+  - [X] Microk8s testing
   - [ ] GKE
   - [ ] EKS
   - [ ] AKS

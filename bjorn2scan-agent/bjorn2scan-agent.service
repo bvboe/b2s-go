@@ -17,8 +17,10 @@ ProtectSystem=strict
 ReadWritePaths=/var/lib/bjorn2scan
 ReadWritePaths=/var/log/bjorn2scan
 ReadWritePaths=/tmp
-# Docker socket needs to be accessible
-BindReadOnlyPaths=/var/run/docker.sock
+# Docker socket access (optional - agent detects availability at runtime)
+# Running as root provides access to /var/run/docker.sock when present
+# The '-' prefix makes this non-fatal if the socket doesn't exist
+BindReadOnlyPaths=-/var/run/docker.sock
 
 # Security hardening - read-only access to most of the system
 NoNewPrivileges=true
@@ -32,9 +34,6 @@ LockPersonality=true
 MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ProtectHostname=true
-
-# Allow Docker socket access
-SupplementaryGroups=docker
 
 # Logging
 StandardOutput=journal
