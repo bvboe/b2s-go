@@ -401,6 +401,10 @@
 
             distributions.forEach(dist => {
                 const row = document.createElement('tr');
+                row.classList.add('clickable-row');
+                row.onclick = function() {
+                    window.location.href = 'pods.html?osNames=' + encodeURIComponent(dist.os_name);
+                };
 
                 addCellToRow(row, 'left', dist.os_name || '');
                 addCellToRow(row, 'right', formatNumber(dist.instance_count));

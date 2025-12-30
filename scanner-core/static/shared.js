@@ -284,6 +284,55 @@ function initializeMultiselects() {
     });
 }
 
+// Parse URL parameters and apply them to filters
+function applyUrlFilters() {
+    const urlParams = new URLSearchParams(window.location.search);
+
+    // Map of URL parameter names (both singular and plural) to filter IDs
+    const filterMappings = [
+        { params: ['namespace', 'namespaces'], filterId: 'namespaceFilter' },
+        { params: ['vulnStatus', 'vulnStatuses'], filterId: 'vulnerabilityStatusFilter' },
+        { params: ['packageType', 'packageTypes'], filterId: 'packageTypeFilter' },
+        { params: ['osName', 'osNames'], filterId: 'osNameFilter' }
+    ];
+
+    filterMappings.forEach(mapping => {
+        // Try both singular and plural parameter names
+        let values = null;
+        for (const paramName of mapping.params) {
+            const paramValue = urlParams.get(paramName);
+            if (paramValue) {
+                values = paramValue;
+                break;
+            }
+        }
+
+        if (values) {
+            // Split comma-separated values
+            const valueArray = values.split(',').map(v => v.trim()).filter(v => v);
+
+            // Get the multiselect instance
+            const instance = multiselectInstances[mapping.filterId];
+            if (instance) {
+                // Check each checkbox that matches a value
+                valueArray.forEach(value => {
+                    const checkbox = instance.dropdown.querySelector(`input[value="${value}"]`);
+                    if (checkbox && !checkbox.checked) {
+                        checkbox.checked = true;
+                        const text = checkbox.dataset.text;
+                        if (!instance.selected.find(s => s.value === value)) {
+                            instance.selected.push({ value, text });
+                        }
+                    }
+                });
+
+                // Update the header to show selected items
+                instance.updateHeader();
+            }
+        }
+    });
+}
+
 // Add cell to row
 function addCellToRow(row, align, text) {
     const cell = document.createElement('td');
@@ -370,6 +419,7 @@ function onFilterChange() {
     currentPage = 1;
     loadDataTable();
     updateCSVLink();
+    renderSidebarNav(); // Update navigation links with current filters
 }
 
 // Pagination functions
@@ -503,6 +553,26 @@ async function loadConfig() {
     }
 }
 
+// Get current filter query string for navigation links
+function getCurrentFilterQueryString() {
+    const params = new URLSearchParams();
+
+    const namespaces = getSelectedValues('namespaceFilter');
+    if (namespaces.length) params.append('namespaces', namespaces.join(','));
+
+    const vulnStatuses = getSelectedValues('vulnerabilityStatusFilter');
+    if (vulnStatuses.length) params.append('vulnStatuses', vulnStatuses.join(','));
+
+    const packageTypes = getSelectedValues('packageTypeFilter');
+    if (packageTypes.length) params.append('packageTypes', packageTypes.join(','));
+
+    const osNames = getSelectedValues('osNameFilter');
+    if (osNames.length) params.append('osNames', osNames.join(','));
+
+    const queryString = params.toString();
+    return queryString ? '?' + queryString : '';
+}
+
 // Render sidebar navigation
 function renderSidebarNav() {
     const tableBody = document.getElementById('sidebarNav');
@@ -513,30 +583,34 @@ function renderSidebarNav() {
     const showContainerScans = appConfig.scanContainers;
     const showNodeScans = appConfig.scanNodes;
 
-    function addNavItem(title, url) {
+    function addNavItem(title, url, includeFilters = false) {
         const row = document.createElement('tr');
         const cell = document.createElement('td');
 
-        const isCurrentPage = url === pageConfig.currentPageUrl;
+        // Extract base page name from URL (e.g., 'images.html' from 'images.html')
+        const basePage = url.split('?')[0];
+        const isCurrentPage = basePage === pageConfig.currentPageUrl;
         const decoration = isCurrentPage ? '<u>' : '';
         const decorationEnd = isCurrentPage ? '</u>' : '';
 
-        cell.innerHTML = `<h2><a href="${url}">${decoration}${title}${decorationEnd}</a></h2>`;
+        // Add filters to Images and Pods links
+        let fullUrl = url;
+        if (includeFilters) {
+            fullUrl = basePage + getCurrentFilterQueryString();
+        }
+
+        cell.innerHTML = `<h2><a href="${fullUrl}">${decoration}${title}${decorationEnd}</a></h2>`;
         row.appendChild(cell);
         tableBody.appendChild(row);
     }
 
     addNavItem('Summary', 'index.html');
     if (showContainerScans) {
-        addNavItem('Images', 'images.html');
-        addNavItem('Pods', 'pods.html');
+        addNavItem('Images', 'images.html', true);
+        addNavItem('Pods', 'pods.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');
-    }
-    if (showContainerScans) {
-        addNavItem('CVEs', 'cves.html');
-        addNavItem('SBOM', 'sbom.html');
     }
 }
 
@@ -581,6 +655,13 @@ async function initPage() {
     renderSidebarNav();
     renderVersionFooter();
     await loadFilterOptions();
+
+    // Apply URL parameters to filters after multiselects are initialized
+    applyUrlFilters();
+
+    // Update sidebar navigation with URL filters
+    renderSidebarNav();
+
     loadDataTable();
     updateCSVLink();
     updateSortIndicators();
