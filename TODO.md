@@ -36,6 +36,19 @@
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
 
 ## Recently Completed
+- [x] [2025-12-30] Fixed release workflow race condition - implemented atomic release creation
+  - Removed attach-to-release from go-binary-reusable.yaml
+  - Centralized asset attachment in helm-release job
+  - All assets (binaries, helm chart, SBOMs) now attached atomically
+  - Fixed ci.yaml workflow to remove invalid attach-to-release parameter
+- [x] [2025-12-30] Implemented updater asset availability validation with retry logic
+  - Added HEAD request pre-flight validation before downloads
+  - Implemented exponential backoff retry (3 attempts: 2s, 4s, 8s, max 30s)
+  - Smart retry logic (only retries transient errors: 503, 504, 429, network issues)
+  - Added configuration: update_download_max_retries and update_download_validate_assets
+  - Updated http_downloader.go, downloader.go, updater.go, main.go, config.go
+  - Documented in agent.conf.example
+- [x] [2025-12-30] Linted and formatted all code changes (golangci-lint, go vet, gofmt)
 - [x] [2025-12-29] Fixed URL filter parameter application in shared.js (namespaces, vulnStatuses, packageTypes, osNames)
 - [x] [2025-12-29] Added click functionality to Container Distribution Summary table (navigates to pods.html)
 - [x] [2025-12-29] Updated Namespace Summary table to navigate to pods.html
