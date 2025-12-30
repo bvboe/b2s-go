@@ -23,6 +23,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
+	"github.com/bvboe/b2s-go/scanner-core/metrics"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 	"github.com/bvboe/b2s-go/scanner-core/scheduler"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
@@ -343,6 +344,9 @@ func main() {
 
 	// Register debug handlers if debug mode is enabled
 	handlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
+
+	// Register Prometheus metrics endpoint
+	metrics.RegisterMetricsHandler(mux, db, infoProvider)
 
 	// Wrap with logging middleware if debug enabled
 	var handler http.Handler = mux

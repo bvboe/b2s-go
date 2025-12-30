@@ -13,6 +13,11 @@ type DB struct {
 	conn *sql.DB
 }
 
+// GetConnection returns the underlying database connection (for testing)
+func (db *DB) GetConnection() *sql.DB {
+	return db.conn
+}
+
 // isCorruptionError checks if an error indicates database corruption
 func isCorruptionError(err error) bool {
 	if err == nil {

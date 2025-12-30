@@ -36,6 +36,14 @@
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
 
 ## Recently Completed
+- [ ] [2025-12-30] Implemented Prometheus metrics endpoint at /metrics
+  - Created scanner-core/metrics package with lightweight Prometheus text format generator
+  - Exposed metrics: scanned_instances, vulnerabilities_total, packages_total, scan_status, images_total, instances_total
+  - Metrics include rich labels: cluster_name, namespace, pod_name, container_name, image, image_id, distro_name, severity, etc.
+  - Registered /metrics endpoint in both bjorn2scan-agent and k8s-scan-server
+  - Added database query helpers for efficient metrics collection
+  - Comprehensive unit tests with 100% pass rate
+  - Documented in docs/PROMETHEUS_METRICS.md with examples and Prometheus query patterns
 - [x] [2025-12-30] Fixed release workflow race condition - implemented atomic release creation
   - Removed attach-to-release from go-binary-reusable.yaml
   - Centralized asset attachment in helm-release job
