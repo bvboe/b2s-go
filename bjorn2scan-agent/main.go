@@ -20,6 +20,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/debug"
+	"github.com/bvboe/b2s-go/scanner-core/deployment"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
@@ -192,6 +193,14 @@ func main() {
 
 	log.Printf("bjorn2scan-agent v%s starting", version)
 	log.Printf("Configuration: port=%s, db_path=%s, debug=%v", port, dbPath, cfg.DebugEnabled)
+
+	// Initialize deployment UUID
+	dbDir := filepath.Dir(dbPath)
+	deploymentUUID, err := deployment.NewUUID(dbDir)
+	if err != nil {
+		log.Fatalf("Failed to initialize deployment UUID: %v", err)
+	}
+	log.Printf("Deployment UUID: %s", deploymentUUID)
 
 	// Create container manager
 	manager := containers.NewManager()

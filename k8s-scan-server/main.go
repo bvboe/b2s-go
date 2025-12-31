@@ -17,6 +17,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/debug"
+	"github.com/bvboe/b2s-go/scanner-core/deployment"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
@@ -113,7 +114,7 @@ func main() {
 	// Initialize database
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
-		dbPath = "/var/lib/bjorn2scan/containers.db"
+		dbPath = "/var/lib/bjorn2scan/data/containers.db"
 	}
 
 	// Initialize debug configuration
@@ -129,6 +130,14 @@ func main() {
 		log.Fatalf("Error initializing database: %v", err)
 	}
 	defer func() { _ = database.Close(db) }()
+
+	// Initialize deployment UUID
+	dbDir := filepath.Dir(dbPath)
+	deploymentUUID, err := deployment.NewUUID(dbDir)
+	if err != nil {
+		log.Fatalf("Failed to initialize deployment UUID: %v", err)
+	}
+	log.Printf("Deployment UUID: %s", deploymentUUID)
 
 	// Load configuration with environment variable overrides from Helm values
 	cfg, err := scannerconfig.LoadConfig("")
