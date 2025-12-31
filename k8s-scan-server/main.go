@@ -67,6 +67,15 @@ func (k *K8sScanServerInfo) GetClusterName() string {
 	return "kubernetes"
 }
 
+func (k *K8sScanServerInfo) GetDeploymentName() string {
+	// For k8s, deployment name is the cluster name
+	return k.GetClusterName()
+}
+
+func (k *K8sScanServerInfo) GetDeploymentType() string {
+	return "kubernetes"
+}
+
 func (k *K8sScanServerInfo) GetVersion() string {
 	return version
 }
@@ -240,7 +249,7 @@ func main() {
 	corehandlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
 
 	// Register Prometheus metrics endpoint
-	metrics.RegisterMetricsHandler(mux, db, infoProvider)
+	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String())
 
 	// Wrap with logging middleware if debug enabled
 	var handler http.Handler = mux

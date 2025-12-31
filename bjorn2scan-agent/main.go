@@ -64,6 +64,15 @@ func (a *AgentInfo) GetClusterName() string {
 	return hostname
 }
 
+func (a *AgentInfo) GetDeploymentName() string {
+	// For agent, deployment name is the hostname
+	return a.GetClusterName()
+}
+
+func (a *AgentInfo) GetDeploymentType() string {
+	return "agent"
+}
+
 func (a *AgentInfo) GetVersion() string {
 	return version
 }
@@ -355,7 +364,7 @@ func main() {
 	handlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
 
 	// Register Prometheus metrics endpoint
-	metrics.RegisterMetricsHandler(mux, db, infoProvider)
+	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String())
 
 	// Wrap with logging middleware if debug enabled
 	var handler http.Handler = mux

@@ -3,13 +3,11 @@ package metrics
 import (
 	"log"
 	"net/http"
-
-	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
 // Handler returns an HTTP handler for the /metrics endpoint
-func Handler(db *database.DB, infoProvider InfoProvider) http.HandlerFunc {
-	collector := NewCollector(db, infoProvider)
+func Handler(infoProvider InfoProvider, deploymentUUID string) http.HandlerFunc {
+	collector := NewCollector(infoProvider, deploymentUUID)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only accept GET requests
@@ -36,7 +34,7 @@ func Handler(db *database.DB, infoProvider InfoProvider) http.HandlerFunc {
 }
 
 // RegisterMetricsHandler registers the /metrics endpoint on the provided mux
-func RegisterMetricsHandler(mux *http.ServeMux, db *database.DB, infoProvider InfoProvider) {
-	mux.HandleFunc("/metrics", Handler(db, infoProvider))
+func RegisterMetricsHandler(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string) {
+	mux.HandleFunc("/metrics", Handler(infoProvider, deploymentUUID))
 	log.Println("Metrics handler registered at /metrics")
 }
