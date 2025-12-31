@@ -53,6 +53,12 @@ type Config struct {
 	JobsCleanupEnabled  bool
 	JobsCleanupInterval time.Duration
 	JobsCleanupTimeout  time.Duration
+
+	// OpenTelemetry metrics configuration
+	OTELMetricsEnabled      bool
+	OTELMetricsEndpoint     string
+	OTELMetricsPushInterval time.Duration
+	OTELMetricsInsecure     bool
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -98,6 +104,12 @@ func defaultConfig() *Config {
 		JobsCleanupEnabled:  true,
 		JobsCleanupInterval: 24 * time.Hour,
 		JobsCleanupTimeout:  1 * time.Hour,
+
+		// OpenTelemetry metrics - disabled by default
+		OTELMetricsEnabled:      false,
+		OTELMetricsEndpoint:     "localhost:4317",
+		OTELMetricsPushInterval: 5 * time.Minute,
+		OTELMetricsInsecure:     true,
 	}
 }
 
@@ -250,6 +262,24 @@ func LoadConfig(path string) (*Config, error) {
 					cfg.JobsCleanupTimeout = duration
 				}
 			}
+
+			// OpenTelemetry metrics configuration
+			if section.HasKey("otel_metrics_enabled") {
+				val := strings.ToLower(section.Key("otel_metrics_enabled").String())
+				cfg.OTELMetricsEnabled = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("otel_metrics_endpoint") {
+				cfg.OTELMetricsEndpoint = section.Key("otel_metrics_endpoint").String()
+			}
+			if section.HasKey("otel_metrics_push_interval") {
+				if duration, err := time.ParseDuration(section.Key("otel_metrics_push_interval").String()); err == nil {
+					cfg.OTELMetricsPushInterval = duration
+				}
+			}
+			if section.HasKey("otel_metrics_insecure") {
+				val := strings.ToLower(section.Key("otel_metrics_insecure").String())
+				cfg.OTELMetricsInsecure = val == "true" || val == "1" || val == "yes"
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -323,6 +353,24 @@ func LoadConfig(path string) (*Config, error) {
 		if duration, err := time.ParseDuration(timeoutEnv); err == nil {
 			cfg.JobsCleanupTimeout = duration
 		}
+	}
+
+	// OpenTelemetry metrics configuration
+	if enabledEnv := os.Getenv("OTEL_METRICS_ENABLED"); enabledEnv != "" {
+		val := strings.ToLower(enabledEnv)
+		cfg.OTELMetricsEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if endpointEnv := os.Getenv("OTEL_METRICS_ENDPOINT"); endpointEnv != "" {
+		cfg.OTELMetricsEndpoint = endpointEnv
+	}
+	if intervalEnv := os.Getenv("OTEL_METRICS_PUSH_INTERVAL"); intervalEnv != "" {
+		if duration, err := time.ParseDuration(intervalEnv); err == nil {
+			cfg.OTELMetricsPushInterval = duration
+		}
+	}
+	if insecureEnv := os.Getenv("OTEL_METRICS_INSECURE"); insecureEnv != "" {
+		val := strings.ToLower(insecureEnv)
+		cfg.OTELMetricsInsecure = val == "true" || val == "1" || val == "yes"
 	}
 
 	return cfg, nil

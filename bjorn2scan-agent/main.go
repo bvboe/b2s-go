@@ -366,6 +366,28 @@ func main() {
 	// Register Prometheus metrics endpoint
 	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String())
 
+	// Initialize OpenTelemetry metrics exporter if enabled
+	var otelExporter *metrics.OTELExporter
+	if cfg.OTELMetricsEnabled {
+		log.Printf("Initializing OpenTelemetry metrics exporter (endpoint: %s, interval: %v)",
+			cfg.OTELMetricsEndpoint, cfg.OTELMetricsPushInterval)
+
+		otelConfig := metrics.OTELConfig{
+			Endpoint:     cfg.OTELMetricsEndpoint,
+			PushInterval: cfg.OTELMetricsPushInterval,
+			Insecure:     cfg.OTELMetricsInsecure,
+		}
+
+		var err error
+		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), otelConfig)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize OTEL exporter: %v (continuing without OTEL)", err)
+		} else {
+			otelExporter.Start()
+			log.Println("OpenTelemetry metrics exporter started")
+		}
+	}
+
 	// Wrap with logging middleware if debug enabled
 	var handler http.Handler = mux
 	if debugConfig.IsEnabled() {
@@ -394,6 +416,14 @@ func main() {
 
 	// Cancel context to stop Docker watcher
 	cancel()
+
+	// Shutdown OTEL exporter if running
+	if otelExporter != nil {
+		log.Println("Shutting down OpenTelemetry exporter...")
+		if err := otelExporter.Shutdown(); err != nil {
+			log.Printf("Error shutting down OTEL exporter: %v", err)
+		}
+	}
 
 	// Shutdown HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
