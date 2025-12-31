@@ -1,7 +1,9 @@
-.PHONY: help build-all test-all docker-build-all clean-all helm-lint helm-template helm-install helm-upgrade helm-uninstall helm-kind-deploy helm-minikube-deploy
+.PHONY: help build-all test-all docker-build-all clean-all helm-lint helm-template helm-install helm-upgrade helm-uninstall helm-kind-deploy helm-kind-deploy-with-metrics helm-minikube-deploy
 
 # Variables
-NAMESPACE?=b2sv2
+# If NAMESPACE is not set, the scripts will auto-detect from kubectl context
+# Set explicitly with: make target NAMESPACE=custom-namespace
+NAMESPACE?=
 HELM_RELEASE?=bjorn2scan
 HELM_CHART=./helm/bjorn2scan
 SCAN_SERVER_IMAGE?=ghcr.io/bvboe/b2s-go/k8s-scan-server
@@ -135,6 +137,86 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 	@echo "Check status: kubectl get pods -n $(NAMESPACE)"
 	@echo "View logs: kubectl logs -l app.kubernetes.io/name=bjorn2scan -n $(NAMESPACE)"
 	@echo "Port forward: kubectl port-forward svc/$(HELM_RELEASE) 8080:80 -n $(NAMESPACE)"
+	@echo "============================================"
+
+# Deploy with Prometheus/Grafana and OTEL metrics on kind
+helm-kind-deploy-with-metrics: docker-build-all ## Build and deploy to kind with Prometheus and OTEL metrics
+	$(eval DEPLOY_NAMESPACE := $(or $(NAMESPACE),$(shell kubectl config view --minify --output 'jsonpath={..namespace}'),default))
+	@echo "============================================"
+	@echo "Deploying to namespace: $(DEPLOY_NAMESPACE)"
+	@echo "============================================"
+	@echo "Deploying Prometheus and Grafana with OTEL support"
+	@bash ./dev-local/kind-dasboard-otel.sh $(DEPLOY_NAMESPACE)
+	@echo ""
+	@echo "============================================"
+	@echo "Deploying bjorn2scan with OTEL metrics enabled"
+	@echo "Image tag: $(IMAGE_TAG)"
+	@echo "============================================"
+	@echo "Loading images into kind cluster..."
+	kind load docker-image $(SCAN_SERVER_IMAGE):$(IMAGE_TAG)
+	kind load docker-image $(POD_SCANNER_IMAGE):$(IMAGE_TAG)
+	kind load docker-image $(UPDATE_CONTROLLER_IMAGE):$(IMAGE_TAG)
+	@if helm list -n $(DEPLOY_NAMESPACE) | grep -q $(HELM_RELEASE); then \
+		helm upgrade $(HELM_RELEASE) $(HELM_CHART) \
+			--namespace $(DEPLOY_NAMESPACE) \
+			--set scanServer.image.repository=$(SCAN_SERVER_IMAGE) \
+			--set scanServer.image.tag=$(IMAGE_TAG) \
+			--set scanServer.image.pullPolicy=IfNotPresent \
+			--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
+			--set podScanner.image.tag=$(IMAGE_TAG) \
+			--set podScanner.image.pullPolicy=IfNotPresent \
+			--set updateController.image.tag=$(IMAGE_TAG) \
+			--set clusterName="Kind Cluster" \
+			--set scanServer.config.otelMetrics.enabled=true \
+			--set scanServer.config.otelMetrics.endpoint="prometheus-kube-prometheus-prometheus.$(DEPLOY_NAMESPACE).svc.cluster.local:9090" \
+			--set scanServer.config.otelMetrics.protocol="http" \
+			--set scanServer.config.otelMetrics.pushInterval="1m" \
+			--set scanServer.config.otelMetrics.insecure=true; \
+		kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(DEPLOY_NAMESPACE); \
+		kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(DEPLOY_NAMESPACE); \
+	else \
+		helm install $(HELM_RELEASE) $(HELM_CHART) \
+			--namespace $(DEPLOY_NAMESPACE) \
+			--create-namespace \
+			--set scanServer.image.repository=$(SCAN_SERVER_IMAGE) \
+			--set scanServer.image.tag=$(IMAGE_TAG) \
+			--set scanServer.image.pullPolicy=IfNotPresent \
+			--set podScanner.image.repository=$(POD_SCANNER_IMAGE) \
+			--set podScanner.image.tag=$(IMAGE_TAG) \
+			--set podScanner.image.pullPolicy=IfNotPresent \
+			--set updateController.image.tag=$(IMAGE_TAG) \
+			--set clusterName="Kind Cluster" \
+			--set scanServer.config.otelMetrics.enabled=true \
+			--set scanServer.config.otelMetrics.endpoint="prometheus-kube-prometheus-prometheus.$(DEPLOY_NAMESPACE).svc.cluster.local:9090" \
+			--set scanServer.config.otelMetrics.protocol="http" \
+			--set scanServer.config.otelMetrics.pushInterval="1m" \
+			--set scanServer.config.otelMetrics.insecure=true; \
+	fi
+	@echo ""
+	@echo "============================================"
+	@echo "Deployment complete!"
+	@echo "============================================"
+	@echo "Image tag used: $(IMAGE_TAG)"
+	@echo "Namespace: $(DEPLOY_NAMESPACE)"
+	@echo ""
+	@echo "Bjorn2scan:"
+	@echo "  Check status: kubectl get pods -n $(DEPLOY_NAMESPACE)"
+	@echo "  View logs: kubectl logs -l app.kubernetes.io/name=bjorn2scan -n $(DEPLOY_NAMESPACE)"
+	@echo ""
+	@echo "Port Forwarding:"
+	@echo "  Bjorn2scan UI:"
+	@echo "    kubectl port-forward svc/$(HELM_RELEASE) 8080:80 -n $(DEPLOY_NAMESPACE)"
+	@echo "    Then open: http://localhost:8080"
+	@echo ""
+	@echo "  Prometheus UI:"
+	@echo "    kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n $(DEPLOY_NAMESPACE)"
+	@echo "    Then open: http://localhost:9090"
+	@echo "    Query: bjorn2scan_deployment"
+	@echo ""
+	@echo "  Grafana UI:"
+	@echo "    kubectl port-forward svc/prometheus-grafana 3000:80 -n $(DEPLOY_NAMESPACE)"
+	@echo "    Then open: http://localhost:3000"
+	@echo "    Login: admin / prom-operator"
 	@echo "============================================"
 
 # Quick Helm deploy for minikube (build all + load all + install/upgrade)

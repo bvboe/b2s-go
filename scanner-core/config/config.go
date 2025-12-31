@@ -57,6 +57,7 @@ type Config struct {
 	// OpenTelemetry metrics configuration
 	OTELMetricsEnabled      bool
 	OTELMetricsEndpoint     string
+	OTELMetricsProtocol     string // "grpc" or "http"
 	OTELMetricsPushInterval time.Duration
 	OTELMetricsInsecure     bool
 }
@@ -108,6 +109,7 @@ func defaultConfig() *Config {
 		// OpenTelemetry metrics - disabled by default
 		OTELMetricsEnabled:      false,
 		OTELMetricsEndpoint:     "localhost:4317",
+		OTELMetricsProtocol:     "grpc", // Use "http" for Prometheus native OTLP
 		OTELMetricsPushInterval: 5 * time.Minute,
 		OTELMetricsInsecure:     true,
 	}
@@ -271,6 +273,12 @@ func LoadConfig(path string) (*Config, error) {
 			if section.HasKey("otel_metrics_endpoint") {
 				cfg.OTELMetricsEndpoint = section.Key("otel_metrics_endpoint").String()
 			}
+			if section.HasKey("otel_metrics_protocol") {
+				protocol := strings.ToLower(section.Key("otel_metrics_protocol").String())
+				if protocol == "grpc" || protocol == "http" {
+					cfg.OTELMetricsProtocol = protocol
+				}
+			}
 			if section.HasKey("otel_metrics_push_interval") {
 				if duration, err := time.ParseDuration(section.Key("otel_metrics_push_interval").String()); err == nil {
 					cfg.OTELMetricsPushInterval = duration
@@ -362,6 +370,12 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if endpointEnv := os.Getenv("OTEL_METRICS_ENDPOINT"); endpointEnv != "" {
 		cfg.OTELMetricsEndpoint = endpointEnv
+	}
+	if protocolEnv := os.Getenv("OTEL_METRICS_PROTOCOL"); protocolEnv != "" {
+		protocol := strings.ToLower(protocolEnv)
+		if protocol == "grpc" || protocol == "http" {
+			cfg.OTELMetricsProtocol = protocol
+		}
 	}
 	if intervalEnv := os.Getenv("OTEL_METRICS_PUSH_INTERVAL"); intervalEnv != "" {
 		if duration, err := time.ParseDuration(intervalEnv); err == nil {

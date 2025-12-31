@@ -2,12 +2,15 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -16,21 +19,62 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// OTELProtocol represents the protocol to use for OTLP
+type OTELProtocol string
+
+const (
+	// OTELProtocolGRPC uses gRPC for OTLP communication
+	OTELProtocolGRPC OTELProtocol = "grpc"
+	// OTELProtocolHTTP uses HTTP for OTLP communication
+	OTELProtocolHTTP OTELProtocol = "http"
+)
+
 // OTELConfig holds OpenTelemetry configuration
 type OTELConfig struct {
 	Endpoint     string
+	Protocol     OTELProtocol
 	PushInterval time.Duration
 	Insecure     bool
 }
 
 // OTELExporter exports metrics to an OpenTelemetry collector
 type OTELExporter struct {
-	collector      *Collector
-	config         OTELConfig
-	meterProvider  *sdkmetric.MeterProvider
+	collector       *Collector
+	config          OTELConfig
+	meterProvider   *sdkmetric.MeterProvider
 	deploymentGauge metric.Int64Gauge
-	ctx            context.Context
-	cancel         context.CancelFunc
+	ctx             context.Context
+	cancel          context.CancelFunc
+}
+
+// createExporter creates the appropriate OTLP exporter based on protocol
+func createExporter(ctx context.Context, config OTELConfig) (sdkmetric.Exporter, error) {
+	protocol := strings.ToLower(string(config.Protocol))
+
+	switch protocol {
+	case "grpc":
+		opts := []otlpmetricgrpc.Option{
+			otlpmetricgrpc.WithEndpoint(config.Endpoint),
+		}
+		if config.Insecure {
+			opts = append(opts, otlpmetricgrpc.WithTLSCredentials(insecure.NewCredentials()))
+			opts = append(opts, otlpmetricgrpc.WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+		}
+		return otlpmetricgrpc.New(ctx, opts...)
+
+	case "http":
+		opts := []otlpmetrichttp.Option{
+			otlpmetrichttp.WithEndpoint(config.Endpoint),
+			otlpmetrichttp.WithURLPath("/api/v1/otlp/v1/metrics"),
+		}
+		if config.Insecure {
+			opts = append(opts, otlpmetrichttp.WithInsecure())
+		}
+		return otlpmetrichttp.New(ctx, opts...)
+
+	default:
+		return nil, fmt.Errorf("unsupported OTLP protocol: %s (supported: grpc, http)", config.Protocol)
+	}
 }
 
 // NewOTELExporter creates a new OTEL metrics exporter
@@ -38,16 +82,8 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 	// Create collector to generate metrics
 	collector := NewCollector(infoProvider, deploymentUUID)
 
-	// Create OTLP exporter
-	opts := []otlpmetricgrpc.Option{
-		otlpmetricgrpc.WithEndpoint(config.Endpoint),
-	}
-	if config.Insecure {
-		opts = append(opts, otlpmetricgrpc.WithTLSCredentials(insecure.NewCredentials()))
-		opts = append(opts, otlpmetricgrpc.WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-	}
-
-	exporter, err := otlpmetricgrpc.New(ctx, opts...)
+	// Create OTLP exporter based on configured protocol
+	exporter, err := createExporter(ctx, config)
 	if err != nil {
 		return nil, err
 	}

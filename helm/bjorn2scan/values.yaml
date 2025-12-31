@@ -80,6 +80,14 @@ scanServer:
     port: "8080"
     debugEnabled: true  # Set to true to enable debug endpoints (/debug/sql, /debug/metrics)
 
+    # OpenTelemetry Metrics Configuration
+    otelMetrics:
+      enabled: false  # Set to true to enable OTLP metrics export
+      endpoint: "prometheus-kube-prometheus-prometheus:9090"  # Service name (will use same namespace)
+      protocol: "http"  # "grpc" for OTEL Collector, "http" for Prometheus native OTLP
+      pushInterval: "1m"
+      insecure: true
+
     # Scheduled Jobs Configuration
     jobs:
       # Refresh Images Job - Periodically reconciles running containers with database

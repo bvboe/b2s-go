@@ -254,11 +254,12 @@ func main() {
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter
 	if cfg.OTELMetricsEnabled {
-		log.Printf("Initializing OpenTelemetry metrics exporter (endpoint: %s, interval: %v)",
-			cfg.OTELMetricsEndpoint, cfg.OTELMetricsPushInterval)
+		log.Printf("Initializing OpenTelemetry metrics exporter (endpoint: %s, protocol: %s, interval: %v)",
+			cfg.OTELMetricsEndpoint, cfg.OTELMetricsProtocol, cfg.OTELMetricsPushInterval)
 
 		otelConfig := metrics.OTELConfig{
 			Endpoint:     cfg.OTELMetricsEndpoint,
+			Protocol:     metrics.OTELProtocol(cfg.OTELMetricsProtocol),
 			PushInterval: cfg.OTELMetricsPushInterval,
 			Insecure:     cfg.OTELMetricsInsecure,
 		}
