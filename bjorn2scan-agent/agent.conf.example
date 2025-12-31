@@ -149,3 +149,33 @@ jobs_rescan_database_timeout=30m
 # jobs_telemetry_interval=5m
 # jobs_telemetry_jitter=2m
 # jobs_telemetry_timeout=30s
+
+# ============================================================================
+# OPENTELEMETRY METRICS CONFIGURATION
+# ============================================================================
+
+# Enable OpenTelemetry metrics export (default: false)
+# When enabled, metrics are pushed to an OTLP endpoint
+# Environment variable: OTEL_METRICS_ENABLED
+otel_metrics_enabled=false
+
+# OTLP endpoint (default: localhost:4317)
+# For Prometheus native OTLP: prometheus-server:9090
+# For OTEL Collector: otel-collector:4317
+# Environment variable: OTEL_METRICS_ENDPOINT
+otel_metrics_endpoint=localhost:4317
+
+# OTLP protocol (default: grpc)
+# Options: "grpc" for OTEL Collector, "http" for Prometheus native OTLP
+# Environment variable: OTEL_METRICS_PROTOCOL
+otel_metrics_protocol=grpc
+
+# Metrics push interval (default: 5m)
+# Format: Go duration string (e.g., "1m", "5m", "10m")
+# Environment variable: OTEL_METRICS_PUSH_INTERVAL
+otel_metrics_push_interval=1m
+
+# Allow insecure connections (default: true)
+# Set to false for production with TLS/SSL
+# Environment variable: OTEL_METRICS_INSECURE
+otel_metrics_insecure=true

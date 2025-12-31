@@ -110,7 +110,7 @@ func defaultConfig() *Config {
 		OTELMetricsEnabled:      false,
 		OTELMetricsEndpoint:     "localhost:4317",
 		OTELMetricsProtocol:     "grpc", // Use "http" for Prometheus native OTLP
-		OTELMetricsPushInterval: 5 * time.Minute,
+		OTELMetricsPushInterval: 1 * time.Minute,
 		OTELMetricsInsecure:     true,
 	}
 }
