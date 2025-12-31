@@ -117,7 +117,6 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 	// Create deployment gauge
 	deploymentGauge, err := meter.Int64Gauge("bjorn2scan_deployment",
 		metric.WithDescription("Bjorn2scan deployment information"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, err
