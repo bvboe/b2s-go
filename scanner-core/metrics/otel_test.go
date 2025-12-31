@@ -218,7 +218,7 @@ func TestRecordMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create OTEL exporter: %v", err)
 	}
-	defer exporter.Shutdown()
+	defer func() { _ = exporter.Shutdown() }()
 
 	// Call recordMetrics - should not panic or error
 	exporter.recordMetrics()
@@ -307,7 +307,7 @@ func TestStart_StartsBackgroundPush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create OTEL exporter: %v", err)
 	}
-	defer exporter.Shutdown()
+	defer func() { _ = exporter.Shutdown() }()
 
 	// Start the exporter
 	exporter.Start()
