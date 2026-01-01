@@ -88,6 +88,11 @@ scanServer:
       pushInterval: "1m"
       insecure: true
 
+    # Individual Metric Toggles
+    metrics:
+      deploymentEnabled: true  # Enable bjorn2scan_deployment metric
+      scannedInstancesEnabled: true  # Enable bjorn2scan_scanned_instance metric
+
     # Scheduled Jobs Configuration
     jobs:
       # Refresh Images Job - Periodically reconciles running containers with database

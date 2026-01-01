@@ -60,6 +60,10 @@ type Config struct {
 	OTELMetricsProtocol     string // "grpc" or "http"
 	OTELMetricsPushInterval time.Duration
 	OTELMetricsInsecure     bool
+
+	// Individual metric toggles
+	MetricsDeploymentEnabled        bool // Enable bjorn2scan_deployment metric
+	MetricsScannedInstancesEnabled  bool // Enable bjorn2scan_scanned_instance metric
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -112,6 +116,10 @@ func defaultConfig() *Config {
 		OTELMetricsProtocol:     "grpc", // Use "http" for Prometheus native OTLP
 		OTELMetricsPushInterval: 1 * time.Minute,
 		OTELMetricsInsecure:     true,
+
+		// Individual metrics - enabled by default
+		MetricsDeploymentEnabled:       true,
+		MetricsScannedInstancesEnabled: true,
 	}
 }
 
@@ -288,6 +296,16 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("otel_metrics_insecure").String())
 				cfg.OTELMetricsInsecure = val == "true" || val == "1" || val == "yes"
 			}
+
+			// Individual metric toggles
+			if section.HasKey("metrics_deployment_enabled") {
+				val := strings.ToLower(section.Key("metrics_deployment_enabled").String())
+				cfg.MetricsDeploymentEnabled = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("metrics_scanned_instances_enabled") {
+				val := strings.ToLower(section.Key("metrics_scanned_instances_enabled").String())
+				cfg.MetricsScannedInstancesEnabled = val == "true" || val == "1" || val == "yes"
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -385,6 +403,16 @@ func LoadConfig(path string) (*Config, error) {
 	if insecureEnv := os.Getenv("OTEL_METRICS_INSECURE"); insecureEnv != "" {
 		val := strings.ToLower(insecureEnv)
 		cfg.OTELMetricsInsecure = val == "true" || val == "1" || val == "yes"
+	}
+
+	// Individual metric toggles
+	if deploymentEnabledEnv := os.Getenv("METRICS_DEPLOYMENT_ENABLED"); deploymentEnabledEnv != "" {
+		val := strings.ToLower(deploymentEnabledEnv)
+		cfg.MetricsDeploymentEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if scannedInstancesEnabledEnv := os.Getenv("METRICS_SCANNED_INSTANCES_ENABLED"); scannedInstancesEnabledEnv != "" {
+		val := strings.ToLower(scannedInstancesEnabledEnv)
+		cfg.MetricsScannedInstancesEnabled = val == "true" || val == "1" || val == "yes"
 	}
 
 	return cfg, nil

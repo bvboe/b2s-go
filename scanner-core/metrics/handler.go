@@ -6,8 +6,8 @@ import (
 )
 
 // Handler returns an HTTP handler for the /metrics endpoint
-func Handler(infoProvider InfoProvider, deploymentUUID string) http.HandlerFunc {
-	collector := NewCollector(infoProvider, deploymentUUID)
+func Handler(infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig) http.HandlerFunc {
+	collector := NewCollector(infoProvider, deploymentUUID, database, config)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only accept GET requests
@@ -34,7 +34,7 @@ func Handler(infoProvider InfoProvider, deploymentUUID string) http.HandlerFunc 
 }
 
 // RegisterMetricsHandler registers the /metrics endpoint on the provided mux
-func RegisterMetricsHandler(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string) {
-	mux.HandleFunc("/metrics", Handler(infoProvider, deploymentUUID))
+func RegisterMetricsHandler(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig) {
+	mux.HandleFunc("/metrics", Handler(infoProvider, deploymentUUID, database, config))
 	log.Println("Metrics handler registered at /metrics")
 }

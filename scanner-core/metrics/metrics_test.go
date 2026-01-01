@@ -3,6 +3,8 @@ package metrics
 import (
 	"strings"
 	"testing"
+
+	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
 // MockInfoProvider implements InfoProvider for testing
@@ -24,6 +26,19 @@ func (m *MockInfoProvider) GetVersion() string {
 	return m.version
 }
 
+// MockDatabaseProvider implements DatabaseProvider for testing
+type MockDatabaseProvider struct {
+	instances []database.ScannedContainerInstance
+	err       error
+}
+
+func (m *MockDatabaseProvider) GetScannedContainerInstances() ([]database.ScannedContainerInstance, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.instances, nil
+}
+
 func TestCollector_Collect(t *testing.T) {
 	infoProvider := &MockInfoProvider{
 		deploymentName: "test-host",
@@ -31,8 +46,12 @@ func TestCollector_Collect(t *testing.T) {
 		version:        "1.0.0",
 	}
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
+	config := CollectorConfig{
+		DeploymentEnabled:       true,
+		ScannedInstancesEnabled: false,
+	}
 
-	collector := NewCollector(infoProvider, deploymentUUID)
+	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
 
 	// Collect metrics
 	metrics, err := collector.Collect()
@@ -72,8 +91,12 @@ func TestCollector_KubernetesType(t *testing.T) {
 		version:        "2.5.3",
 	}
 	deploymentUUID := "abc-123-def-456"
+	config := CollectorConfig{
+		DeploymentEnabled:       true,
+		ScannedInstancesEnabled: false,
+	}
 
-	collector := NewCollector(infoProvider, deploymentUUID)
+	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
 	metrics, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
@@ -115,8 +138,12 @@ func TestCollector_EscapesSpecialCharacters(t *testing.T) {
 		version:        "1.0.0",
 	}
 	deploymentUUID := "test-uuid"
+	config := CollectorConfig{
+		DeploymentEnabled:       true,
+		ScannedInstancesEnabled: false,
+	}
 
-	collector := NewCollector(infoProvider, deploymentUUID)
+	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
 	metrics, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
@@ -125,5 +152,330 @@ func TestCollector_EscapesSpecialCharacters(t *testing.T) {
 	// Verify escaped quotes
 	if !strings.Contains(metrics, `deployment_name="host\"with\"quotes"`) {
 		t.Error("Expected escaped quotes in deployment_name")
+	}
+}
+
+func TestCollector_CollectScannedInstances(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test-cluster",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
+
+	mockDB := &MockDatabaseProvider{
+		instances: []database.ScannedContainerInstance{
+			{
+				Namespace:  "default",
+				Pod:        "test-pod-1",
+				Container:  "nginx",
+				NodeName:   "node-1",
+				Repository: "nginx",
+				Tag:        "1.21",
+				Digest:     "sha256:abc123",
+				OSName:     "debian",
+			},
+			{
+				Namespace:  "kube-system",
+				Pod:        "coredns-abc",
+				Container:  "coredns",
+				NodeName:   "node-2",
+				Repository: "coredns/coredns",
+				Tag:        "1.8.0",
+				Digest:     "sha256:def456",
+				OSName:     "alpine",
+			},
+		},
+	}
+
+	config := CollectorConfig{
+		DeploymentEnabled:       true,
+		ScannedInstancesEnabled: true,
+	}
+
+	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+	metrics, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Verify deployment metric is present
+	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
+		t.Error("Expected bjorn2scan_deployment metric")
+	}
+
+	// Verify scanned instance metric is present
+	if !strings.Contains(metrics, "bjorn2scan_scanned_instance{") {
+		t.Error("Expected bjorn2scan_scanned_instance metric")
+	}
+
+	// Verify first instance
+	if !strings.Contains(metrics, `namespace="default"`) {
+		t.Error("Expected namespace=default")
+	}
+	if !strings.Contains(metrics, `pod="test-pod-1"`) {
+		t.Error("Expected pod=test-pod-1")
+	}
+	if !strings.Contains(metrics, `container="nginx"`) {
+		t.Error("Expected container=nginx")
+	}
+	if !strings.Contains(metrics, `host_name="node-1"`) {
+		t.Error("Expected host_name=node-1")
+	}
+	if !strings.Contains(metrics, `distro="debian"`) {
+		t.Error("Expected distro=debian")
+	}
+
+	// Verify second instance
+	if !strings.Contains(metrics, `namespace="kube-system"`) {
+		t.Error("Expected namespace=kube-system")
+	}
+	if !strings.Contains(metrics, `pod="coredns-abc"`) {
+		t.Error("Expected pod=coredns-abc")
+	}
+	if !strings.Contains(metrics, `distro="alpine"`) {
+		t.Error("Expected distro=alpine")
+	}
+
+	// Verify instance_type is hardcoded
+	if !strings.Contains(metrics, `instance_type="CONTAINER"`) {
+		t.Error("Expected instance_type=CONTAINER")
+	}
+
+	// Count the number of scanned instance metrics (should be 2)
+	count := strings.Count(metrics, "bjorn2scan_scanned_instance{")
+	if count != 2 {
+		t.Errorf("Expected 2 scanned instance metrics, got %d", count)
+	}
+}
+
+func TestCollector_ScannedInstanceLabels(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "prod-cluster",
+		deploymentType: "kubernetes",
+		version:        "2.0.0",
+	}
+	deploymentUUID := "abc-123-def-456"
+
+	mockDB := &MockDatabaseProvider{
+		instances: []database.ScannedContainerInstance{
+			{
+				Namespace:  "production",
+				Pod:        "app-pod",
+				Container:  "app-container",
+				NodeName:   "prod-node-1",
+				Repository: "myapp",
+				Tag:        "v1.2.3",
+				Digest:     "sha256:xyz789",
+				OSName:     "ubuntu",
+			},
+		},
+	}
+
+	config := CollectorConfig{
+		DeploymentEnabled:       false,
+		ScannedInstancesEnabled: true,
+	}
+
+	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+	metrics, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Verify all hierarchical labels are present
+	expectedLabels := []string{
+		`deployment_uuid="abc-123-def-456"`,
+		`deployment_uuid_host_name="abc-123-def-456.prod-node-1"`,
+		`deployment_uuid_namespace="abc-123-def-456.production"`,
+		`deployment_uuid_namespace_image="abc-123-def-456.production.myapp:v1.2.3"`,
+		`deployment_uuid_namespace_image_id="abc-123-def-456.production.sha256:xyz789"`,
+		`deployment_uuid_namespace_pod="abc-123-def-456.production.app-pod"`,
+		`deployment_uuid_namespace_pod_container="abc-123-def-456.production.app-pod.app-container"`,
+		`host_name="prod-node-1"`,
+		`namespace="production"`,
+		`pod="app-pod"`,
+		`container="app-container"`,
+		`distro="ubuntu"`,
+		`image_repo="myapp"`,
+		`image_tag="v1.2.3"`,
+		`image_digest="sha256:xyz789"`,
+		`instance_type="CONTAINER"`,
+	}
+
+	for _, label := range expectedLabels {
+		if !strings.Contains(metrics, label) {
+			t.Errorf("Expected label %s to be present in metrics", label)
+		}
+	}
+
+	// Verify deployment metric is NOT present (disabled)
+	if strings.Contains(metrics, "bjorn2scan_deployment{") {
+		t.Error("Expected bjorn2scan_deployment metric to be disabled")
+	}
+}
+
+func TestCollector_ConfigToggles(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "agent",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "test-uuid"
+
+	mockDB := &MockDatabaseProvider{
+		instances: []database.ScannedContainerInstance{
+			{
+				Namespace:  "default",
+				Pod:        "test-pod",
+				Container:  "test-container",
+				NodeName:   "node-1",
+				Repository: "test",
+				Tag:        "latest",
+				Digest:     "sha256:abc",
+				OSName:     "alpine",
+			},
+		},
+	}
+
+	testCases := []struct {
+		name                    string
+		deploymentEnabled       bool
+		scannedInstancesEnabled bool
+		expectDeployment        bool
+		expectScannedInstance   bool
+	}{
+		{
+			name:                    "Both enabled",
+			deploymentEnabled:       true,
+			scannedInstancesEnabled: true,
+			expectDeployment:        true,
+			expectScannedInstance:   true,
+		},
+		{
+			name:                    "Only deployment enabled",
+			deploymentEnabled:       true,
+			scannedInstancesEnabled: false,
+			expectDeployment:        true,
+			expectScannedInstance:   false,
+		},
+		{
+			name:                    "Only scanned instances enabled",
+			deploymentEnabled:       false,
+			scannedInstancesEnabled: true,
+			expectDeployment:        false,
+			expectScannedInstance:   true,
+		},
+		{
+			name:                    "Both disabled",
+			deploymentEnabled:       false,
+			scannedInstancesEnabled: false,
+			expectDeployment:        false,
+			expectScannedInstance:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := CollectorConfig{
+				DeploymentEnabled:       tc.deploymentEnabled,
+				ScannedInstancesEnabled: tc.scannedInstancesEnabled,
+			}
+
+			collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+			metrics, err := collector.Collect()
+			if err != nil {
+				t.Fatalf("Failed to collect metrics: %v", err)
+			}
+
+			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
+			hasScannedInstance := strings.Contains(metrics, "bjorn2scan_scanned_instance{")
+
+			if hasDeployment != tc.expectDeployment {
+				t.Errorf("Expected deployment metric present=%v, got=%v", tc.expectDeployment, hasDeployment)
+			}
+			if hasScannedInstance != tc.expectScannedInstance {
+				t.Errorf("Expected scanned instance metric present=%v, got=%v", tc.expectScannedInstance, hasScannedInstance)
+			}
+		})
+	}
+}
+
+func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "agent",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "test-uuid"
+
+	mockDB := &MockDatabaseProvider{
+		instances: []database.ScannedContainerInstance{
+			{
+				Namespace:  "default",
+				Pod:        `pod-with"quotes`,
+				Container:  `container\with\backslash`,
+				NodeName:   "node-1",
+				Repository: "test/repo",
+				Tag:        "v1.0",
+				Digest:     "sha256:abc",
+				OSName:     `ubuntu"22.04`,
+			},
+		},
+	}
+
+	config := CollectorConfig{
+		DeploymentEnabled:       false,
+		ScannedInstancesEnabled: true,
+	}
+
+	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+	metrics, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Verify escaped quotes in pod name
+	if !strings.Contains(metrics, `pod="pod-with\"quotes"`) {
+		t.Error("Expected escaped quotes in pod name")
+	}
+
+	// Verify escaped backslashes in container name
+	if !strings.Contains(metrics, `container="container\\with\\backslash"`) {
+		t.Error("Expected escaped backslashes in container name")
+	}
+
+	// Verify escaped quotes in distro
+	if !strings.Contains(metrics, `distro="ubuntu\"22.04"`) {
+		t.Error("Expected escaped quotes in distro")
+	}
+}
+
+func TestCollector_ScannedInstancesWithNilDatabase(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "agent",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "test-uuid"
+
+	config := CollectorConfig{
+		DeploymentEnabled:       true,
+		ScannedInstancesEnabled: true,
+	}
+
+	// Nil database should be handled gracefully
+	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
+	metrics, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Should have deployment metric but not scanned instance metrics
+	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
+		t.Error("Expected bjorn2scan_deployment metric")
+	}
+	if strings.Contains(metrics, "bjorn2scan_scanned_instance{") {
+		t.Error("Expected no bjorn2scan_scanned_instance metric with nil database")
 	}
 }

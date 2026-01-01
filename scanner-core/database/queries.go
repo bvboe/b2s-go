@@ -364,3 +364,63 @@ func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
 
 	return signature, nil
 }
+
+// ScannedContainerInstance represents a scanned container instance for metrics
+type ScannedContainerInstance struct {
+	Namespace  string `json:"namespace"`
+	Pod        string `json:"pod"`
+	Container  string `json:"container"`
+	NodeName   string `json:"node_name"`
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	Digest     string `json:"digest"`
+	OSName     string `json:"os_name"`
+}
+
+// GetScannedContainerInstances returns all container instances that have been successfully scanned
+func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error) {
+	rows, err := db.conn.Query(`
+		SELECT
+			ci.namespace,
+			ci.pod,
+			ci.container,
+			ci.node_name,
+			ci.repository,
+			ci.tag,
+			img.digest,
+			COALESCE(img.os_name, '') as os_name
+		FROM container_instances ci
+		JOIN container_images img ON ci.image_id = img.id
+		WHERE img.status = 'completed'
+		ORDER BY ci.namespace, ci.pod, ci.container
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query scanned container instances: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	var instances []ScannedContainerInstance
+	for rows.Next() {
+		var instance ScannedContainerInstance
+		err := rows.Scan(
+			&instance.Namespace,
+			&instance.Pod,
+			&instance.Container,
+			&instance.NodeName,
+			&instance.Repository,
+			&instance.Tag,
+			&instance.Digest,
+			&instance.OSName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan container instance row: %w", err)
+		}
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}

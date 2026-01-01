@@ -39,12 +39,13 @@ type OTELConfig struct {
 
 // OTELExporter exports metrics to an OpenTelemetry collector
 type OTELExporter struct {
-	collector       *Collector
-	config          OTELConfig
-	meterProvider   *sdkmetric.MeterProvider
-	deploymentGauge metric.Int64Gauge
-	ctx             context.Context
-	cancel          context.CancelFunc
+	collector             *Collector
+	config                OTELConfig
+	meterProvider         *sdkmetric.MeterProvider
+	deploymentGauge       metric.Int64Gauge
+	scannedInstanceGauge  metric.Int64Gauge
+	ctx                   context.Context
+	cancel                context.CancelFunc
 }
 
 // createExporter creates the appropriate OTLP exporter based on protocol
@@ -78,9 +79,9 @@ func createExporter(ctx context.Context, config OTELConfig) (sdkmetric.Exporter,
 }
 
 // NewOTELExporter creates a new OTEL metrics exporter
-func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentUUID string, config OTELConfig) (*OTELExporter, error) {
+func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, collectorConfig CollectorConfig, config OTELConfig) (*OTELExporter, error) {
 	// Create collector to generate metrics
-	collector := NewCollector(infoProvider, deploymentUUID)
+	collector := NewCollector(infoProvider, deploymentUUID, database, collectorConfig)
 
 	// Create OTLP exporter based on configured protocol
 	exporter, err := createExporter(ctx, config)
@@ -122,15 +123,24 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 		return nil, err
 	}
 
+	// Create scanned instance gauge
+	scannedInstanceGauge, err := meter.Int64Gauge("bjorn2scan_scanned_instance",
+		metric.WithDescription("Bjorn2scan scanned container instance information"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	exporterCtx, cancel := context.WithCancel(ctx)
 
 	return &OTELExporter{
-		collector:       collector,
-		config:          config,
-		meterProvider:   meterProvider,
-		deploymentGauge: deploymentGauge,
-		ctx:             exporterCtx,
-		cancel:          cancel,
+		collector:            collector,
+		config:               config,
+		meterProvider:        meterProvider,
+		deploymentGauge:      deploymentGauge,
+		scannedInstanceGauge: scannedInstanceGauge,
+		ctx:                  exporterCtx,
+		cancel:               cancel,
 	}, nil
 }
 
@@ -157,10 +167,21 @@ func (e *OTELExporter) pushMetrics() {
 	}
 }
 
-// recordMetrics records the current deployment metric
+// recordMetrics records the current metrics based on collector config
 func (e *OTELExporter) recordMetrics() {
-	// Use collector to generate labels (even though we're not using the text output)
-	// This ensures consistency between HTTP and OTEL metrics
+	// Record deployment metric if enabled
+	if e.collector.config.DeploymentEnabled {
+		e.recordDeploymentMetric()
+	}
+
+	// Record scanned instance metrics if enabled
+	if e.collector.config.ScannedInstancesEnabled && e.collector.database != nil {
+		e.recordScannedInstanceMetrics()
+	}
+}
+
+// recordDeploymentMetric records the deployment gauge metric
+func (e *OTELExporter) recordDeploymentMetric() {
 	deploymentName := e.collector.infoProvider.GetDeploymentName()
 	deploymentType := e.collector.infoProvider.GetDeploymentType()
 	version := e.collector.infoProvider.GetVersion()
@@ -174,6 +195,51 @@ func (e *OTELExporter) recordMetrics() {
 			attribute.String("bjorn2scan_version", version),
 		),
 	)
+}
+
+// recordScannedInstanceMetrics records scanned container instance metrics
+func (e *OTELExporter) recordScannedInstanceMetrics() {
+	instances, err := e.collector.database.GetScannedContainerInstances()
+	if err != nil {
+		log.Printf("Error getting scanned container instances for OTEL metrics: %v", err)
+		return
+	}
+
+	for _, instance := range instances {
+		// Generate hierarchical labels
+		deploymentUUIDHostName := fmt.Sprintf("%s.%s", e.collector.deploymentUUID, instance.NodeName)
+		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", e.collector.deploymentUUID, instance.Namespace)
+		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
+			e.collector.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
+		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
+			e.collector.deploymentUUID, instance.Namespace, instance.Digest)
+		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
+			e.collector.deploymentUUID, instance.Namespace, instance.Pod)
+		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
+			e.collector.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
+
+		// Record scanned instance gauge with all labels as attributes
+		e.scannedInstanceGauge.Record(e.ctx, 1,
+			metric.WithAttributes(
+				attribute.String("deployment_uuid", e.collector.deploymentUUID),
+				attribute.String("deployment_uuid_host_name", deploymentUUIDHostName),
+				attribute.String("deployment_uuid_namespace", deploymentUUIDNamespace),
+				attribute.String("deployment_uuid_namespace_image", deploymentUUIDNamespaceImage),
+				attribute.String("deployment_uuid_namespace_image_id", deploymentUUIDNamespaceImageID),
+				attribute.String("deployment_uuid_namespace_pod", deploymentUUIDNamespacePod),
+				attribute.String("deployment_uuid_namespace_pod_container", deploymentUUIDNamespacePodContainer),
+				attribute.String("host_name", instance.NodeName),
+				attribute.String("namespace", instance.Namespace),
+				attribute.String("pod", instance.Pod),
+				attribute.String("container", instance.Container),
+				attribute.String("distro", instance.OSName),
+				attribute.String("image_repo", instance.Repository),
+				attribute.String("image_tag", instance.Tag),
+				attribute.String("image_digest", instance.Digest),
+				attribute.String("instance_type", "CONTAINER"),
+			),
+		)
+	}
 }
 
 // Shutdown gracefully shuts down the OTEL exporter

@@ -7,6 +7,7 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Add host_ip tracking to metrics (requires storing Kubernetes node IP in database or querying K8s API)
 - [ ] Proper agent update testing
 - [ ] Pick up node tags!
 - [ ] Clean up agent configuration management:

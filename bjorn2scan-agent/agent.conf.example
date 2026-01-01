@@ -179,3 +179,18 @@ otel_metrics_push_interval=1m
 # Set to false for production with TLS/SSL
 # Environment variable: OTEL_METRICS_INSECURE
 otel_metrics_insecure=true
+
+# ============================================================================
+# INDIVIDUAL METRIC TOGGLES
+# ============================================================================
+
+# Enable bjorn2scan_deployment metric (default: true)
+# This metric reports deployment information (uuid, name, type, version)
+# Environment variable: METRICS_DEPLOYMENT_ENABLED
+metrics_deployment_enabled=true
+
+# Enable bjorn2scan_scanned_instance metric (default: true)
+# This metric reports detailed information about each scanned container instance
+# Warning: In large clusters with many containers, this can generate significant metric cardinality
+# Environment variable: METRICS_SCANNED_INSTANCES_ENABLED
+metrics_scanned_instances_enabled=true

@@ -363,8 +363,14 @@ func main() {
 	// Register debug handlers if debug mode is enabled
 	handlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
 
+	// Create collector config for metrics
+	collectorConfig := metrics.CollectorConfig{
+		DeploymentEnabled:       cfg.MetricsDeploymentEnabled,
+		ScannedInstancesEnabled: cfg.MetricsScannedInstancesEnabled,
+	}
+
 	// Register Prometheus metrics endpoint
-	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String())
+	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String(), db, collectorConfig)
 
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter
@@ -380,7 +386,7 @@ func main() {
 		}
 
 		var err error
-		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), otelConfig)
+		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), db, collectorConfig, otelConfig)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize OTEL exporter: %v (continuing without OTEL)", err)
 		} else {

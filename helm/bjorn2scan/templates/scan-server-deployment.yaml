@@ -65,6 +65,10 @@ spec:
           value: {{ .Values.scanServer.config.otelMetrics.pushInterval | quote }}
         - name: OTEL_METRICS_INSECURE
           value: {{ .Values.scanServer.config.otelMetrics.insecure | quote }}
+        - name: METRICS_DEPLOYMENT_ENABLED
+          value: {{ .Values.scanServer.config.metrics.deploymentEnabled | quote }}
+        - name: METRICS_SCANNED_INSTANCES_ENABLED
+          value: {{ .Values.scanServer.config.metrics.scannedInstancesEnabled | quote }}
         - name: JOBS_RESCAN_DATABASE_ENABLED
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.enabled | quote }}
         - name: JOBS_RESCAN_DATABASE_INTERVAL
