@@ -346,14 +346,17 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 // Using row count is necessary to detect deletions, since deleted rows have no
 // timestamp to update.
 func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
-	var signature string
+	var signature sql.NullString
 
 	// Build a signature combining timestamp and row count
 	// This detects both data updates (timestamp) and structural changes (count)
+	// Returns empty string if no images exist yet
 	query := `
 		SELECT
-			COALESCE(MAX(updated_at), datetime('now')) || '|' ||
-			(SELECT COUNT(*) FROM container_instances)
+			CASE
+				WHEN COUNT(*) = 0 THEN NULL
+				ELSE MAX(updated_at) || '|' || (SELECT COUNT(*) FROM container_instances)
+			END
 		FROM container_images
 	`
 
@@ -362,7 +365,11 @@ func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
 		return "", fmt.Errorf("failed to get last updated signature: %w", err)
 	}
 
-	return signature, nil
+	if !signature.Valid {
+		return "", nil
+	}
+
+	return signature.String, nil
 }
 
 // ScannedContainerInstance represents a scanned container instance for metrics
@@ -418,6 +425,88 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan container instance row: %w", err)
+		}
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}
+
+// VulnerabilityInstance represents a vulnerability found in a running container instance
+type VulnerabilityInstance struct {
+	Namespace     string `json:"namespace"`
+	Pod           string `json:"pod"`
+	Container     string `json:"container"`
+	NodeName      string `json:"node_name"`
+	Repository    string `json:"repository"`
+	Tag           string `json:"tag"`
+	Digest        string `json:"digest"`
+	OSName        string `json:"os_name"`
+	CVEID         string `json:"cve_id"`
+	PackageName   string `json:"package_name"`
+	PackageVersion string `json:"package_version"`
+	Severity      string `json:"severity"`
+	FixStatus     string `json:"fix_status"`
+	FixedVersion  string `json:"fixed_version"`
+	Count         int    `json:"count"`
+}
+
+// GetVulnerabilityInstances returns all vulnerabilities for all running container instances
+func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
+	rows, err := db.conn.Query(`
+		SELECT
+			ci.namespace,
+			ci.pod,
+			ci.container,
+			ci.node_name,
+			ci.repository,
+			ci.tag,
+			img.digest,
+			COALESCE(img.os_name, '') as os_name,
+			v.cve_id,
+			COALESCE(v.package_name, '') as package_name,
+			COALESCE(v.package_version, '') as package_version,
+			COALESCE(v.severity, '') as severity,
+			COALESCE(v.fix_status, '') as fix_status,
+			COALESCE(v.fixed_version, '') as fixed_version,
+			v.count
+		FROM container_instances ci
+		JOIN container_images img ON ci.image_id = img.id
+		JOIN vulnerabilities v ON img.id = v.image_id
+		WHERE img.status = 'completed'
+		ORDER BY ci.namespace, ci.pod, ci.container, v.severity, v.cve_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query vulnerability instances: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Warning: Failed to close rows: %v", err)
+		}
+	}()
+
+	var instances []VulnerabilityInstance
+	for rows.Next() {
+		var instance VulnerabilityInstance
+		err := rows.Scan(
+			&instance.Namespace,
+			&instance.Pod,
+			&instance.Container,
+			&instance.NodeName,
+			&instance.Repository,
+			&instance.Tag,
+			&instance.Digest,
+			&instance.OSName,
+			&instance.CVEID,
+			&instance.PackageName,
+			&instance.PackageVersion,
+			&instance.Severity,
+			&instance.FixStatus,
+			&instance.FixedVersion,
+			&instance.Count,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan vulnerability instance row: %w", err)
 		}
 		instances = append(instances, instance)
 	}
