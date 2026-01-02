@@ -194,3 +194,10 @@ metrics_deployment_enabled=true
 # Warning: In large clusters with many containers, this can generate significant metric cardinality
 # Environment variable: METRICS_SCANNED_INSTANCES_ENABLED
 metrics_scanned_instances_enabled=true
+
+# Enable bjorn2scan_vulnerability metric (default: true)
+# This metric reports vulnerabilities found in each running container instance
+# Warning: In environments with many vulnerabilities, this can generate very high metric cardinality
+# Each unique vulnerability per container instance creates a separate metric
+# Environment variable: METRICS_VULNERABILITIES_ENABLED
+metrics_vulnerabilities_enabled=true

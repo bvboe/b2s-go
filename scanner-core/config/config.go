@@ -64,6 +64,7 @@ type Config struct {
 	// Individual metric toggles
 	MetricsDeploymentEnabled        bool // Enable bjorn2scan_deployment metric
 	MetricsScannedInstancesEnabled  bool // Enable bjorn2scan_scanned_instance metric
+	MetricsVulnerabilitiesEnabled   bool // Enable bjorn2scan_vulnerability metric
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -120,6 +121,7 @@ func defaultConfig() *Config {
 		// Individual metrics - enabled by default
 		MetricsDeploymentEnabled:       true,
 		MetricsScannedInstancesEnabled: true,
+		MetricsVulnerabilitiesEnabled:  true,
 	}
 }
 
@@ -306,6 +308,10 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("metrics_scanned_instances_enabled").String())
 				cfg.MetricsScannedInstancesEnabled = val == "true" || val == "1" || val == "yes"
 			}
+			if section.HasKey("metrics_vulnerabilities_enabled") {
+				val := strings.ToLower(section.Key("metrics_vulnerabilities_enabled").String())
+				cfg.MetricsVulnerabilitiesEnabled = val == "true" || val == "1" || val == "yes"
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -413,6 +419,10 @@ func LoadConfig(path string) (*Config, error) {
 	if scannedInstancesEnabledEnv := os.Getenv("METRICS_SCANNED_INSTANCES_ENABLED"); scannedInstancesEnabledEnv != "" {
 		val := strings.ToLower(scannedInstancesEnabledEnv)
 		cfg.MetricsScannedInstancesEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if vulnerabilitiesEnabledEnv := os.Getenv("METRICS_VULNERABILITIES_ENABLED"); vulnerabilitiesEnabledEnv != "" {
+		val := strings.ToLower(vulnerabilitiesEnabledEnv)
+		cfg.MetricsVulnerabilitiesEnabled = val == "true" || val == "1" || val == "yes"
 	}
 
 	return cfg, nil

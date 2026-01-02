@@ -69,6 +69,8 @@ spec:
           value: {{ .Values.scanServer.config.metrics.deploymentEnabled | quote }}
         - name: METRICS_SCANNED_INSTANCES_ENABLED
           value: {{ .Values.scanServer.config.metrics.scannedInstancesEnabled | quote }}
+        - name: METRICS_VULNERABILITIES_ENABLED
+          value: {{ .Values.scanServer.config.metrics.vulnerabilitiesEnabled | quote }}
         - name: JOBS_RESCAN_DATABASE_ENABLED
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.enabled | quote }}
         - name: JOBS_RESCAN_DATABASE_INTERVAL

@@ -92,6 +92,7 @@ scanServer:
     metrics:
       deploymentEnabled: true  # Enable bjorn2scan_deployment metric
       scannedInstancesEnabled: true  # Enable bjorn2scan_scanned_instance metric
+      vulnerabilitiesEnabled: true  # Enable bjorn2scan_vulnerability metric
 
     # Scheduled Jobs Configuration
     jobs:
