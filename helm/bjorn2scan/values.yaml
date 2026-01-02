@@ -51,7 +51,7 @@ scanServer:
   resources:
     limits:
       cpu: 2000m
-      memory: 1Gi  # Increased for Grype vulnerability database download (~200MB)
+      memory: 1Gi  # Increased for Grype vulnerability database (~500-800MB)
     requests:
       cpu: 200m
       memory: 512Mi  # Increased to handle vulnerability scanning workload
@@ -125,7 +125,7 @@ scanServer:
   # Data persistence
   persistence:
     enabled: true  # Set to false to use emptyDir (for testing only)
-    size: 1Gi
+    size: 5Gi
     storageClassName: ""  # Leave empty to use default storage class
     accessMode: ReadWriteOnce
     # Path where data (database, etc.) will be stored
