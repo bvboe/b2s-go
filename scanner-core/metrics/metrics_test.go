@@ -1223,6 +1223,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				Pod:       "test-1",
 				Container: "app",
 				Risk:      0.0,
+				Count:     1,
 			},
 			{
 				CVEID:     "CVE-2022-0002",
@@ -1230,6 +1231,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				Pod:       "test-2",
 				Container: "app",
 				Risk:      0.5,
+				Count:     1,
 			},
 			{
 				CVEID:     "CVE-2022-0003",
@@ -1237,6 +1239,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				Pod:       "test-3",
 				Container: "app",
 				Risk:      7.5,
+				Count:     1,
 			},
 			{
 				CVEID:     "CVE-2022-0004",
@@ -1244,6 +1247,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				Pod:       "test-4",
 				Container: "app",
 				Risk:      10.0,
+				Count:     1,
 			},
 			{
 				CVEID:     "CVE-2022-0005",
@@ -1251,6 +1255,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				Pod:       "test-5",
 				Container: "app",
 				Risk:      3.14159,
+				Count:     1,
 			},
 		},
 	}

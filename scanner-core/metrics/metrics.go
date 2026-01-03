@@ -310,7 +310,7 @@ func (c *Collector) collectVulnerabilityExploitedMetrics() (MetricFamily, error)
 				"fix_status":                           instance.FixStatus,
 				"fixed_version":                        instance.FixedVersion,
 			},
-			Value: float64(instance.KnownExploited),
+			Value: float64(instance.KnownExploited * instance.Count),
 		})
 	}
 
@@ -372,7 +372,7 @@ func (c *Collector) collectVulnerabilityRiskMetrics() (MetricFamily, error) {
 				"fix_status":                           instance.FixStatus,
 				"fixed_version":                        instance.FixedVersion,
 			},
-			Value: instance.Risk,
+			Value: instance.Risk * float64(instance.Count),
 		})
 	}
 
