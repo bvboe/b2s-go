@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -49,9 +50,10 @@ type K8sScanServerInfo struct {
 	k8sClient    kubernetes.Interface
 	serviceName  string
 	servicePort  string
-	// Cached values computed at startup
+	// Cached values computed at startup and refreshed periodically
 	deploymentIP     string
 	cachedConsoleURL string
+	consoleMu        sync.RWMutex // Protects cachedConsoleURL
 }
 
 func NewK8sScanServerInfo(port string, webUIEnabled bool, customConsoleURL string, k8sClient kubernetes.Interface, serviceName, servicePort string) *K8sScanServerInfo {
@@ -81,6 +83,32 @@ func NewK8sScanServerInfo(port string, webUIEnabled bool, customConsoleURL strin
 	}
 
 	return info
+}
+
+// StartPeriodicRefresh starts a background goroutine that periodically refreshes
+// the console URL. This handles cases where the service configuration changes
+// after startup (e.g., LoadBalancer IP becomes available).
+// Only call this if auto-detecting the console URL (no custom URL override).
+func (k *K8sScanServerInfo) StartPeriodicRefresh(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				newURL := k.detectConsoleURL()
+				k.consoleMu.Lock()
+				if newURL != k.cachedConsoleURL {
+					log.Printf("Console URL updated: %s", newURL)
+					k.cachedConsoleURL = newURL
+				}
+				k.consoleMu.Unlock()
+			}
+		}
+	}()
 }
 
 func (k *K8sScanServerInfo) GetInfo() interface{} {
@@ -146,6 +174,8 @@ func (k *K8sScanServerInfo) GetDeploymentIP() string {
 
 // GetConsoleURL returns the cached console URL.
 func (k *K8sScanServerInfo) GetConsoleURL() string {
+	k.consoleMu.RLock()
+	defer k.consoleMu.RUnlock()
 	return k.cachedConsoleURL
 }
 
@@ -358,6 +388,13 @@ func main() {
 	}
 
 	infoProvider := NewK8sScanServerInfo(port, cfg.WebUIEnabled, consoleURL, clientset, serviceName, servicePort)
+
+	// Start periodic refresh for console URL detection (only if auto-detecting)
+	// This handles LoadBalancer IPs that aren't available immediately at startup
+	if consoleURL == "" && cfg.WebUIEnabled {
+		infoProvider.StartPeriodicRefresh(ctx, 5*time.Minute)
+	}
+
 	mux := http.NewServeMux()
 
 	// Register standard handlers
