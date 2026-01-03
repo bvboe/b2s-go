@@ -94,6 +94,7 @@ scanServer:
       scannedInstancesEnabled: true  # Enable bjorn2scan_scanned_instance metric
       vulnerabilitiesEnabled: true  # Enable bjorn2scan_vulnerability metric
       vulnerabilityExploitedEnabled: true  # Enable bjorn2scan_vulnerability_exploited metric (known exploited vulnerabilities)
+      vulnerabilityRiskEnabled: true  # Enable bjorn2scan_vulnerability_risk metric (risk scores)
 
     # Scheduled Jobs Configuration
     jobs:

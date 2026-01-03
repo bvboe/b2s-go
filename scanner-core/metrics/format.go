@@ -20,7 +20,7 @@ func FormatPrometheus(data *MetricsData) string {
 		for _, metric := range family.Metrics {
 			// Format labels
 			labels := formatLabels(metric.Labels)
-			output.WriteString(fmt.Sprintf("%s{%s} %d\n", family.Name, labels, metric.Value))
+			output.WriteString(fmt.Sprintf("%s{%s} %g\n", family.Name, labels, metric.Value))
 		}
 	}
 

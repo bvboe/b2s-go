@@ -254,6 +254,7 @@ func main() {
 		ScannedInstancesEnabled:  cfg.MetricsScannedInstancesEnabled,
 		VulnerabilitiesEnabled:   cfg.MetricsVulnerabilitiesEnabled,
 		VulnerabilityExploitedEnabled: cfg.MetricsVulnerabilityExploitedEnabled,
+		VulnerabilityRiskEnabled: cfg.MetricsVulnerabilityRiskEnabled,
 	}
 
 	// Register Prometheus metrics endpoint

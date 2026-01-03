@@ -73,6 +73,8 @@ spec:
           value: {{ .Values.scanServer.config.metrics.vulnerabilitiesEnabled | quote }}
         - name: METRICS_VULNERABILITY_EXPLOITED_ENABLED
           value: {{ .Values.scanServer.config.metrics.vulnerabilityExploitedEnabled | quote }}
+        - name: METRICS_VULNERABILITY_RISK_ENABLED
+          value: {{ .Values.scanServer.config.metrics.vulnerabilityRiskEnabled | quote }}
         - name: JOBS_RESCAN_DATABASE_ENABLED
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.enabled | quote }}
         - name: JOBS_RESCAN_DATABASE_INTERVAL

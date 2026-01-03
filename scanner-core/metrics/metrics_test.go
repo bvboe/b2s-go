@@ -938,3 +938,381 @@ func TestCollector_EscapesVulnerabilityLabels(t *testing.T) {
 		t.Error("Expected escaped quotes in fixed version")
 	}
 }
+
+func TestCollector_CollectVulnerabilityRisk(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test-cluster",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
+
+	mockDB := &MockDatabaseProvider{
+		vulnerabilities: []database.VulnerabilityInstance{
+			{
+				Namespace:      "default",
+				Pod:            "test-pod-1",
+				Container:      "nginx",
+				NodeName:       "node-1",
+				Repository:     "nginx",
+				Tag:            "1.21",
+				Digest:         "sha256:abc123",
+				OSName:         "debian",
+				CVEID:          "CVE-2022-48174",
+				PackageName:    "busybox",
+				PackageVersion: "1.35.0",
+				Severity:       "Critical",
+				FixStatus:      "fixed",
+				FixedVersion:   "1.35.1",
+				Count:          1,
+				KnownExploited: 0,
+				Risk:           7.5,
+			},
+			{
+				Namespace:      "default",
+				Pod:            "test-pod-2",
+				Container:      "redis",
+				NodeName:       "node-2",
+				Repository:     "redis",
+				Tag:            "6.2",
+				Digest:         "sha256:def456",
+				OSName:         "alpine",
+				CVEID:          "CVE-2023-5678",
+				PackageName:    "openssl",
+				PackageVersion: "1.1.1",
+				Severity:       "High",
+				FixStatus:      "not-fixed",
+				FixedVersion:   "",
+				Count:          2,
+				KnownExploited: 1,
+				Risk:           0.0,
+			},
+			{
+				Namespace:      "prod",
+				Pod:            "test-pod-3",
+				Container:      "postgres",
+				NodeName:       "node-3",
+				Repository:     "postgres",
+				Tag:            "14",
+				Digest:         "sha256:ghi789",
+				OSName:         "debian",
+				CVEID:          "CVE-2024-1234",
+				PackageName:    "libpq",
+				PackageVersion: "14.0",
+				Severity:       "Medium",
+				FixStatus:      "fixed",
+				FixedVersion:   "14.1",
+				Count:          1,
+				KnownExploited: 0,
+				Risk:           3.2,
+			},
+		},
+	}
+
+	config := CollectorConfig{
+		DeploymentEnabled:         false,
+		ScannedInstancesEnabled:   false,
+		VulnerabilitiesEnabled:    false,
+		VulnerabilityRiskEnabled:  true,
+	}
+
+	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+	data, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
+
+	// Verify vulnerability risk metric is present
+	if !strings.Contains(metrics, "bjorn2scan_vulnerability_risk{") {
+		t.Error("Expected bjorn2scan_vulnerability_risk metric")
+	}
+
+	// Verify all three vulnerabilities are included (no filtering)
+	if !strings.Contains(metrics, `vulnerability="CVE-2022-48174"`) {
+		t.Error("Expected CVE-2022-48174")
+	}
+	if !strings.Contains(metrics, `vulnerability="CVE-2023-5678"`) {
+		t.Error("Expected CVE-2023-5678 (risk=0.0 should be included)")
+	}
+	if !strings.Contains(metrics, `vulnerability="CVE-2024-1234"`) {
+		t.Error("Expected CVE-2024-1234")
+	}
+
+	// Verify float values are present
+	if !strings.Contains(metrics, "7.5") {
+		t.Error("Expected risk value 7.5")
+	}
+	if !strings.Contains(metrics, "0") {
+		t.Error("Expected risk value 0 (for zero risk)")
+	}
+	if !strings.Contains(metrics, "3.2") {
+		t.Error("Expected risk value 3.2")
+	}
+}
+
+func TestCollector_VulnerabilityRiskLabels(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test-cluster",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
+
+	mockDB := &MockDatabaseProvider{
+		vulnerabilities: []database.VulnerabilityInstance{
+			{
+				VulnID:         123,
+				Namespace:      "production",
+				Pod:            "web-app-xyz",
+				Container:      "nginx-container",
+				NodeName:       "worker-node-1",
+				Repository:     "nginx",
+				Tag:            "1.21.6",
+				Digest:         "sha256:abcdef123456",
+				OSName:         "debian-11",
+				CVEID:          "CVE-2022-48174",
+				PackageName:    "busybox",
+				PackageVersion: "1.35.0",
+				Severity:       "Critical",
+				FixStatus:      "fixed",
+				FixedVersion:   "1.35.1",
+				Count:          1,
+				KnownExploited: 1,
+				Risk:           8.9,
+			},
+		},
+	}
+
+	config := CollectorConfig{
+		VulnerabilityRiskEnabled: true,
+	}
+
+	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+	data, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	metrics := FormatPrometheus(data)
+
+	// Verify all required labels are present
+	expectedLabels := []string{
+		`deployment_uuid="550e8400-e29b-41d4-a716-446655440000"`,
+		`host_name="worker-node-1"`,
+		`namespace="production"`,
+		`pod="web-app-xyz"`,
+		`container="nginx-container"`,
+		`distro="debian-11"`,
+		`image_repo="nginx"`,
+		`image_tag="1.21.6"`,
+		`image_digest="sha256:abcdef123456"`,
+		`instance_type="CONTAINER"`,
+		`severity="Critical"`,
+		`vulnerability="CVE-2022-48174"`,
+		`package_name="busybox"`,
+		`package_version="1.35.0"`,
+		`fix_status="fixed"`,
+		`fixed_version="1.35.1"`,
+	}
+
+	for _, label := range expectedLabels {
+		if !strings.Contains(metrics, label) {
+			t.Errorf("Expected label %s in metrics output", label)
+		}
+	}
+
+	// Verify risk value
+	if !strings.Contains(metrics, "8.9") {
+		t.Error("Expected risk value 8.9")
+	}
+}
+
+func TestCollector_ConfigTogglesWithVulnerabilityRisk(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+
+	mockDB := &MockDatabaseProvider{
+		vulnerabilities: []database.VulnerabilityInstance{
+			{
+				CVEID: "CVE-2022-48174",
+				Risk:  5.5,
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		config       CollectorConfig
+		expectMetric bool
+	}{
+		{
+			name: "VulnerabilityRiskEnabled_true",
+			config: CollectorConfig{
+				VulnerabilityRiskEnabled: true,
+			},
+			expectMetric: true,
+		},
+		{
+			name: "VulnerabilityRiskEnabled_false",
+			config: CollectorConfig{
+				VulnerabilityRiskEnabled: false,
+			},
+			expectMetric: false,
+		},
+		{
+			name: "All_metrics_enabled",
+			config: CollectorConfig{
+				DeploymentEnabled:            true,
+				ScannedInstancesEnabled:      true,
+				VulnerabilitiesEnabled:       true,
+				VulnerabilityExploitedEnabled: true,
+				VulnerabilityRiskEnabled:     true,
+			},
+			expectMetric: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector := NewCollector(infoProvider, "test-uuid", mockDB, tt.config)
+			data, err := collector.Collect()
+			if err != nil {
+				t.Fatalf("Failed to collect metrics: %v", err)
+			}
+
+			metrics := FormatPrometheus(data)
+			hasMetric := strings.Contains(metrics, "bjorn2scan_vulnerability_risk")
+
+			if hasMetric != tt.expectMetric {
+				t.Errorf("Expected metric presence: %v, got: %v", tt.expectMetric, hasMetric)
+			}
+		})
+	}
+}
+
+func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test-cluster",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
+
+	// Test various float values including edge cases
+	mockDB := &MockDatabaseProvider{
+		vulnerabilities: []database.VulnerabilityInstance{
+			{
+				CVEID:     "CVE-2022-0001",
+				Namespace: "default",
+				Pod:       "test-1",
+				Container: "app",
+				Risk:      0.0,
+			},
+			{
+				CVEID:     "CVE-2022-0002",
+				Namespace: "default",
+				Pod:       "test-2",
+				Container: "app",
+				Risk:      0.5,
+			},
+			{
+				CVEID:     "CVE-2022-0003",
+				Namespace: "default",
+				Pod:       "test-3",
+				Container: "app",
+				Risk:      7.5,
+			},
+			{
+				CVEID:     "CVE-2022-0004",
+				Namespace: "default",
+				Pod:       "test-4",
+				Container: "app",
+				Risk:      10.0,
+			},
+			{
+				CVEID:     "CVE-2022-0005",
+				Namespace: "default",
+				Pod:       "test-5",
+				Container: "app",
+				Risk:      3.14159,
+			},
+		},
+	}
+
+	config := CollectorConfig{
+		VulnerabilityRiskEnabled: true,
+	}
+
+	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
+	data, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	metrics := FormatPrometheus(data)
+
+	// Verify different float values are present
+	testCases := []struct {
+		cve   string
+		value string
+	}{
+		{"CVE-2022-0001", "0"},          // Zero value
+		{"CVE-2022-0002", "0.5"},        // Decimal
+		{"CVE-2022-0003", "7.5"},        // Common CVSS score
+		{"CVE-2022-0004", "10"},         // Maximum
+		{"CVE-2022-0005", "3.14159"},    // Multiple decimals
+	}
+
+	for _, tc := range testCases {
+		if !strings.Contains(metrics, tc.cve) {
+			t.Errorf("Expected CVE %s in output", tc.cve)
+		}
+		if !strings.Contains(metrics, tc.value) {
+			t.Errorf("Expected risk value %s in output", tc.value)
+		}
+	}
+
+	// Verify Prometheus format is valid (should use %g which produces valid float format)
+	lines := strings.Split(metrics, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "bjorn2scan_vulnerability_risk{") {
+			// Line should end with a valid float
+			parts := strings.Split(line, "} ")
+			if len(parts) != 2 {
+				t.Errorf("Invalid metric line format: %s", line)
+			}
+		}
+	}
+}
+
+func TestCollector_VulnerabilityRiskWithNilDatabase(t *testing.T) {
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+
+	config := CollectorConfig{
+		VulnerabilityRiskEnabled: true,
+	}
+
+	// Pass nil database
+	collector := NewCollector(infoProvider, "test-uuid", nil, config)
+	data, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	metrics := FormatPrometheus(data)
+
+	// Should not contain vulnerability risk metric when database is nil
+	if strings.Contains(metrics, "bjorn2scan_vulnerability_risk") {
+		t.Error("Should not have vulnerability risk metric with nil database")
+	}
+}

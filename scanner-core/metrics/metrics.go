@@ -26,6 +26,7 @@ type CollectorConfig struct {
 	ScannedInstancesEnabled  bool
 	VulnerabilitiesEnabled   bool
 	VulnerabilityExploitedEnabled bool
+	VulnerabilityRiskEnabled bool
 }
 
 // Collector collects metrics and formats them for Prometheus
@@ -84,6 +85,15 @@ func (c *Collector) Collect() (*MetricsData, error) {
 		family, err := c.collectVulnerabilityExploitedMetrics()
 		if err != nil {
 			return nil, fmt.Errorf("failed to collect vulnerability exploited metrics: %w", err)
+		}
+		data.Families = append(data.Families, family)
+	}
+
+	// Collect vulnerability risk metrics if enabled
+	if c.config.VulnerabilityRiskEnabled && c.database != nil {
+		family, err := c.collectVulnerabilityRiskMetrics()
+		if err != nil {
+			return nil, fmt.Errorf("failed to collect vulnerability risk metrics: %w", err)
 		}
 		data.Families = append(data.Families, family)
 	}
@@ -217,7 +227,7 @@ func (c *Collector) collectVulnerabilityMetrics() (MetricFamily, error) {
 				"fix_status":                           instance.FixStatus,
 				"fixed_version":                        instance.FixedVersion,
 			},
-			Value: int64(instance.Count),
+			Value: float64(instance.Count),
 		})
 	}
 
@@ -284,13 +294,75 @@ func (c *Collector) collectVulnerabilityExploitedMetrics() (MetricFamily, error)
 				"fix_status":                           instance.FixStatus,
 				"fixed_version":                        instance.FixedVersion,
 			},
-			Value: int64(instance.KnownExploited),
+			Value: float64(instance.KnownExploited),
 		})
 	}
 
 	return MetricFamily{
 		Name:    "bjorn2scan_vulnerability_exploited",
 		Help:    "Bjorn2scan known exploited vulnerabilities (CISA KEV) in running container instances",
+		Type:    "gauge",
+		Metrics: metrics,
+	}, nil
+}
+
+// collectVulnerabilityRiskMetrics generates bjorn2scan_vulnerability_risk metrics for all vulnerabilities in running containers
+// Uses risk field (float) to provide risk scores for each vulnerability
+func (c *Collector) collectVulnerabilityRiskMetrics() (MetricFamily, error) {
+	instances, err := c.database.GetVulnerabilityInstances()
+	if err != nil {
+		return MetricFamily{}, fmt.Errorf("failed to get vulnerability instances: %w", err)
+	}
+
+	metrics := make([]MetricPoint, 0, len(instances))
+
+	for _, instance := range instances {
+		// Generate hierarchical labels
+		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
+		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
+		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
+			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
+		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Digest)
+		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Pod)
+		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
+		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, instance.VulnID)
+
+		metrics = append(metrics, MetricPoint{
+			Labels: map[string]string{
+				"deployment_uuid":                      c.deploymentUUID,
+				"deployment_uuid_host_name":            deploymentUUIDHostName,
+				"deployment_uuid_namespace":            deploymentUUIDNamespace,
+				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
+				"deployment_uuid_namespace_image_id":   deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_pod":        deploymentUUIDNamespacePod,
+				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
+				"host_name":                            instance.NodeName,
+				"namespace":                            instance.Namespace,
+				"pod":                                  instance.Pod,
+				"container":                            instance.Container,
+				"distro":                               instance.OSName,
+				"image_repo":                           instance.Repository,
+				"image_tag":                            instance.Tag,
+				"image_digest":                         instance.Digest,
+				"instance_type":                        "CONTAINER",
+				"severity":                             instance.Severity,
+				"vulnerability":                        instance.CVEID,
+				"vulnerability_id":                     vulnerabilityID,
+				"package_name":                         instance.PackageName,
+				"package_version":                      instance.PackageVersion,
+				"fix_status":                           instance.FixStatus,
+				"fixed_version":                        instance.FixedVersion,
+			},
+			Value: instance.Risk,
+		})
+	}
+
+	return MetricFamily{
+		Name:    "bjorn2scan_vulnerability_risk",
+		Help:    "Bjorn2scan vulnerability risk scores for running container instances",
 		Type:    "gauge",
 		Metrics: metrics,
 	}, nil

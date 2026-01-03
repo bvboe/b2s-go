@@ -448,8 +448,9 @@ type VulnerabilityInstance struct {
 	Severity       string `json:"severity"`
 	FixStatus      string `json:"fix_status"`
 	FixedVersion   string `json:"fixed_version"`
-	Count          int    `json:"count"`
-	KnownExploited int    `json:"known_exploited"`
+	Count          int     `json:"count"`
+	KnownExploited int     `json:"known_exploited"`
+	Risk           float64 `json:"risk"`
 }
 
 // GetVulnerabilityInstances returns all vulnerabilities for all running container instances
@@ -472,7 +473,8 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 			COALESCE(v.fix_status, '') as fix_status,
 			COALESCE(v.fixed_version, '') as fixed_version,
 			v.count,
-			v.known_exploited
+			v.known_exploited,
+			v.risk
 		FROM container_instances ci
 		JOIN container_images img ON ci.image_id = img.id
 		JOIN vulnerabilities v ON img.id = v.image_id
@@ -509,6 +511,7 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 			&instance.FixedVersion,
 			&instance.Count,
 			&instance.KnownExploited,
+			&instance.Risk,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan vulnerability instance row: %w", err)

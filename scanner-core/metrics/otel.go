@@ -43,7 +43,7 @@ type OTELExporter struct {
 	config        OTELConfig
 	meterProvider *sdkmetric.MeterProvider
 	meter         metric.Meter
-	gauges        map[string]metric.Int64Gauge
+	gauges        map[string]metric.Float64Gauge
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
@@ -122,7 +122,7 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 		config:        config,
 		meterProvider: meterProvider,
 		meter:         meter,
-		gauges:        make(map[string]metric.Int64Gauge),
+		gauges:        make(map[string]metric.Float64Gauge),
 		ctx:           exporterCtx,
 		cancel:        cancel,
 	}, nil
@@ -184,14 +184,14 @@ func (e *OTELExporter) recordMetrics() {
 }
 
 // getOrCreateGauge returns an existing gauge or creates a new one
-func (e *OTELExporter) getOrCreateGauge(name, help string) (metric.Int64Gauge, error) {
+func (e *OTELExporter) getOrCreateGauge(name, help string) (metric.Float64Gauge, error) {
 	// Check if gauge already exists
 	if gauge, ok := e.gauges[name]; ok {
 		return gauge, nil
 	}
 
 	// Create new gauge
-	gauge, err := e.meter.Int64Gauge(name, metric.WithDescription(help))
+	gauge, err := e.meter.Float64Gauge(name, metric.WithDescription(help))
 	if err != nil {
 		return nil, err
 	}

@@ -120,6 +120,23 @@ bjorn2scan_vulnerability_exploited{deployment_uuid="abc-123",namespace="frontend
 - Agent config: `metrics_vulnerability_exploited_enabled=true`
 - Environment: `METRICS_VULNERABILITY_EXPLOITED_ENABLED=true`
 
+#### `bjorn2scan_vulnerability_risk`
+Gauge metric reporting vulnerability risk scores for running container instances. Value represents the risk score (float) for each vulnerability. Includes all vulnerabilities regardless of risk value.
+
+**Labels**: Same as `bjorn2scan_vulnerability`
+
+**Example**:
+```
+bjorn2scan_vulnerability_risk{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 7.5
+```
+
+**Use Case**: This metric provides granular risk assessment based on multiple factors (CVSS, EPSS, exploitability). The risk score helps prioritize remediation efforts with more nuance than severity alone.
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.vulnerabilityRiskEnabled: true`
+- Agent config: `metrics_vulnerability_risk_enabled=true`
+- Environment: `METRICS_VULNERABILITY_RISK_ENABLED=true`
+
 ### 3. System Metrics
 
 #### `bjorn2scan_scan_status`
@@ -229,6 +246,26 @@ count by (namespace, pod, container) (bjorn2scan_vulnerability_exploited > 0)
 ### Top 10 most critical exploited vulnerabilities
 ```promql
 topk(10, sum by (vulnerability, severity) (bjorn2scan_vulnerability_exploited{severity="Critical"}))
+```
+
+### Average risk score by severity
+```promql
+avg by (severity) (bjorn2scan_vulnerability_risk)
+```
+
+### Highest risk vulnerabilities across all containers
+```promql
+topk(10, max by (vulnerability, severity) (bjorn2scan_vulnerability_risk))
+```
+
+### Containers with high-risk vulnerabilities (risk > 7.0)
+```promql
+count by (namespace, pod, container) (bjorn2scan_vulnerability_risk > 7.0)
+```
+
+### Total risk exposure by namespace
+```promql
+sum by (namespace) (bjorn2scan_vulnerability_risk)
 ```
 
 ### Deployment info

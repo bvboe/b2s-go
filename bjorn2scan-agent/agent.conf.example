@@ -208,3 +208,10 @@ metrics_vulnerabilities_enabled=true
 # Warning: Similar to bjorn2scan_vulnerability, this can generate high metric cardinality
 # Environment variable: METRICS_VULNERABILITY_EXPLOITED_ENABLED
 metrics_vulnerability_exploited_enabled=true
+
+# Enable bjorn2scan_vulnerability_risk metric (default: true)
+# This metric reports vulnerability risk scores for running container instances
+# Uses the risk field (float) to provide granular risk assessment for each vulnerability
+# Warning: Similar to bjorn2scan_vulnerability, this can generate high metric cardinality
+# Environment variable: METRICS_VULNERABILITY_RISK_ENABLED
+metrics_vulnerability_risk_enabled=true

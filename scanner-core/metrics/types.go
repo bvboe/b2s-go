@@ -3,7 +3,7 @@ package metrics
 // MetricPoint represents a single metric observation with labels and value
 type MetricPoint struct {
 	Labels map[string]string
-	Value  int64
+	Value  float64
 }
 
 // MetricFamily represents a family of metrics (e.g., all bjorn2scan_deployment metrics)
