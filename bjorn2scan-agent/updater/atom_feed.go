@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -56,6 +57,34 @@ func NewFeedParser(feedURL string) *FeedParser {
 	}
 }
 
+// extractTagFromID extracts the tag name from an atom entry ID.
+// The ID format is: tag:github.com,2008:Repository/{repo_id}/{tag}
+// For example: tag:github.com,2008:Repository/1114756634/v0.1.72 -> v0.1.72
+//
+// We use the ID instead of the Title because GitHub may temporarily show
+// a corrupted title during release creation (e.g., "v0.1.72: ## 🎯 Highlights")
+// while the ID always contains the correct tag name.
+func extractTagFromID(id string) string {
+	lastSlash := strings.LastIndex(id, "/")
+	if lastSlash == -1 || lastSlash == len(id)-1 {
+		return ""
+	}
+	return id[lastSlash+1:]
+}
+
+// isReleaseReady checks if an atom entry represents a complete release
+// (not just a tag). GitHub shows tags in the atom feed before releases are created.
+// When the release exists, the <title> matches the tag name from <id>.
+// When only the tag exists, the <title> contains extra content from the tag annotation.
+func isReleaseReady(entry AtomEntry) bool {
+	tag := extractTagFromID(entry.ID)
+	if tag == "" {
+		return false
+	}
+	// If title matches the tag exactly, the release is ready
+	return entry.Title == tag
+}
+
 // GetLatestRelease fetches and parses the feed to get the latest release
 func (fp *FeedParser) GetLatestRelease(ctx context.Context) (*Release, error) {
 	// Fetch feed
@@ -85,13 +114,25 @@ func (fp *FeedParser) GetLatestRelease(ctx context.Context) (*Release, error) {
 		return nil, fmt.Errorf("failed to parse feed XML: %w", err)
 	}
 
-	// Get latest entry (first in the feed)
-	if len(feed.Entries) == 0 {
-		return nil, fmt.Errorf("no releases found in feed")
+	// Find first entry that is a complete release (not just a tag)
+	// Tags appear in the feed before releases are created, with corrupted titles
+	var entry *AtomEntry
+	for i := range feed.Entries {
+		if isReleaseReady(feed.Entries[i]) {
+			entry = &feed.Entries[i]
+			break
+		}
 	}
 
-	entry := feed.Entries[0]
-	tag := entry.Title
+	if entry == nil {
+		return nil, fmt.Errorf("no releases found in feed (only tags)")
+	}
+
+	// Extract tag from ID (more reliable than Title during release creation)
+	tag := extractTagFromID(entry.ID)
+	if tag == "" {
+		return nil, fmt.Errorf("failed to extract tag from entry ID: %s", entry.ID)
+	}
 
 	// Strip 'v' prefix if present
 	version := tag
@@ -136,10 +177,21 @@ func (fp *FeedParser) ListReleases(ctx context.Context) ([]*Release, error) {
 		return nil, fmt.Errorf("failed to parse feed XML: %w", err)
 	}
 
-	// Convert entries to releases
+	// Convert entries to releases, filtering out tag-only entries
 	releases := make([]*Release, 0, len(feed.Entries))
 	for _, entry := range feed.Entries {
-		tag := entry.Title
+		// Skip entries that are just tags (not complete releases)
+		if !isReleaseReady(entry) {
+			continue
+		}
+
+		// Extract tag from ID (more reliable than Title during release creation)
+		tag := extractTagFromID(entry.ID)
+		if tag == "" {
+			// Skip entries with unparseable IDs
+			continue
+		}
+
 		version := tag
 		if len(version) > 0 && version[0] == 'v' {
 			version = version[1:]

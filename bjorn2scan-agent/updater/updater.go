@@ -245,10 +245,10 @@ func (u *Updater) TriggerCheck() {
 }
 
 // GetStatus returns the current status
-func (u *Updater) GetStatus() (Status, string, time.Time, time.Time, string) {
+func (u *Updater) GetStatus() (Status, string, time.Time, time.Time, string, string) {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
-	return u.status, u.errorMsg, u.lastCheck, u.lastUpdate, u.latestVersion
+	return u.status, u.errorMsg, u.lastCheck, u.lastUpdate, u.latestVersion, u.config.CurrentVersion
 }
 
 // setStatus updates the current status

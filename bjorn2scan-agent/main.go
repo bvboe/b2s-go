@@ -151,13 +151,14 @@ func registerUpdaterHandlers(mux *http.ServeMux, u *updater.Updater) {
 			return
 		}
 
-		status, errorMsg, lastCheck, lastUpdate, latestVersion := u.GetStatus()
+		status, errorMsg, lastCheck, lastUpdate, latestVersion, currentVersion := u.GetStatus()
 		response := map[string]interface{}{
-			"status":        status,
-			"error":         errorMsg,
-			"lastCheck":     lastCheck,
-			"lastUpdate":    lastUpdate,
-			"latestVersion": latestVersion,
+			"status":         status,
+			"error":          errorMsg,
+			"lastCheck":      lastCheck,
+			"lastUpdate":     lastUpdate,
+			"latestVersion":  latestVersion,
+			"currentVersion": currentVersion,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

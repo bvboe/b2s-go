@@ -25,19 +25,19 @@
   - [ ] RHEL/Rocky/AlmaLinux 8/9
   - [ ] Fedora (latest)
   - [ ] Raspberry Pi OS (ARM64)
-- [ ] OpenTelemetry integration
-- [ ] Database optimization
+- [X] OpenTelemetry integration
+- [X] Database optimization
 - [ ] Other K8s distributions
   - [ ] GKE
   - [ ] EKS
   - [ ] AKS
-- [ ] Sending data using opentelemetry to a remote opentelemetry server
+- [X] Sending data using opentelemetry to a remote opentelemetry server
 - [ ] Make sure auto updates verify signatures (signature verification stub needs implementation in verifier.go)
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 - [ ] Implement cosign signature verification in verifier.go (currently just returns nil), also for helm and put SHAs in values.yml
 
 ## Recently Completed
-- [ ] [2025-12-30] Implemented Prometheus metrics endpoint at /metrics
+- [X] [2025-12-30] Implemented Prometheus metrics endpoint at /metrics
   - Created scanner-core/metrics package with lightweight Prometheus text format generator
   - Exposed metrics: scanned_instances, vulnerabilities_total, packages_total, scan_status, images_total, instances_total
   - Metrics include rich labels: cluster_name, namespace, pod_name, container_name, image, image_id, distro_name, severity, etc.

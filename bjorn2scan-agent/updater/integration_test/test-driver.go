@@ -61,7 +61,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Update check timed out\n")
 			os.Exit(1)
 		case <-ticker.C:
-			status, errMsg, _, _, _ := u.GetStatus()
+			status, errMsg, _, _, _, _ := u.GetStatus()
 
 			if status == updater.StatusFailed {
 				fmt.Fprintf(os.Stderr, "Update failed: %s\n", errMsg)

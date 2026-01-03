@@ -189,7 +189,7 @@ func TestUpdater_StatusManagement(t *testing.T) {
 			updater.setStatus(tt.status, tt.errorMsg)
 
 			// Get status
-			status, errorMsg, lastCheck, lastUpdate, latestVersion := updater.GetStatus()
+			status, errorMsg, lastCheck, lastUpdate, latestVersion, _ := updater.GetStatus()
 
 			if status != tt.status {
 				t.Errorf("Status = %v, want %v", status, tt.status)
@@ -212,6 +212,24 @@ func TestUpdater_StatusManagement(t *testing.T) {
 				t.Error("latestVersion should be empty initially")
 			}
 		})
+	}
+}
+
+func TestUpdater_GetStatusReturnsCurrentVersion(t *testing.T) {
+	config := &Config{
+		FeedURL:        "http://localhost:8080/releases.atom",
+		AssetBaseURL:   "http://localhost:8080/download",
+		CurrentVersion: "1.2.3",
+	}
+
+	updater, err := New(config)
+	if err != nil {
+		t.Fatalf("Failed to create updater: %v", err)
+	}
+
+	_, _, _, _, _, currentVersion := updater.GetStatus()
+	if currentVersion != "1.2.3" {
+		t.Errorf("GetStatus() currentVersion = %q, want %q", currentVersion, "1.2.3")
 	}
 }
 
@@ -525,7 +543,7 @@ func TestUpdater_TriggerCheck(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Check that status changed (likely to StatusFailed due to API call failing)
-	status, _, _, _, _ := updater.GetStatus()
+	status, _, _, _, _, _ := updater.GetStatus()
 	if status == StatusIdle {
 		// It might still be idle if the check hasn't started yet
 		// This is expected in a unit test without real API
