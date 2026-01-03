@@ -12,6 +12,8 @@ type InfoProvider interface {
 	GetDeploymentName() string // hostname for agent, cluster name for k8s
 	GetDeploymentType() string // "agent" or "kubernetes"
 	GetVersion() string
+	GetDeploymentIP() string   // primary outbound IP for agent, node IP for k8s
+	GetConsoleURL() string     // web UI URL (empty if disabled)
 }
 
 // DatabaseProvider provides access to container instance data
@@ -106,6 +108,25 @@ func (c *Collector) collectDeploymentMetric() (MetricFamily, error) {
 	deploymentName := c.infoProvider.GetDeploymentName()
 	deploymentType := c.infoProvider.GetDeploymentType()
 	version := c.infoProvider.GetVersion()
+	deploymentIP := c.infoProvider.GetDeploymentIP()
+	consoleURL := c.infoProvider.GetConsoleURL()
+
+	labels := map[string]string{
+		"deployment_uuid":    c.deploymentUUID,
+		"deployment_name":    deploymentName,
+		"deployment_type":    deploymentType,
+		"bjorn2scan_version": version,
+	}
+
+	// Only include deployment_ip if not empty
+	if deploymentIP != "" {
+		labels["deployment_ip"] = deploymentIP
+	}
+
+	// Only include deployment_console if not empty
+	if consoleURL != "" {
+		labels["deployment_console"] = consoleURL
+	}
 
 	return MetricFamily{
 		Name: "bjorn2scan_deployment",
@@ -113,13 +134,8 @@ func (c *Collector) collectDeploymentMetric() (MetricFamily, error) {
 		Type: "gauge",
 		Metrics: []MetricPoint{
 			{
-				Labels: map[string]string{
-					"deployment_uuid":     c.deploymentUUID,
-					"deployment_name":     deploymentName,
-					"deployment_type":     deploymentType,
-					"bjorn2scan_version":  version,
-				},
-				Value: 1,
+				Labels: labels,
+				Value:  1,
 			},
 		},
 	}, nil

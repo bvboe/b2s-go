@@ -55,6 +55,18 @@ spec:
           value: "{{ .Values.scanServer.persistence.mountPath }}/containers.db"
         - name: DEBUG_ENABLED
           value: {{ .Values.scanServer.config.debugEnabled | quote }}
+        - name: WEB_UI_ENABLED
+          value: {{ .Values.scanServer.config.webUIEnabled | quote }}
+        - name: CONSOLE_URL
+          value: {{ .Values.scanServer.config.consoleURL | quote }}
+        - name: SERVICE_NAME
+          value: {{ include "bjorn2scan.fullname" . }}
+        - name: SERVICE_PORT
+          value: {{ .Values.scanServer.service.port | quote }}
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         - name: OTEL_METRICS_ENABLED
           value: {{ .Values.scanServer.config.otelMetrics.enabled | quote }}
         - name: OTEL_METRICS_ENDPOINT

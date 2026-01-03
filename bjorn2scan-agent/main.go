@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,7 +43,17 @@ type InfoResponse struct {
 	Arch      string `json:"arch"`
 }
 
-type AgentInfo struct{}
+type AgentInfo struct {
+	port         string
+	webUIEnabled bool
+}
+
+func NewAgentInfo(port string, webUIEnabled bool) *AgentInfo {
+	return &AgentInfo{
+		port:         port,
+		webUIEnabled: webUIEnabled,
+	}
+}
 
 func (a *AgentInfo) GetInfo() interface{} {
 	hostname, _ := os.Hostname()
@@ -85,6 +97,39 @@ func (a *AgentInfo) GetScanContainers() bool {
 func (a *AgentInfo) GetScanNodes() bool {
 	// Agent does not scan nodes
 	return false
+}
+
+func (a *AgentInfo) GetDeploymentIP() string {
+	// Get primary outbound IP address by dialing a well-known address
+	// This determines which local IP would be used for outbound connections
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		log.Printf("Warning: failed to determine primary outbound IP: %v", err)
+		return ""
+	}
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close connection: %v", closeErr)
+		}
+	}()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
+func (a *AgentInfo) GetConsoleURL() string {
+	// Return empty if web UI is disabled
+	if !a.webUIEnabled {
+		return ""
+	}
+
+	// Construct console URL: http://<ip>:<port>/
+	ip := a.GetDeploymentIP()
+	if ip == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("http://%s:%s/", ip, a.port)
 }
 
 // registerUpdaterHandlers registers HTTP handlers for the updater
@@ -349,11 +394,15 @@ func main() {
 	}
 
 	// Setup HTTP server
-	infoProvider := &AgentInfo{}
+	infoProvider := NewAgentInfo(cfg.Port, cfg.WebUIEnabled)
 	mux := http.NewServeMux()
 	handlers.RegisterHandlers(mux, infoProvider)
 	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
-	handlers.RegisterStaticHandlers(mux)
+
+	// Register static handlers only if web UI is enabled
+	if cfg.WebUIEnabled {
+		handlers.RegisterStaticHandlers(mux)
+	}
 
 	// Register updater API endpoints if updater is initialized
 	if agentUpdater != nil {

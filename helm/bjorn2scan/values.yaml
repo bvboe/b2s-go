@@ -79,6 +79,8 @@ scanServer:
   config:
     port: "8080"
     debugEnabled: true  # Set to true to enable debug endpoints (/debug/sql, /debug/metrics)
+    webUIEnabled: true  # Set to false to disable the web UI
+    consoleURL: ""  # Custom console URL (e.g., https://bjorn2scan.example.com/). Leave empty for auto-detection
 
     # OpenTelemetry Metrics Configuration
     otelMetrics:

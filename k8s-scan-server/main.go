@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 	// SQLite driver is registered by Grype's dependencies
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -40,7 +43,25 @@ type InfoResponse struct {
 	Namespace string `json:"namespace"`
 }
 
-type K8sScanServerInfo struct{}
+type K8sScanServerInfo struct {
+	port          string
+	webUIEnabled  bool
+	consoleURL    string // Custom console URL override from Helm
+	k8sClient     kubernetes.Interface
+	serviceName   string
+	servicePort   string
+}
+
+func NewK8sScanServerInfo(port string, webUIEnabled bool, consoleURL string, k8sClient kubernetes.Interface, serviceName, servicePort string) *K8sScanServerInfo {
+	return &K8sScanServerInfo{
+		port:         port,
+		webUIEnabled: webUIEnabled,
+		consoleURL:   consoleURL,
+		k8sClient:    k8sClient,
+		serviceName:  serviceName,
+		servicePort:  servicePort,
+	}
+}
 
 func (k *K8sScanServerInfo) GetInfo() interface{} {
 	return InfoResponse{
@@ -96,6 +117,96 @@ func (k *K8sScanServerInfo) GetScanNodes() bool {
 		return true
 	}
 	return false
+}
+
+func (k *K8sScanServerInfo) GetDeploymentIP() string {
+	// Use Node IP from downward API environment variable
+	nodeIP := os.Getenv("NODE_IP")
+	if nodeIP != "" {
+		return nodeIP
+	}
+
+	log.Printf("Warning: NODE_IP environment variable not set")
+	return ""
+}
+
+func (k *K8sScanServerInfo) GetConsoleURL() string {
+	// If custom console URL is provided via Helm, use it
+	if k.consoleURL != "" {
+		return k.consoleURL
+	}
+
+	// Return empty if web UI is disabled
+	if !k.webUIEnabled {
+		return ""
+	}
+
+	// Try to construct URL based on service configuration
+	namespace := os.Getenv("NAMESPACE")
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	// Try to get service information from Kubernetes API
+	if k.k8sClient != nil && k.serviceName != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		svc, err := k.k8sClient.CoreV1().Services(namespace).Get(ctx, k.serviceName, metav1.GetOptions{})
+		if err != nil {
+			log.Printf("Warning: failed to get service %s: %v", k.serviceName, err)
+		} else {
+			// Determine URL based on service type
+			switch svc.Spec.Type {
+			case corev1.ServiceTypeLoadBalancer:
+				// Use LoadBalancer IP if available
+				if len(svc.Status.LoadBalancer.Ingress) > 0 {
+					ingress := svc.Status.LoadBalancer.Ingress[0]
+					if ingress.IP != "" {
+						port := k.servicePort
+						if port == "" && len(svc.Spec.Ports) > 0 {
+							port = fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
+						}
+						return fmt.Sprintf("http://%s:%s/", ingress.IP, port)
+					}
+					if ingress.Hostname != "" {
+						port := k.servicePort
+						if port == "" && len(svc.Spec.Ports) > 0 {
+							port = fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
+						}
+						return fmt.Sprintf("http://%s:%s/", ingress.Hostname, port)
+					}
+				}
+
+			case corev1.ServiceTypeNodePort:
+				// Use Node IP + NodePort
+				nodeIP := k.GetDeploymentIP()
+				if nodeIP != "" && len(svc.Spec.Ports) > 0 {
+					nodePort := svc.Spec.Ports[0].NodePort
+					return fmt.Sprintf("http://%s:%d/", nodeIP, nodePort)
+				}
+
+			case corev1.ServiceTypeClusterIP:
+				// Use internal cluster DNS name
+				port := k.servicePort
+				if port == "" && len(svc.Spec.Ports) > 0 {
+					port = fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
+				}
+				return fmt.Sprintf("http://%s.%s.svc.cluster.local:%s/", k.serviceName, namespace, port)
+			}
+		}
+	}
+
+	// Fallback: construct internal cluster DNS name
+	if k.serviceName != "" {
+		port := k.servicePort
+		if port == "" {
+			port = "80"
+		}
+		return fmt.Sprintf("http://%s.%s.svc.cluster.local:%s/", k.serviceName, namespace, port)
+	}
+
+	return ""
 }
 
 func main() {
@@ -229,7 +340,15 @@ func main() {
 	}
 
 	// Setup HTTP server
-	infoProvider := &K8sScanServerInfo{}
+	// Get console URL configuration from environment (can be overridden via Helm)
+	consoleURL := os.Getenv("CONSOLE_URL")
+	serviceName := os.Getenv("SERVICE_NAME")
+	servicePort := os.Getenv("SERVICE_PORT")
+	if servicePort == "" {
+		servicePort = "80" // Default service port
+	}
+
+	infoProvider := NewK8sScanServerInfo(port, cfg.WebUIEnabled, consoleURL, clientset, serviceName, servicePort)
 	mux := http.NewServeMux()
 
 	// Register standard handlers
@@ -242,8 +361,10 @@ func main() {
 	}
 	corehandlers.RegisterDatabaseHandlers(mux, db, dbHandlerOverrides)
 
-	// Register static file handlers (web UI)
-	corehandlers.RegisterStaticHandlers(mux)
+	// Register static file handlers (web UI) only if enabled
+	if cfg.WebUIEnabled {
+		corehandlers.RegisterStaticHandlers(mux)
+	}
 
 	// Register debug handlers if debug mode is enabled
 	corehandlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)

@@ -12,6 +12,8 @@ type MockInfoProvider struct {
 	deploymentName string
 	deploymentType string
 	version        string
+	deploymentIP   string
+	consoleURL     string
 }
 
 func (m *MockInfoProvider) GetDeploymentName() string {
@@ -24,6 +26,14 @@ func (m *MockInfoProvider) GetDeploymentType() string {
 
 func (m *MockInfoProvider) GetVersion() string {
 	return m.version
+}
+
+func (m *MockInfoProvider) GetDeploymentIP() string {
+	return m.deploymentIP
+}
+
+func (m *MockInfoProvider) GetConsoleURL() string {
+	return m.consoleURL
 }
 
 // MockDatabaseProvider implements DatabaseProvider for testing

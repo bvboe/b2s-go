@@ -17,6 +17,7 @@ type Config struct {
 	Port         string
 	DBPath       string
 	DebugEnabled bool
+	WebUIEnabled bool
 
 	// Auto-update configuration
 	AutoUpdateEnabled            bool
@@ -75,6 +76,7 @@ func defaultConfig() *Config {
 		Port:         "9999",
 		DBPath:       "/var/lib/bjorn2scan/data/containers.db",
 		DebugEnabled: false,
+		WebUIEnabled: true,
 
 		// Auto-update defaults
 		AutoUpdateEnabled: true,
@@ -159,6 +161,12 @@ func LoadConfig(path string) (*Config, error) {
 			if section.HasKey("debug_enabled") {
 				debugStr := strings.ToLower(section.Key("debug_enabled").String())
 				cfg.DebugEnabled = debugStr == "true" || debugStr == "1" || debugStr == "yes"
+			}
+
+			// Load web UI enabled
+			if section.HasKey("web_ui_enabled") {
+				val := strings.ToLower(section.Key("web_ui_enabled").String())
+				cfg.WebUIEnabled = val == "true" || val == "1" || val == "yes"
 			}
 
 			// Load auto-update settings
@@ -343,6 +351,11 @@ func LoadConfig(path string) (*Config, error) {
 	if debugEnv := os.Getenv("DEBUG_ENABLED"); debugEnv != "" {
 		debugStr := strings.ToLower(debugEnv)
 		cfg.DebugEnabled = debugStr == "true" || debugStr == "1" || debugStr == "yes"
+	}
+
+	if webUIEnv := os.Getenv("WEB_UI_ENABLED"); webUIEnv != "" {
+		val := strings.ToLower(webUIEnv)
+		cfg.WebUIEnabled = val == "true" || val == "1" || val == "yes"
 	}
 
 	// Jobs enabled

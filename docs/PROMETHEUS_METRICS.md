@@ -44,11 +44,21 @@ Gauge metric providing deployment information (value always 1).
 - `deployment_name`: Deployment name (hostname for agent, cluster name for k8s)
 - `deployment_type`: Type of deployment ("agent" or "kubernetes")
 - `bjorn2scan_version`: Version of bjorn2scan
+- `deployment_ip`: IP address where scanner runs (primary outbound IP for agent, node IP for k8s). Omitted if unavailable.
+- `deployment_console`: URL of the web UI console (e.g., http://192.168.1.10:9999/). Omitted if web UI is disabled or URL cannot be determined.
 
 **Example**:
 ```
-bjorn2scan_deployment{deployment_uuid="abc-123",deployment_name="prod-cluster",deployment_type="kubernetes",bjorn2scan_version="0.1.54"} 1
+# Agent deployment with web UI enabled
+bjorn2scan_deployment{deployment_uuid="abc-123",deployment_name="my-server",deployment_type="agent",bjorn2scan_version="0.1.54",deployment_ip="192.168.1.10",deployment_console="http://192.168.1.10:9999/"} 1
+
+# Kubernetes deployment with ClusterIP service
+bjorn2scan_deployment{deployment_uuid="def-456",deployment_name="prod-cluster",deployment_type="kubernetes",bjorn2scan_version="0.1.54",deployment_ip="10.0.1.5",deployment_console="http://bjorn2scan.default.svc.cluster.local:80/"} 1
 ```
+
+**Configuration**:
+- Web UI: Enable/disable via `web_ui_enabled` (agent config) or `scanServer.config.webUIEnabled` (Helm)
+- Custom Console URL: Set via `CONSOLE_URL` environment variable or `scanServer.config.consoleURL` (Helm) to override auto-detection
 
 ### 3. Container Instance Metrics
 

@@ -16,6 +16,13 @@ db_path=/var/lib/bjorn2scan/data/containers.db
 # Environment variable: DEBUG_ENABLED
 debug_enabled=false
 
+# Enable web UI (default: true)
+# When enabled, serves the web UI at the root path (/)
+# The web UI provides a dashboard for viewing scanned containers and vulnerabilities
+# Set to false to disable the web UI and only expose API endpoints
+# Environment variable: WEB_UI_ENABLED
+web_ui_enabled=true
+
 # ============================================================================
 # AUTO-UPDATE CONFIGURATION
 # ============================================================================
