@@ -44,23 +44,43 @@ type InfoResponse struct {
 }
 
 type K8sScanServerInfo struct {
-	port          string
-	webUIEnabled  bool
-	consoleURL    string // Custom console URL override from Helm
-	k8sClient     kubernetes.Interface
-	serviceName   string
-	servicePort   string
+	port         string
+	webUIEnabled bool
+	k8sClient    kubernetes.Interface
+	serviceName  string
+	servicePort  string
+	// Cached values computed at startup
+	deploymentIP     string
+	cachedConsoleURL string
 }
 
-func NewK8sScanServerInfo(port string, webUIEnabled bool, consoleURL string, k8sClient kubernetes.Interface, serviceName, servicePort string) *K8sScanServerInfo {
-	return &K8sScanServerInfo{
+func NewK8sScanServerInfo(port string, webUIEnabled bool, customConsoleURL string, k8sClient kubernetes.Interface, serviceName, servicePort string) *K8sScanServerInfo {
+	info := &K8sScanServerInfo{
 		port:         port,
 		webUIEnabled: webUIEnabled,
-		consoleURL:   consoleURL,
 		k8sClient:    k8sClient,
 		serviceName:  serviceName,
 		servicePort:  servicePort,
 	}
+
+	// Cache deployment IP (node IP from downward API)
+	info.deploymentIP = os.Getenv("NODE_IP")
+	if info.deploymentIP == "" {
+		log.Printf("Warning: NODE_IP environment variable not set")
+	}
+
+	// Cache console URL at startup
+	if customConsoleURL != "" {
+		info.cachedConsoleURL = customConsoleURL
+	} else if webUIEnabled {
+		info.cachedConsoleURL = info.detectConsoleURL()
+	}
+
+	if info.cachedConsoleURL != "" {
+		log.Printf("Console URL: %s", info.cachedConsoleURL)
+	}
+
+	return info
 }
 
 func (k *K8sScanServerInfo) GetInfo() interface{} {
@@ -119,29 +139,19 @@ func (k *K8sScanServerInfo) GetScanNodes() bool {
 	return false
 }
 
+// GetDeploymentIP returns the cached deployment IP (node IP).
 func (k *K8sScanServerInfo) GetDeploymentIP() string {
-	// Use Node IP from downward API environment variable
-	nodeIP := os.Getenv("NODE_IP")
-	if nodeIP != "" {
-		return nodeIP
-	}
-
-	log.Printf("Warning: NODE_IP environment variable not set")
-	return ""
+	return k.deploymentIP
 }
 
+// GetConsoleURL returns the cached console URL.
 func (k *K8sScanServerInfo) GetConsoleURL() string {
-	// If custom console URL is provided via Helm, use it
-	if k.consoleURL != "" {
-		return k.consoleURL
-	}
+	return k.cachedConsoleURL
+}
 
-	// Return empty if web UI is disabled
-	if !k.webUIEnabled {
-		return ""
-	}
-
-	// Try to construct URL based on service configuration
+// detectConsoleURL determines the console URL based on service configuration.
+// Called once at startup and cached.
+func (k *K8sScanServerInfo) detectConsoleURL() string {
 	namespace := os.Getenv("NAMESPACE")
 	if namespace == "" {
 		namespace = "default"
@@ -180,10 +190,9 @@ func (k *K8sScanServerInfo) GetConsoleURL() string {
 
 			case corev1.ServiceTypeNodePort:
 				// Use Node IP + NodePort
-				nodeIP := k.GetDeploymentIP()
-				if nodeIP != "" && len(svc.Spec.Ports) > 0 {
+				if k.deploymentIP != "" && len(svc.Spec.Ports) > 0 {
 					nodePort := svc.Spec.Ports[0].NodePort
-					return fmt.Sprintf("http://%s:%d/", nodeIP, nodePort)
+					return fmt.Sprintf("http://%s:%d/", k.deploymentIP, nodePort)
 				}
 
 			case corev1.ServiceTypeClusterIP:

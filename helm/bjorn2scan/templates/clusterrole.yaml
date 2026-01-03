@@ -15,6 +15,10 @@ rules:
 - apiGroups: [""]
   resources: ["pods/status"]
   verbs: ["get"]
+# Required for console URL detection in metrics
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get"]
 {{- if .Values.updateController.enabled }}
 # Update controller needs to manage config and Helm releases
 - apiGroups: [""]

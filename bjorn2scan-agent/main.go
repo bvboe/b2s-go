@@ -46,13 +46,26 @@ type InfoResponse struct {
 type AgentInfo struct {
 	port         string
 	webUIEnabled bool
+	// Cached values computed at startup
+	deploymentIP string
+	consoleURL   string
 }
 
 func NewAgentInfo(port string, webUIEnabled bool) *AgentInfo {
-	return &AgentInfo{
+	info := &AgentInfo{
 		port:         port,
 		webUIEnabled: webUIEnabled,
 	}
+
+	// Cache deployment IP at startup
+	info.deploymentIP = info.detectOutboundIP()
+
+	// Cache console URL at startup
+	if webUIEnabled && info.deploymentIP != "" {
+		info.consoleURL = fmt.Sprintf("http://%s:%s/", info.deploymentIP, port)
+	}
+
+	return info
 }
 
 func (a *AgentInfo) GetInfo() interface{} {
@@ -99,7 +112,9 @@ func (a *AgentInfo) GetScanNodes() bool {
 	return false
 }
 
-func (a *AgentInfo) GetDeploymentIP() string {
+// detectOutboundIP determines the primary outbound IP address.
+// Called once at startup and cached.
+func (a *AgentInfo) detectOutboundIP() string {
 	// Get primary outbound IP address by dialing a well-known address
 	// This determines which local IP would be used for outbound connections
 	conn, err := net.Dial("udp", "8.8.8.8:80")
@@ -117,19 +132,14 @@ func (a *AgentInfo) GetDeploymentIP() string {
 	return localAddr.IP.String()
 }
 
+// GetDeploymentIP returns the cached deployment IP address.
+func (a *AgentInfo) GetDeploymentIP() string {
+	return a.deploymentIP
+}
+
+// GetConsoleURL returns the cached console URL.
 func (a *AgentInfo) GetConsoleURL() string {
-	// Return empty if web UI is disabled
-	if !a.webUIEnabled {
-		return ""
-	}
-
-	// Construct console URL: http://<ip>:<port>/
-	ip := a.GetDeploymentIP()
-	if ip == "" {
-		return ""
-	}
-
-	return fmt.Sprintf("http://%s:%s/", ip, a.port)
+	return a.consoleURL
 }
 
 // registerUpdaterHandlers registers HTTP handlers for the updater
