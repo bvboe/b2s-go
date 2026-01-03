@@ -313,9 +313,9 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO vulnerabilities
 		(image_id, cve_id, package_name, package_version, package_type,
-		 severity, fix_status, fixed_version, known_exploits, count,
+		 severity, fix_status, fixed_version, count,
 		 risk, epss_score, epss_percentile, known_exploited)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -383,10 +383,6 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		// Count known exploits from CISA KEV catalog
 		knownExploited := len(firstMatch.Vulnerability.KnownExploited)
 
-		// Set known_exploits to match known_exploited for backward compatibility
-		// (previously this was set to RelatedVulnerabilities count, which was incorrect)
-		knownExploits := knownExploited
-
 		result, err := stmt.Exec(
 			imageID,
 			key.cveID,
@@ -396,7 +392,6 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			firstMatch.Vulnerability.Severity,
 			fixStatus,
 			fixedVersion,
-			knownExploits,
 			count,
 			risk,
 			epssScore,

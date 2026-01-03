@@ -28,7 +28,6 @@ type Vulnerability struct {
 	Severity       string  `json:"severity"`
 	FixStatus      string  `json:"fix_status"`
 	FixedVersion   string  `json:"fixed_version"`
-	KnownExploits  int     `json:"known_exploits"`
 	Count          int     `json:"count"`
 	CreatedAt      string  `json:"created_at"`
 }
@@ -103,7 +102,7 @@ func (db *DB) GetPackagesByImage(digest string) (interface{}, error) {
 func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT v.id, v.image_id, v.cve_id, v.package_name, v.package_version, v.package_type,
-		       v.severity, v.fix_status, v.fixed_version, v.known_exploits, v.count, v.created_at
+		       v.severity, v.fix_status, v.fixed_version, v.count, v.created_at
 		FROM vulnerabilities v
 		JOIN container_images img ON v.image_id = img.id
 		WHERE img.digest = ?
@@ -132,7 +131,7 @@ func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
 		var vuln Vulnerability
 		err := rows.Scan(&vuln.ID, &vuln.ImageID, &vuln.CVEID, &vuln.PackageName,
 			&vuln.PackageVersion, &vuln.PackageType, &vuln.Severity, &vuln.FixStatus,
-			&vuln.FixedVersion, &vuln.KnownExploits, &vuln.Count, &vuln.CreatedAt)
+			&vuln.FixedVersion, &vuln.Count, &vuln.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan vulnerability row: %w", err)
 		}
@@ -434,27 +433,29 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 
 // VulnerabilityInstance represents a vulnerability found in a running container instance
 type VulnerabilityInstance struct {
-	Namespace     string `json:"namespace"`
-	Pod           string `json:"pod"`
-	Container     string `json:"container"`
-	NodeName      string `json:"node_name"`
-	Repository    string `json:"repository"`
-	Tag           string `json:"tag"`
-	Digest        string `json:"digest"`
-	OSName        string `json:"os_name"`
-	CVEID         string `json:"cve_id"`
-	PackageName   string `json:"package_name"`
+	VulnID         int64  `json:"vuln_id"`
+	Namespace      string `json:"namespace"`
+	Pod            string `json:"pod"`
+	Container      string `json:"container"`
+	NodeName       string `json:"node_name"`
+	Repository     string `json:"repository"`
+	Tag            string `json:"tag"`
+	Digest         string `json:"digest"`
+	OSName         string `json:"os_name"`
+	CVEID          string `json:"cve_id"`
+	PackageName    string `json:"package_name"`
 	PackageVersion string `json:"package_version"`
-	Severity      string `json:"severity"`
-	FixStatus     string `json:"fix_status"`
-	FixedVersion  string `json:"fixed_version"`
-	Count         int    `json:"count"`
+	Severity       string `json:"severity"`
+	FixStatus      string `json:"fix_status"`
+	FixedVersion   string `json:"fixed_version"`
+	Count          int    `json:"count"`
 }
 
 // GetVulnerabilityInstances returns all vulnerabilities for all running container instances
 func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 	rows, err := db.conn.Query(`
 		SELECT
+			v.id,
 			ci.namespace,
 			ci.pod,
 			ci.container,
@@ -489,6 +490,7 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 	for rows.Next() {
 		var instance VulnerabilityInstance
 		err := rows.Scan(
+			&instance.VulnID,
 			&instance.Namespace,
 			&instance.Pod,
 			&instance.Container,

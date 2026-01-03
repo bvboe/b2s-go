@@ -179,6 +179,7 @@ func (c *Collector) collectVulnerabilityMetrics() (MetricFamily, error) {
 			c.deploymentUUID, instance.Namespace, instance.Pod)
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
+		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, instance.VulnID)
 
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
@@ -200,6 +201,7 @@ func (c *Collector) collectVulnerabilityMetrics() (MetricFamily, error) {
 				"instance_type":                        "CONTAINER",
 				"severity":                             instance.Severity,
 				"vulnerability":                        instance.CVEID,
+				"vulnerability_id":                     vulnerabilityID,
 				"package_name":                         instance.PackageName,
 				"package_version":                      instance.PackageVersion,
 				"fix_status":                           instance.FixStatus,

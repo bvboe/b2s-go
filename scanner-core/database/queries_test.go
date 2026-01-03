@@ -227,17 +227,17 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 
 	// Insert vulnerabilities directly (simulating what StoreVulnerabilities would do)
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, known_exploits, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, imageID, "CVE-2022-1234", "busybox", "1.35.0", "apk", "Critical", "fixed", "1.35.1", 0, 1)
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, imageID, "CVE-2022-1234", "busybox", "1.35.0", "apk", "Critical", "fixed", "1.35.1", 1)
 	if err != nil {
 		t.Fatalf("Failed to insert vulnerability 1: %v", err)
 	}
 
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, known_exploits, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, imageID, "CVE-2023-5678", "openssl", "1.1.1", "deb", "High", "not-fixed", "", 0, 2)
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, imageID, "CVE-2023-5678", "openssl", "1.1.1", "deb", "High", "not-fixed", "", 2)
 	if err != nil {
 		t.Fatalf("Failed to insert vulnerability 2: %v", err)
 	}
@@ -395,9 +395,9 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 	}
 
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, known_exploits, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, completedImageID, "CVE-2024-COMPLETED", "pkg1", "1.0", "apk", "High", "fixed", "1.1", 0, 1)
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, completedImageID, "CVE-2024-COMPLETED", "pkg1", "1.0", "apk", "High", "fixed", "1.1", 1)
 	if err != nil {
 		t.Fatalf("Failed to insert vulnerability for completed: %v", err)
 	}
@@ -434,9 +434,9 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 	}
 
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, known_exploits, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, failedImageID, "CVE-2024-FAILED", "pkg2", "2.0", "apk", "Critical", "fixed", "2.1", 0, 1)
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, failedImageID, "CVE-2024-FAILED", "pkg2", "2.0", "apk", "Critical", "fixed", "2.1", 1)
 	if err != nil {
 		t.Fatalf("Failed to insert vulnerability for failed: %v", err)
 	}

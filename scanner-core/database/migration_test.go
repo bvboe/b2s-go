@@ -119,35 +119,21 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 		t.Error("No vulnerabilities have EPSS scores")
 	}
 
-	// Verify that known_exploits matches known_exploited for all vulnerabilities
-	var mismatchCount int
-	err = db.conn.QueryRow(`
-		SELECT COUNT(*)
-		FROM vulnerabilities
-		WHERE image_id = ? AND known_exploits != known_exploited
-	`, imageID).Scan(&mismatchCount)
-	if err != nil {
-		t.Fatalf("Failed to query exploit field consistency: %v", err)
-	}
-	if mismatchCount > 0 {
-		t.Errorf("Found %d vulnerabilities where known_exploits != known_exploited", mismatchCount)
-	}
-
 	// Query a specific vulnerability with known exploit (CVE-2020-15999)
 	var risk, epssScore, epssPercentile float64
-	var knownExploited, knownExploits int
+	var knownExploited int
 	var severity string
 
 	err = db.conn.QueryRow(`
-		SELECT risk, epss_score, epss_percentile, known_exploited, known_exploits, severity
+		SELECT risk, epss_score, epss_percentile, known_exploited, severity
 		FROM vulnerabilities
 		WHERE cve_id = 'CVE-2020-15999' AND image_id = ?
 		LIMIT 1
-	`, imageID).Scan(&risk, &epssScore, &epssPercentile, &knownExploited, &knownExploits, &severity)
+	`, imageID).Scan(&risk, &epssScore, &epssPercentile, &knownExploited, &severity)
 
 	if err == nil {
-		t.Logf("CVE-2020-15999: risk=%.2f, epss=%.5f, percentile=%.5f, exploited=%d, exploits=%d, severity=%s",
-			risk, epssScore, epssPercentile, knownExploited, knownExploits, severity)
+		t.Logf("CVE-2020-15999: risk=%.2f, epss=%.5f, percentile=%.5f, exploited=%d, severity=%s",
+			risk, epssScore, epssPercentile, knownExploited, severity)
 
 		if risk <= 0 {
 			t.Error("CVE-2020-15999 should have risk > 0")
@@ -158,30 +144,24 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 		if knownExploited != 1 {
 			t.Errorf("CVE-2020-15999 should have known_exploited=1, got %d", knownExploited)
 		}
-		if knownExploits != 1 {
-			t.Errorf("CVE-2020-15999 should have known_exploits=1, got %d", knownExploits)
-		}
-		if knownExploits != knownExploited {
-			t.Errorf("CVE-2020-15999: known_exploits(%d) should match known_exploited(%d)", knownExploits, knownExploited)
-		}
 	} else {
 		t.Logf("CVE-2020-15999 not found in parsed data (might be expected depending on test data)")
 	}
 
 	// Verify at least one vulnerability has no exploits
 	var noExploitCVE string
-	var noExploitExploited, noExploitExploits int
+	var noExploitExploited int
 	err = db.conn.QueryRow(`
-		SELECT cve_id, known_exploited, known_exploits
+		SELECT cve_id, known_exploited
 		FROM vulnerabilities
 		WHERE image_id = ? AND known_exploited = 0
 		LIMIT 1
-	`, imageID).Scan(&noExploitCVE, &noExploitExploited, &noExploitExploits)
+	`, imageID).Scan(&noExploitCVE, &noExploitExploited)
 
 	if err == nil {
-		t.Logf("Found CVE with no exploits: %s (exploited=%d, exploits=%d)", noExploitCVE, noExploitExploited, noExploitExploits)
-		if noExploitExploits != 0 {
-			t.Errorf("CVE %s should have known_exploits=0, got %d", noExploitCVE, noExploitExploits)
+		t.Logf("Found CVE with no exploits: %s (exploited=%d)", noExploitCVE, noExploitExploited)
+		if noExploitExploited != 0 {
+			t.Errorf("CVE %s should have known_exploited=0, got %d", noExploitCVE, noExploitExploited)
 		}
 	} else {
 		t.Logf("No CVE without exploits found (might indicate data issue)")

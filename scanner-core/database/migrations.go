@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 13
+const currentSchemaVersion = 20
 
 type migration struct {
 	version int
@@ -104,6 +104,16 @@ var migrations = []migration{
 		version: 18,
 		name:    "update_vulnerability_details_with_raw_json",
 		up:      migrateToV18,
+	},
+	{
+		version: 19,
+		name:    "remove_known_exploits_column",
+		up:      migrateToV19,
+	},
+	{
+		version: 20,
+		name:    "add_performance_indexes",
+		up:      migrateToV20,
 	},
 }
 
@@ -1445,5 +1455,142 @@ func migrateToV18(conn *sql.DB) error {
 	}
 
 	log.Printf("Migration v18: Successfully regenerated vulnerability details for %d images (%d failed)", successCount, failCount)
+	return nil
+}
+
+// migrateToV19 removes the deprecated known_exploits column from vulnerabilities table
+// The known_exploited column (added in v7) provides the correct CISA KEV catalog count
+func migrateToV19(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v19: Removing deprecated known_exploits column from vulnerabilities table...")
+
+	// SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+	// Step 1: Create new table without known_exploits column
+	_, err = tx.Exec(`
+		CREATE TABLE vulnerabilities_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			image_id INTEGER NOT NULL,
+			cve_id TEXT NOT NULL,
+			package_name TEXT,
+			package_version TEXT,
+			package_type TEXT,
+			severity TEXT,
+			fix_status TEXT,
+			fixed_version TEXT,
+			count INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			risk REAL DEFAULT 0.0,
+			epss_score REAL DEFAULT 0.0,
+			epss_percentile REAL DEFAULT 0.0,
+			known_exploited INTEGER DEFAULT 0,
+			FOREIGN KEY (image_id) REFERENCES container_images(id),
+			UNIQUE(image_id, cve_id, package_name, package_version, package_type)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new vulnerabilities table: %w", err)
+	}
+
+	// Step 2: Copy data from old table to new table (excluding known_exploits)
+	_, err = tx.Exec(`
+		INSERT INTO vulnerabilities_new (
+			id, image_id, cve_id, package_name, package_version, package_type,
+			severity, fix_status, fixed_version, count, created_at,
+			risk, epss_score, epss_percentile, known_exploited
+		)
+		SELECT
+			id, image_id, cve_id, package_name, package_version, package_type,
+			severity, fix_status, fixed_version, count, created_at,
+			risk, epss_score, epss_percentile, known_exploited
+		FROM vulnerabilities
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy vulnerabilities data: %w", err)
+	}
+
+	// Step 3: Drop old table
+	_, err = tx.Exec(`DROP TABLE vulnerabilities`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old vulnerabilities table: %w", err)
+	}
+
+	// Step 4: Rename new table
+	_, err = tx.Exec(`ALTER TABLE vulnerabilities_new RENAME TO vulnerabilities`)
+	if err != nil {
+		return fmt.Errorf("failed to rename vulnerabilities table: %w", err)
+	}
+
+	// Step 5: Recreate indexes
+	_, err = tx.Exec(`
+		CREATE INDEX idx_vulnerabilities_image ON vulnerabilities(image_id);
+		CREATE INDEX idx_vulnerabilities_severity ON vulnerabilities(severity);
+		CREATE INDEX idx_vulnerabilities_cve ON vulnerabilities(cve_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerabilities indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v19: Successfully removed known_exploits column from vulnerabilities table")
+	log.Println("Note: Use known_exploited column instead for CISA KEV catalog count")
+	return nil
+}
+
+// migrateToV20 adds performance indexes for frequently accessed sort and filter operations
+func migrateToV20(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v20: Adding performance indexes...")
+
+	// Add index on container_images.created_at for ORDER BY optimization
+	// Used by: GetAllImages, GetAllImageDetails, GetImagesByStatus, GetImagesByScanStatus
+	log.Println("Migration v20: Creating index on container_images(created_at)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_images_created_at ON container_images(created_at)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create container_images created_at index: %w", err)
+	}
+
+	// Add index on container_instances.created_at for ORDER BY optimization
+	// Used by: GetAllInstances, GetFirstInstanceForImage
+	log.Println("Migration v20: Creating index on container_instances(created_at)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_instances_created_at ON container_instances(created_at)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create container_instances created_at index: %w", err)
+	}
+
+	// Add composite index on vulnerabilities(image_id, severity) for GROUP BY optimization
+	// Used by: GetImageDetails vulnerability counts aggregation
+	log.Println("Migration v20: Creating composite index on vulnerabilities(image_id, severity)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_vulnerabilities_image_severity ON vulnerabilities(image_id, severity)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create vulnerabilities image_severity composite index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v20: Successfully added performance indexes")
+	log.Println("  - container_images(created_at): Optimizes ORDER BY in image list queries")
+	log.Println("  - container_instances(created_at): Optimizes ORDER BY in instance list queries")
+	log.Println("  - vulnerabilities(image_id, severity): Optimizes GROUP BY in vulnerability count queries")
 	return nil
 }
