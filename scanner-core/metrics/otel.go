@@ -39,13 +39,13 @@ type OTELConfig struct {
 
 // OTELExporter exports metrics to an OpenTelemetry collector
 type OTELExporter struct {
-	collector             *Collector
-	config                OTELConfig
-	meterProvider         *sdkmetric.MeterProvider
-	deploymentGauge       metric.Int64Gauge
-	scannedInstanceGauge  metric.Int64Gauge
-	ctx                   context.Context
-	cancel                context.CancelFunc
+	collector     *Collector
+	config        OTELConfig
+	meterProvider *sdkmetric.MeterProvider
+	meter         metric.Meter
+	gauges        map[string]metric.Int64Gauge
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // createExporter creates the appropriate OTLP exporter based on protocol
@@ -115,32 +115,16 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 	// Create meter
 	meter := meterProvider.Meter("bjorn2scan")
 
-	// Create deployment gauge
-	deploymentGauge, err := meter.Int64Gauge("bjorn2scan_deployment",
-		metric.WithDescription("Bjorn2scan deployment information"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create scanned instance gauge
-	scannedInstanceGauge, err := meter.Int64Gauge("bjorn2scan_scanned_instance",
-		metric.WithDescription("Bjorn2scan scanned container instance information"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	exporterCtx, cancel := context.WithCancel(ctx)
 
 	return &OTELExporter{
-		collector:            collector,
-		config:               config,
-		meterProvider:        meterProvider,
-		deploymentGauge:      deploymentGauge,
-		scannedInstanceGauge: scannedInstanceGauge,
-		ctx:                  exporterCtx,
-		cancel:               cancel,
+		collector:     collector,
+		config:        config,
+		meterProvider: meterProvider,
+		meter:         meter,
+		gauges:        make(map[string]metric.Int64Gauge),
+		ctx:           exporterCtx,
+		cancel:        cancel,
 	}, nil
 }
 
@@ -167,79 +151,54 @@ func (e *OTELExporter) pushMetrics() {
 	}
 }
 
-// recordMetrics records the current metrics based on collector config
+// recordMetrics records all metrics by collecting structured data and converting to OTLP
 func (e *OTELExporter) recordMetrics() {
-	// Record deployment metric if enabled
-	if e.collector.config.DeploymentEnabled {
-		e.recordDeploymentMetric()
-	}
-
-	// Record scanned instance metrics if enabled
-	if e.collector.config.ScannedInstancesEnabled && e.collector.database != nil {
-		e.recordScannedInstanceMetrics()
-	}
-}
-
-// recordDeploymentMetric records the deployment gauge metric
-func (e *OTELExporter) recordDeploymentMetric() {
-	deploymentName := e.collector.infoProvider.GetDeploymentName()
-	deploymentType := e.collector.infoProvider.GetDeploymentType()
-	version := e.collector.infoProvider.GetVersion()
-
-	// Record deployment gauge with all labels as attributes
-	e.deploymentGauge.Record(e.ctx, 1,
-		metric.WithAttributes(
-			attribute.String("deployment_uuid", e.collector.deploymentUUID),
-			attribute.String("deployment_name", deploymentName),
-			attribute.String("deployment_type", deploymentType),
-			attribute.String("bjorn2scan_version", version),
-		),
-	)
-}
-
-// recordScannedInstanceMetrics records scanned container instance metrics
-func (e *OTELExporter) recordScannedInstanceMetrics() {
-	instances, err := e.collector.database.GetScannedContainerInstances()
+	// Collect metrics using the same method as /metrics endpoint
+	data, err := e.collector.Collect()
 	if err != nil {
-		log.Printf("Error getting scanned container instances for OTEL metrics: %v", err)
+		log.Printf("Error collecting metrics for OTEL: %v", err)
 		return
 	}
 
-	for _, instance := range instances {
-		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", e.collector.deploymentUUID, instance.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", e.collector.deploymentUUID, instance.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
-			e.collector.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
-		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
-			e.collector.deploymentUUID, instance.Namespace, instance.Digest)
-		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			e.collector.deploymentUUID, instance.Namespace, instance.Pod)
-		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			e.collector.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
+	// Record each metric family
+	for _, family := range data.Families {
+		// Get or create gauge for this metric
+		gauge, err := e.getOrCreateGauge(family.Name, family.Help)
+		if err != nil {
+			log.Printf("Error creating gauge for %s: %v", family.Name, err)
+			continue
+		}
 
-		// Record scanned instance gauge with all labels as attributes
-		e.scannedInstanceGauge.Record(e.ctx, 1,
-			metric.WithAttributes(
-				attribute.String("deployment_uuid", e.collector.deploymentUUID),
-				attribute.String("deployment_uuid_host_name", deploymentUUIDHostName),
-				attribute.String("deployment_uuid_namespace", deploymentUUIDNamespace),
-				attribute.String("deployment_uuid_namespace_image", deploymentUUIDNamespaceImage),
-				attribute.String("deployment_uuid_namespace_image_id", deploymentUUIDNamespaceImageID),
-				attribute.String("deployment_uuid_namespace_pod", deploymentUUIDNamespacePod),
-				attribute.String("deployment_uuid_namespace_pod_container", deploymentUUIDNamespacePodContainer),
-				attribute.String("host_name", instance.NodeName),
-				attribute.String("namespace", instance.Namespace),
-				attribute.String("pod", instance.Pod),
-				attribute.String("container", instance.Container),
-				attribute.String("distro", instance.OSName),
-				attribute.String("image_repo", instance.Repository),
-				attribute.String("image_tag", instance.Tag),
-				attribute.String("image_digest", instance.Digest),
-				attribute.String("instance_type", "CONTAINER"),
-			),
-		)
+		// Record all metrics in this family
+		for _, m := range family.Metrics {
+			// Convert labels map to OpenTelemetry attributes
+			attrs := make([]attribute.KeyValue, 0, len(m.Labels))
+			for k, v := range m.Labels {
+				attrs = append(attrs, attribute.String(k, v))
+			}
+
+			// Record the metric
+			gauge.Record(e.ctx, m.Value, metric.WithAttributes(attrs...))
+		}
 	}
+}
+
+// getOrCreateGauge returns an existing gauge or creates a new one
+func (e *OTELExporter) getOrCreateGauge(name, help string) (metric.Int64Gauge, error) {
+	// Check if gauge already exists
+	if gauge, ok := e.gauges[name]; ok {
+		return gauge, nil
+	}
+
+	// Create new gauge
+	gauge, err := e.meter.Int64Gauge(name, metric.WithDescription(help))
+	if err != nil {
+		return nil, err
+	}
+
+	// Store for reuse
+	e.gauges[name] = gauge
+	return gauge, nil
 }
 
 // Shutdown gracefully shuts down the OTEL exporter

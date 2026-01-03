@@ -62,10 +62,13 @@ func TestCollector_Collect(t *testing.T) {
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
 
 	// Collect metrics
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify metric name
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
@@ -105,10 +108,13 @@ func TestCollector_KubernetesType(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify kubernetes type
 	if !strings.Contains(metrics, `deployment_type="kubernetes"`) {
@@ -152,10 +158,13 @@ func TestCollector_EscapesSpecialCharacters(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify escaped quotes
 	if !strings.Contains(metrics, `deployment_name="host\"with\"quotes"`) {
@@ -202,10 +211,13 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify deployment metric is present
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
@@ -286,10 +298,13 @@ func TestCollector_ScannedInstanceLabels(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify all hierarchical labels are present
 	expectedLabels := []string{
@@ -391,10 +406,13 @@ func TestCollector_ConfigToggles(t *testing.T) {
 			}
 
 			collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-			metrics, err := collector.Collect()
+			data, err := collector.Collect()
 			if err != nil {
 				t.Fatalf("Failed to collect metrics: %v", err)
 			}
+
+			// Format as Prometheus text
+			metrics := FormatPrometheus(data)
 
 			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
 			hasScannedInstance := strings.Contains(metrics, "bjorn2scan_scanned_instance{")
@@ -438,10 +456,13 @@ func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify escaped quotes in pod name
 	if !strings.Contains(metrics, `pod="pod-with\"quotes"`) {
@@ -474,10 +495,13 @@ func TestCollector_ScannedInstancesWithNilDatabase(t *testing.T) {
 
 	// Nil database should be handled gracefully
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Should have deployment metric but not scanned instance metrics
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
@@ -542,10 +566,13 @@ func TestCollector_CollectVulnerabilities(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify vulnerability metric is present
 	if !strings.Contains(metrics, "bjorn2scan_vulnerability{") {
@@ -634,10 +661,13 @@ func TestCollector_VulnerabilityLabels(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify all hierarchical labels are present
 	expectedLabels := []string{
@@ -775,10 +805,13 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 			}
 
 			collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-			metrics, err := collector.Collect()
+			data, err := collector.Collect()
 			if err != nil {
 				t.Fatalf("Failed to collect metrics: %v", err)
 			}
+
+			// Format as Prometheus text
+			metrics := FormatPrometheus(data)
 
 			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
 			hasScannedInstance := strings.Contains(metrics, "bjorn2scan_scanned_instance{")
@@ -813,10 +846,13 @@ func TestCollector_VulnerabilitiesWithNilDatabase(t *testing.T) {
 
 	// Nil database should be handled gracefully
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Should have deployment metric but not vulnerability metrics
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
@@ -864,10 +900,13 @@ func TestCollector_EscapesVulnerabilityLabels(t *testing.T) {
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
-	metrics, err := collector.Collect()
+	data, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("Failed to collect metrics: %v", err)
 	}
+
+	// Format as Prometheus text
+	metrics := FormatPrometheus(data)
 
 	// Verify escaped quotes in pod name
 	if !strings.Contains(metrics, `pod="pod-with\"quotes"`) {

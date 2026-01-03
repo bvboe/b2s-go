@@ -3,7 +3,6 @@ package metrics
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
 )
@@ -46,63 +45,74 @@ func NewCollector(infoProvider InfoProvider, deploymentUUID string, database Dat
 	}
 }
 
-// Collect generates Prometheus metrics in text format
-func (c *Collector) Collect() (string, error) {
-	var output strings.Builder
+// Collect generates structured metrics data
+func (c *Collector) Collect() (*MetricsData, error) {
+	data := &MetricsData{
+		Families: make([]MetricFamily, 0),
+	}
 
 	// Collect deployment metric if enabled
 	if c.config.DeploymentEnabled {
-		deploymentMetric, err := c.collectDeploymentMetric()
+		family, err := c.collectDeploymentMetric()
 		if err != nil {
-			return "", fmt.Errorf("failed to collect deployment metric: %w", err)
+			return nil, fmt.Errorf("failed to collect deployment metric: %w", err)
 		}
-		output.WriteString(deploymentMetric)
+		data.Families = append(data.Families, family)
 	}
 
 	// Collect scanned instance metrics if enabled
 	if c.config.ScannedInstancesEnabled && c.database != nil {
-		instanceMetrics, err := c.collectScannedInstanceMetrics()
+		family, err := c.collectScannedInstanceMetrics()
 		if err != nil {
-			return "", fmt.Errorf("failed to collect scanned instance metrics: %w", err)
+			return nil, fmt.Errorf("failed to collect scanned instance metrics: %w", err)
 		}
-		output.WriteString(instanceMetrics)
+		data.Families = append(data.Families, family)
 	}
 
 	// Collect vulnerability metrics if enabled
 	if c.config.VulnerabilitiesEnabled && c.database != nil {
-		vulnMetrics, err := c.collectVulnerabilityMetrics()
+		family, err := c.collectVulnerabilityMetrics()
 		if err != nil {
-			return "", fmt.Errorf("failed to collect vulnerability metrics: %w", err)
+			return nil, fmt.Errorf("failed to collect vulnerability metrics: %w", err)
 		}
-		output.WriteString(vulnMetrics)
+		data.Families = append(data.Families, family)
 	}
 
-	return output.String(), nil
+	return data, nil
 }
 
 // collectDeploymentMetric generates the bjorn2scan_deployment metric
-func (c *Collector) collectDeploymentMetric() (string, error) {
+func (c *Collector) collectDeploymentMetric() (MetricFamily, error) {
 	deploymentName := c.infoProvider.GetDeploymentName()
 	deploymentType := c.infoProvider.GetDeploymentType()
 	version := c.infoProvider.GetVersion()
 
-	labels := fmt.Sprintf(`deployment_uuid="%s",deployment_name="%s",deployment_type="%s",bjorn2scan_version="%s"`,
-		escapeLabelValue(c.deploymentUUID),
-		escapeLabelValue(deploymentName),
-		escapeLabelValue(deploymentType),
-		escapeLabelValue(version))
-
-	return fmt.Sprintf("bjorn2scan_deployment{%s} 1\n", labels), nil
+	return MetricFamily{
+		Name: "bjorn2scan_deployment",
+		Help: "Bjorn2scan deployment information",
+		Type: "gauge",
+		Metrics: []MetricPoint{
+			{
+				Labels: map[string]string{
+					"deployment_uuid":     c.deploymentUUID,
+					"deployment_name":     deploymentName,
+					"deployment_type":     deploymentType,
+					"bjorn2scan_version":  version,
+				},
+				Value: 1,
+			},
+		},
+	}, nil
 }
 
 // collectScannedInstanceMetrics generates bjorn2scan_scanned_instance metrics for all scanned containers
-func (c *Collector) collectScannedInstanceMetrics() (string, error) {
+func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 	instances, err := c.database.GetScannedContainerInstances()
 	if err != nil {
-		return "", fmt.Errorf("failed to get scanned container instances: %w", err)
+		return MetricFamily{}, fmt.Errorf("failed to get scanned container instances: %w", err)
 	}
 
-	var output strings.Builder
+	metrics := make([]MetricPoint, 0, len(instances))
 
 	for _, instance := range instances {
 		// Generate hierarchical labels
@@ -117,59 +127,45 @@ func (c *Collector) collectScannedInstanceMetrics() (string, error) {
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
 
-		// Format image tag and digest for labels
-		imageTag := instance.Tag
-		imageDigest := instance.Digest
-
-		// Build labels
-		labels := fmt.Sprintf(
-			`deployment_uuid="%s",`+
-				`deployment_uuid_host_name="%s",`+
-				`deployment_uuid_namespace="%s",`+
-				`deployment_uuid_namespace_image="%s",`+
-				`deployment_uuid_namespace_image_id="%s",`+
-				`deployment_uuid_namespace_pod="%s",`+
-				`deployment_uuid_namespace_pod_container="%s",`+
-				`host_name="%s",`+
-				`namespace="%s",`+
-				`pod="%s",`+
-				`container="%s",`+
-				`distro="%s",`+
-				`image_repo="%s",`+
-				`image_tag="%s",`+
-				`image_digest="%s",`+
-				`instance_type="CONTAINER"`,
-			escapeLabelValue(c.deploymentUUID),
-			escapeLabelValue(deploymentUUIDHostName),
-			escapeLabelValue(deploymentUUIDNamespace),
-			escapeLabelValue(deploymentUUIDNamespaceImage),
-			escapeLabelValue(deploymentUUIDNamespaceImageID),
-			escapeLabelValue(deploymentUUIDNamespacePod),
-			escapeLabelValue(deploymentUUIDNamespacePodContainer),
-			escapeLabelValue(instance.NodeName),
-			escapeLabelValue(instance.Namespace),
-			escapeLabelValue(instance.Pod),
-			escapeLabelValue(instance.Container),
-			escapeLabelValue(instance.OSName),
-			escapeLabelValue(instance.Repository),
-			escapeLabelValue(imageTag),
-			escapeLabelValue(imageDigest),
-		)
-
-		output.WriteString(fmt.Sprintf("bjorn2scan_scanned_instance{%s} 1\n", labels))
+		metrics = append(metrics, MetricPoint{
+			Labels: map[string]string{
+				"deployment_uuid":                      c.deploymentUUID,
+				"deployment_uuid_host_name":            deploymentUUIDHostName,
+				"deployment_uuid_namespace":            deploymentUUIDNamespace,
+				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
+				"deployment_uuid_namespace_image_id":   deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_pod":        deploymentUUIDNamespacePod,
+				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
+				"host_name":                            instance.NodeName,
+				"namespace":                            instance.Namespace,
+				"pod":                                  instance.Pod,
+				"container":                            instance.Container,
+				"distro":                               instance.OSName,
+				"image_repo":                           instance.Repository,
+				"image_tag":                            instance.Tag,
+				"image_digest":                         instance.Digest,
+				"instance_type":                        "CONTAINER",
+			},
+			Value: 1,
+		})
 	}
 
-	return output.String(), nil
+	return MetricFamily{
+		Name:    "bjorn2scan_scanned_instance",
+		Help:    "Bjorn2scan scanned container instance information",
+		Type:    "gauge",
+		Metrics: metrics,
+	}, nil
 }
 
 // collectVulnerabilityMetrics generates bjorn2scan_vulnerability metrics for all vulnerabilities in running containers
-func (c *Collector) collectVulnerabilityMetrics() (string, error) {
+func (c *Collector) collectVulnerabilityMetrics() (MetricFamily, error) {
 	instances, err := c.database.GetVulnerabilityInstances()
 	if err != nil {
-		return "", fmt.Errorf("failed to get vulnerability instances: %w", err)
+		return MetricFamily{}, fmt.Errorf("failed to get vulnerability instances: %w", err)
 	}
 
-	var output strings.Builder
+	metrics := make([]MetricPoint, 0, len(instances))
 
 	for _, instance := range instances {
 		// Generate hierarchical labels
@@ -184,64 +180,39 @@ func (c *Collector) collectVulnerabilityMetrics() (string, error) {
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
 
-		// Build labels including vulnerability-specific fields
-		labels := fmt.Sprintf(
-			`deployment_uuid="%s",`+
-				`deployment_uuid_host_name="%s",`+
-				`deployment_uuid_namespace="%s",`+
-				`deployment_uuid_namespace_image="%s",`+
-				`deployment_uuid_namespace_image_id="%s",`+
-				`deployment_uuid_namespace_pod="%s",`+
-				`deployment_uuid_namespace_pod_container="%s",`+
-				`host_name="%s",`+
-				`namespace="%s",`+
-				`pod="%s",`+
-				`container="%s",`+
-				`distro="%s",`+
-				`image_repo="%s",`+
-				`image_tag="%s",`+
-				`image_digest="%s",`+
-				`instance_type="CONTAINER",`+
-				`severity="%s",`+
-				`vulnerability="%s",`+
-				`package_name="%s",`+
-				`package_version="%s",`+
-				`fix_status="%s",`+
-				`fixed_version="%s"`,
-			escapeLabelValue(c.deploymentUUID),
-			escapeLabelValue(deploymentUUIDHostName),
-			escapeLabelValue(deploymentUUIDNamespace),
-			escapeLabelValue(deploymentUUIDNamespaceImage),
-			escapeLabelValue(deploymentUUIDNamespaceImageID),
-			escapeLabelValue(deploymentUUIDNamespacePod),
-			escapeLabelValue(deploymentUUIDNamespacePodContainer),
-			escapeLabelValue(instance.NodeName),
-			escapeLabelValue(instance.Namespace),
-			escapeLabelValue(instance.Pod),
-			escapeLabelValue(instance.Container),
-			escapeLabelValue(instance.OSName),
-			escapeLabelValue(instance.Repository),
-			escapeLabelValue(instance.Tag),
-			escapeLabelValue(instance.Digest),
-			escapeLabelValue(instance.Severity),
-			escapeLabelValue(instance.CVEID),
-			escapeLabelValue(instance.PackageName),
-			escapeLabelValue(instance.PackageVersion),
-			escapeLabelValue(instance.FixStatus),
-			escapeLabelValue(instance.FixedVersion),
-		)
-
-		output.WriteString(fmt.Sprintf("bjorn2scan_vulnerability{%s} %d\n", labels, instance.Count))
+		metrics = append(metrics, MetricPoint{
+			Labels: map[string]string{
+				"deployment_uuid":                      c.deploymentUUID,
+				"deployment_uuid_host_name":            deploymentUUIDHostName,
+				"deployment_uuid_namespace":            deploymentUUIDNamespace,
+				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
+				"deployment_uuid_namespace_image_id":   deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_pod":        deploymentUUIDNamespacePod,
+				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
+				"host_name":                            instance.NodeName,
+				"namespace":                            instance.Namespace,
+				"pod":                                  instance.Pod,
+				"container":                            instance.Container,
+				"distro":                               instance.OSName,
+				"image_repo":                           instance.Repository,
+				"image_tag":                            instance.Tag,
+				"image_digest":                         instance.Digest,
+				"instance_type":                        "CONTAINER",
+				"severity":                             instance.Severity,
+				"vulnerability":                        instance.CVEID,
+				"package_name":                         instance.PackageName,
+				"package_version":                      instance.PackageVersion,
+				"fix_status":                           instance.FixStatus,
+				"fixed_version":                        instance.FixedVersion,
+			},
+			Value: int64(instance.Count),
+		})
 	}
 
-	return output.String(), nil
-}
-
-// escapeLabelValue escapes special characters in Prometheus label values
-func escapeLabelValue(value string) string {
-	// Escape backslash, newline, and double quote
-	value = strings.ReplaceAll(value, "\\", "\\\\")
-	value = strings.ReplaceAll(value, "\n", "\\n")
-	value = strings.ReplaceAll(value, "\"", "\\\"")
-	return value
+	return MetricFamily{
+		Name:    "bjorn2scan_vulnerability",
+		Help:    "Bjorn2scan vulnerability information for running container instances",
+		Type:    "gauge",
+		Metrics: metrics,
+	}, nil
 }

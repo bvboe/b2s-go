@@ -154,8 +154,8 @@ func TestNewOTELExporter_Success(t *testing.T) {
 	if exporter.meterProvider == nil {
 		t.Error("Expected non-nil meter provider")
 	}
-	if exporter.deploymentGauge == nil {
-		t.Error("Expected non-nil deployment gauge")
+	if exporter.gauges == nil {
+		t.Error("Expected non-nil gauges map")
 	}
 	if exporter.ctx == nil {
 		t.Error("Expected non-nil context")
@@ -475,9 +475,9 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 	}
 	defer func() { _ = exporter.Shutdown() }()
 
-	// Verify scannedInstanceGauge was created
-	if exporter.scannedInstanceGauge == nil {
-		t.Error("Expected non-nil scanned instance gauge")
+	// Verify gauges map was created
+	if exporter.gauges == nil {
+		t.Error("Expected non-nil gauges map")
 	}
 
 	// Call recordMetrics - should not panic and should record both metrics
@@ -528,9 +528,9 @@ func TestOTELExporter_ScannedInstancesDisabled(t *testing.T) {
 	}
 	defer func() { _ = exporter.Shutdown() }()
 
-	// Verify scannedInstanceGauge was still created (always created, just not used if disabled)
-	if exporter.scannedInstanceGauge == nil {
-		t.Error("Expected non-nil scanned instance gauge")
+	// Verify gauges map was created (gauges are created dynamically on demand)
+	if exporter.gauges == nil {
+		t.Error("Expected non-nil gauges map")
 	}
 
 	// Call recordMetrics - should not panic even with scanned instances disabled
