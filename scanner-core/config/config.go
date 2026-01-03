@@ -65,6 +65,7 @@ type Config struct {
 	MetricsDeploymentEnabled        bool // Enable bjorn2scan_deployment metric
 	MetricsScannedInstancesEnabled  bool // Enable bjorn2scan_scanned_instance metric
 	MetricsVulnerabilitiesEnabled   bool // Enable bjorn2scan_vulnerability metric
+	MetricsVulnerabilityExploitedEnabled bool // Enable bjorn2scan_vulnerability_exploited metric
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -119,9 +120,10 @@ func defaultConfig() *Config {
 		OTELMetricsInsecure:     true,
 
 		// Individual metrics - enabled by default
-		MetricsDeploymentEnabled:       true,
-		MetricsScannedInstancesEnabled: true,
-		MetricsVulnerabilitiesEnabled:  true,
+		MetricsDeploymentEnabled:        true,
+		MetricsScannedInstancesEnabled:  true,
+		MetricsVulnerabilitiesEnabled:   true,
+		MetricsVulnerabilityExploitedEnabled: true,
 	}
 }
 
@@ -312,6 +314,10 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("metrics_vulnerabilities_enabled").String())
 				cfg.MetricsVulnerabilitiesEnabled = val == "true" || val == "1" || val == "yes"
 			}
+			if section.HasKey("metrics_vulnerability_exploited_enabled") {
+				val := strings.ToLower(section.Key("metrics_vulnerability_exploited_enabled").String())
+				cfg.MetricsVulnerabilityExploitedEnabled = val == "true" || val == "1" || val == "yes"
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -423,6 +429,10 @@ func LoadConfig(path string) (*Config, error) {
 	if vulnerabilitiesEnabledEnv := os.Getenv("METRICS_VULNERABILITIES_ENABLED"); vulnerabilitiesEnabledEnv != "" {
 		val := strings.ToLower(vulnerabilitiesEnabledEnv)
 		cfg.MetricsVulnerabilitiesEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if vulnerabilityExploitedEnabledEnv := os.Getenv("METRICS_VULNERABILITY_EXPLOITED_ENABLED"); vulnerabilityExploitedEnabledEnv != "" {
+		val := strings.ToLower(vulnerabilityExploitedEnabledEnv)
+		cfg.MetricsVulnerabilityExploitedEnabled = val == "true" || val == "1" || val == "yes"
 	}
 
 	return cfg, nil

@@ -201,3 +201,10 @@ metrics_scanned_instances_enabled=true
 # Each unique vulnerability per container instance creates a separate metric
 # Environment variable: METRICS_VULNERABILITIES_ENABLED
 metrics_vulnerabilities_enabled=true
+
+# Enable bjorn2scan_vulnerability_exploited metric (default: true)
+# This metric reports known exploited vulnerabilities (CISA KEV catalog) in running container instances
+# Uses the known_exploited field to highlight actively exploited CVEs that pose higher risk
+# Warning: Similar to bjorn2scan_vulnerability, this can generate high metric cardinality
+# Environment variable: METRICS_VULNERABILITY_EXPLOITED_ENABLED
+metrics_vulnerability_exploited_enabled=true

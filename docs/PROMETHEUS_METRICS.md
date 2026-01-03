@@ -34,33 +34,91 @@ Gauge metric indicating scanned container instances (value always 1 per instance
 bjorn2scan_scanned_instances{cluster_name="prod-cluster",namespace="frontend",pod_name="web-app-xyz",container_name="nginx",image="nginx:1.25",image_id="sha256:abc123...",distro_name="debian",distro_version="12",node_name="node-1",container_runtime="containerd"} 1
 ```
 
-### 2. Vulnerability Metrics
+### 2. Deployment Metrics
 
-#### `bjorn2scan_vulnerabilities_total`
-Gauge metric showing total vulnerability count per image.
+#### `bjorn2scan_deployment`
+Gauge metric providing deployment information (value always 1).
 
 **Labels**:
-- `image_id`: Image digest (SHA256)
-- `severity`: Vulnerability severity (critical, high, medium, low, negligible)
+- `deployment_uuid`: Unique deployment identifier
+- `deployment_name`: Deployment name (hostname for agent, cluster name for k8s)
+- `deployment_type`: Type of deployment ("agent" or "kubernetes")
+- `bjorn2scan_version`: Version of bjorn2scan
 
 **Example**:
 ```
-bjorn2scan_vulnerabilities_total{image_id="sha256:abc123...",severity="critical"} 5
-bjorn2scan_vulnerabilities_total{image_id="sha256:abc123...",severity="high"} 12
+bjorn2scan_deployment{deployment_uuid="abc-123",deployment_name="prod-cluster",deployment_type="kubernetes",bjorn2scan_version="0.1.54"} 1
 ```
 
-#### `bjorn2scan_packages_total`
-Gauge metric showing total package count per image.
+### 3. Container Instance Metrics
+
+#### `bjorn2scan_scanned_instance`
+Gauge metric for each scanned container instance (value always 1 per instance).
 
 **Labels**:
-- `image_id`: Image digest (SHA256)
-- `package_type`: Package type (apk, deb, rpm, pypi, npm, etc.)
+- `deployment_uuid`: Unique deployment identifier
+- `deployment_uuid_host_name`: Hierarchical label combining deployment UUID and host name
+- `deployment_uuid_namespace`: Hierarchical label combining deployment UUID and namespace
+- `deployment_uuid_namespace_image`: Hierarchical label for deployment, namespace, and image
+- `deployment_uuid_namespace_image_id`: Hierarchical label for deployment, namespace, and image digest
+- `deployment_uuid_namespace_pod`: Hierarchical label for deployment, namespace, and pod
+- `deployment_uuid_namespace_pod_container`: Full hierarchical label for container instance
+- `host_name`: Node where container runs
+- `namespace`: Kubernetes namespace (or "default" for Docker containers)
+- `pod`: Pod name (or "standalone" for Docker containers)
+- `container`: Container name
+- `distro`: Operating system distribution
+- `image_repo`: Image repository
+- `image_tag`: Image tag
+- `image_digest`: Image digest (SHA256)
+- `instance_type`: Type of instance ("CONTAINER")
 
 **Example**:
 ```
-bjorn2scan_packages_total{image_id="sha256:abc123...",package_type="deb"} 145
-bjorn2scan_packages_total{image_id="sha256:abc123...",package_type="pypi"} 23
+bjorn2scan_scanned_instance{deployment_uuid="abc-123",host_name="node-1",namespace="frontend",pod="web-app-xyz",container="nginx",distro="debian",image_repo="nginx",image_tag="1.25",image_digest="sha256:abc123..."} 1
 ```
+
+### 4. Vulnerability Metrics
+
+#### `bjorn2scan_vulnerability`
+Gauge metric reporting all vulnerabilities found in running container instances. Value represents the number of vulnerability instances.
+
+**Labels**:
+- All labels from `bjorn2scan_scanned_instance` plus:
+- `severity`: Vulnerability severity (Critical, High, Medium, Low, Negligible, Unknown)
+- `vulnerability`: CVE ID (e.g., "CVE-2024-1234")
+- `vulnerability_id`: Unique vulnerability identifier combining deployment UUID and vulnerability DB ID
+- `package_name`: Affected package name
+- `package_version`: Affected package version
+- `fix_status`: Fix availability ("fixed", "not-fixed", "wont-fix", "unknown")
+- `fixed_version`: Version with fix (if available)
+
+**Example**:
+```
+bjorn2scan_vulnerability{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 2
+```
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.vulnerabilitiesEnabled: true`
+- Agent config: `metrics_vulnerabilities_enabled=true`
+- Environment: `METRICS_VULNERABILITIES_ENABLED=true`
+
+#### `bjorn2scan_vulnerability_exploited`
+Gauge metric reporting known exploited vulnerabilities (CISA KEV catalog) in running container instances. Only includes vulnerabilities with known exploits. Value is always 1 (presence indicates exploitation).
+
+**Labels**: Same as `bjorn2scan_vulnerability`
+
+**Example**:
+```
+bjorn2scan_vulnerability_exploited{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 1
+```
+
+**Use Case**: This metric helps prioritize remediation by highlighting vulnerabilities that are actively being exploited in the wild according to CISA's Known Exploited Vulnerabilities catalog.
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.vulnerabilityExploitedEnabled: true`
+- Agent config: `metrics_vulnerability_exploited_enabled=true`
+- Environment: `METRICS_VULNERABILITY_EXPLOITED_ENABLED=true`
 
 ### 3. System Metrics
 
@@ -143,24 +201,39 @@ scrape_configs:
 
 ## Example Prometheus Queries
 
-### Count instances by severity
+### Count vulnerabilities by severity
 ```promql
-sum by (severity) (bjorn2scan_vulnerabilities_total)
+sum by (severity) (bjorn2scan_vulnerability)
 ```
 
-### Images with critical vulnerabilities
+### Count containers with critical vulnerabilities
 ```promql
-bjorn2scan_vulnerabilities_total{severity="critical"} > 0
+count(bjorn2scan_vulnerability{severity="Critical"})
 ```
 
 ### Container instances by namespace
 ```promql
-count by (namespace) (bjorn2scan_scanned_instances)
+count by (namespace) (bjorn2scan_scanned_instance)
 ```
 
-### Unscanned images
+### Known exploited vulnerabilities (CISA KEV) by severity
 ```promql
-bjorn2scan_scan_status{status="pending"} == 1
+sum by (severity) (bjorn2scan_vulnerability_exploited > 0)
+```
+
+### Containers with actively exploited CVEs
+```promql
+count by (namespace, pod, container) (bjorn2scan_vulnerability_exploited > 0)
+```
+
+### Top 10 most critical exploited vulnerabilities
+```promql
+topk(10, sum by (vulnerability, severity) (bjorn2scan_vulnerability_exploited{severity="Critical"}))
+```
+
+### Deployment info
+```promql
+bjorn2scan_deployment
 ```
 
 ## Grafana Dashboard
