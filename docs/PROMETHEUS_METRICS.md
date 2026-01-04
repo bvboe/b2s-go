@@ -147,35 +147,23 @@ bjorn2scan_vulnerability_risk{deployment_uuid="abc-123",namespace="frontend",pod
 - Agent config: `metrics_vulnerability_risk_enabled=true`
 - Environment: `METRICS_VULNERABILITY_RISK_ENABLED=true`
 
-### 3. System Metrics
+### 3. Aggregated Queries
 
-#### `bjorn2scan_scan_status`
-Gauge metric indicating scan status (1 = completed, 0 = pending/failed).
+While there are no dedicated total metrics, you can derive counts using PromQL:
 
-**Labels**:
-- `image_id`: Image digest (SHA256)
-- `status`: Status value (scanned, pending, failed, scanning)
-
-**Example**:
-```
-bjorn2scan_scan_status{image_id="sha256:abc123...",status="scanned"} 1
-bjorn2scan_scan_status{image_id="sha256:def456...",status="pending"} 1
+#### Count Total Instances
+```promql
+count(bjorn2scan_scanned_instance)
 ```
 
-#### `bjorn2scan_images_total`
-Gauge metric showing total number of unique images.
-
-**Example**:
-```
-bjorn2scan_images_total 42
+#### Count Unique Images
+```promql
+count(count by (image_digest) (bjorn2scan_scanned_instance))
 ```
 
-#### `bjorn2scan_instances_total`
-Gauge metric showing total number of container instances.
-
-**Example**:
-```
-bjorn2scan_instances_total 156
+#### Count Instances by Namespace
+```promql
+count by (namespace) (bjorn2scan_scanned_instance)
 ```
 
 ## Implementation Architecture
@@ -285,7 +273,25 @@ bjorn2scan_deployment
 
 ## Grafana Dashboard
 
-A sample Grafana dashboard is available at `docs/grafana-dashboard.json` (TODO).
+A comprehensive Grafana dashboard is available at `docs/grafana-dashboard.json`.
+
+### Dashboard Features
+
+- **Overview Row**: Total instances, unique images, known exploited vulns, critical/high/total vuln counts
+- **Vulnerability Distribution**: Pie charts for severity, fix status, and instances by namespace
+- **Risk Analysis**: Top 10 highest risk vulnerabilities, total risk by namespace
+- **Known Exploited Vulnerabilities**: Table of all CISA KEV matches with severity highlighting
+- **Namespace Details**: Stacked bar chart of vulnerabilities by namespace and severity
+- **Deployment Info**: Table of all bjorn2scan deployments with version and console URL
+
+### Import Instructions
+
+1. In Grafana, go to **Dashboards** > **Import**
+2. Upload `grafana-dashboard.json` or paste its contents
+3. Select your Prometheus data source
+4. Click **Import**
+
+The dashboard auto-refreshes every 30 seconds and includes a data source selector variable.
 
 ## Security Considerations
 
