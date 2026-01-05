@@ -16,12 +16,12 @@ var (
 
 // Mock implementations for testing
 
-type MockFeedChecker struct {
+type MockDatabaseUpdater struct {
 	hasChanged bool
 	err        error
 }
 
-func (m *MockFeedChecker) CheckForUpdates(ctx context.Context) (bool, error) {
+func (m *MockDatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	return m.hasChanged, m.err
 }
 
@@ -72,8 +72,8 @@ func (m *MockScanQueue) EnqueueForceScan(image containers.ImageID, nodeName stri
 
 // Test: database has changed, rescans triggered
 func TestRescanDatabaseJob_Integration(t *testing.T) {
-	// Setup: mock feed checker that returns "changed"
-	mockFeedChecker := &MockFeedChecker{hasChanged: true}
+	// Setup: mock database updater that returns "changed"
+	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
 
 	// Setup: mock database with completed images
 	mockDB := &MockDatabase{
@@ -115,7 +115,7 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job
 	err := job.Run(context.Background())
@@ -170,8 +170,8 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 
 // Test: no changes detected, no rescans triggered
 func TestRescanDatabaseJob_NoChanges(t *testing.T) {
-	// Setup: mock feed checker that returns "no change"
-	mockFeedChecker := &MockFeedChecker{hasChanged: false}
+	// Setup: mock database updater that returns "no change"
+	mockDBUpdater := &MockDatabaseUpdater{hasChanged: false}
 
 	// Setup: mock database with completed images
 	mockDB := &MockDatabase{
@@ -187,7 +187,7 @@ func TestRescanDatabaseJob_NoChanges(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job
 	err := job.Run(context.Background())
@@ -203,8 +203,8 @@ func TestRescanDatabaseJob_NoChanges(t *testing.T) {
 
 // Test: no completed images, job succeeds with no work
 func TestRescanDatabaseJob_NoCompletedImages(t *testing.T) {
-	// Setup: mock feed checker that returns "changed"
-	mockFeedChecker := &MockFeedChecker{hasChanged: true}
+	// Setup: mock database updater that returns "changed"
+	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
 
 	// Setup: mock database with NO completed images
 	mockDB := &MockDatabase{
@@ -216,7 +216,7 @@ func TestRescanDatabaseJob_NoCompletedImages(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job
 	err := job.Run(context.Background())
@@ -232,8 +232,8 @@ func TestRescanDatabaseJob_NoCompletedImages(t *testing.T) {
 
 // Test: missing container instances, orphaned images skipped
 func TestRescanDatabaseJob_MissingInstances(t *testing.T) {
-	// Setup: mock feed checker that returns "changed"
-	mockFeedChecker := &MockFeedChecker{hasChanged: true}
+	// Setup: mock database updater that returns "changed"
+	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
 
 	// Setup: mock database with completed images but missing instances
 	mockDB := &MockDatabase{
@@ -253,7 +253,7 @@ func TestRescanDatabaseJob_MissingInstances(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job
 	err := job.Run(context.Background())
@@ -274,10 +274,10 @@ func TestRescanDatabaseJob_MissingInstances(t *testing.T) {
 	}
 }
 
-// Test: feed checker error, job fails
-func TestRescanDatabaseJob_FeedCheckerError(t *testing.T) {
-	// Setup: mock feed checker that returns error
-	mockFeedChecker := &MockFeedChecker{
+// Test: database updater error, job fails
+func TestRescanDatabaseJob_UpdaterError(t *testing.T) {
+	// Setup: mock database updater that returns error
+	mockDBUpdater := &MockDatabaseUpdater{
 		hasChanged: false,
 		err:        errDatabase,
 	}
@@ -290,12 +290,12 @@ func TestRescanDatabaseJob_FeedCheckerError(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job
 	err := job.Run(context.Background())
 	if err == nil {
-		t.Error("Expected error from feed checker")
+		t.Error("Expected error from database updater")
 	}
 
 	// Verify: no rescans enqueued
@@ -306,8 +306,8 @@ func TestRescanDatabaseJob_FeedCheckerError(t *testing.T) {
 
 // Test: database error when getting images
 func TestRescanDatabaseJob_DatabaseError(t *testing.T) {
-	// Setup: mock feed checker that returns "changed"
-	mockFeedChecker := &MockFeedChecker{hasChanged: true}
+	// Setup: mock database updater that returns "changed"
+	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
 
 	// Setup: mock database that returns error
 	mockDB := &MockDatabase{
@@ -319,7 +319,7 @@ func TestRescanDatabaseJob_DatabaseError(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job
 	err := job.Run(context.Background())
@@ -339,8 +339,8 @@ func TestRescanDatabaseJob_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	// Setup: mock feed checker (will be called with cancelled context)
-	mockFeedChecker := &MockFeedChecker{hasChanged: false}
+	// Setup: mock database updater (will be called with cancelled context)
+	mockDBUpdater := &MockDatabaseUpdater{hasChanged: false}
 
 	mockDB := &MockDatabase{
 		images:    []database.ContainerImage{},
@@ -350,25 +350,25 @@ func TestRescanDatabaseJob_ContextCancellation(t *testing.T) {
 	mockQueue := &MockScanQueue{}
 
 	// Create job
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	// Run job with cancelled context
 	// Note: Our current implementation doesn't explicitly check context in CheckForUpdates,
-	// but the feed checker's HTTP client will respect the context
+	// but the database updater's HTTP client will respect the context
 	err := job.Run(ctx)
 
-	// The feed checker should handle context cancellation
+	// The database updater should handle context cancellation
 	// For this test, we just verify the job doesn't panic
-	_ = err // Error handling depends on feed checker implementation
+	_ = err // Error handling depends on database updater implementation
 }
 
 // Test: job name
 func TestRescanDatabaseJob_Name(t *testing.T) {
-	mockFeedChecker := &MockFeedChecker{}
+	mockDBUpdater := &MockDatabaseUpdater{}
 	mockDB := &MockDatabase{}
 	mockQueue := &MockScanQueue{}
 
-	job := NewRescanDatabaseJob(mockFeedChecker, mockDB, mockQueue)
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
 
 	if job.Name() != "rescan-database" {
 		t.Errorf("Expected name 'rescan-database', got '%s'", job.Name())
@@ -377,14 +377,14 @@ func TestRescanDatabaseJob_Name(t *testing.T) {
 
 // Test: panic on nil dependencies
 func TestNewRescanDatabaseJob_NilDependencies(t *testing.T) {
-	mockFeedChecker := &MockFeedChecker{}
+	mockDBUpdater := &MockDatabaseUpdater{}
 	mockDB := &MockDatabase{}
 	mockQueue := &MockScanQueue{}
 
-	// Test nil feed checker
+	// Test nil database updater
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Expected panic for nil feedChecker")
+			t.Error("Expected panic for nil dbUpdater")
 		}
 	}()
 	NewRescanDatabaseJob(nil, mockDB, mockQueue)
@@ -395,7 +395,7 @@ func TestNewRescanDatabaseJob_NilDependencies(t *testing.T) {
 			t.Error("Expected panic for nil database")
 		}
 	}()
-	NewRescanDatabaseJob(mockFeedChecker, nil, mockQueue)
+	NewRescanDatabaseJob(mockDBUpdater, nil, mockQueue)
 
 	// Test nil scan queue
 	defer func() {
@@ -403,5 +403,5 @@ func TestNewRescanDatabaseJob_NilDependencies(t *testing.T) {
 			t.Error("Expected panic for nil scan queue")
 		}
 	}()
-	NewRescanDatabaseJob(mockFeedChecker, mockDB, nil)
+	NewRescanDatabaseJob(mockDBUpdater, mockDB, nil)
 }

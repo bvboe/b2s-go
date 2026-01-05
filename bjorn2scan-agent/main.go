@@ -378,12 +378,12 @@ func main() {
 		log.Println("Initializing scheduled jobs...")
 		sched := scheduler.New()
 
-		// Add rescan database job
-		feedChecker, err := vulndb.NewFeedChecker(grypeCfg.DBRootDir)
+		// Add rescan database job - uses grype's native update mechanism
+		dbUpdater, err := vulndb.NewDatabaseUpdater(grypeCfg.DBRootDir)
 		if err != nil {
-			log.Printf("Warning: failed to create feed checker: %v", err)
+			log.Printf("Warning: failed to create database updater: %v", err)
 		} else {
-			rescanJob := jobs.NewRescanDatabaseJob(feedChecker, db, scanQueue)
+			rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
 			if err := sched.AddJob(
 				rescanJob,
 				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),

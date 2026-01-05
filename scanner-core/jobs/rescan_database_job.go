@@ -11,8 +11,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
 
-// FeedCheckerInterface defines the interface for checking vulnerability database updates
-type FeedCheckerInterface interface {
+// DatabaseUpdateChecker defines the interface for checking vulnerability database updates
+type DatabaseUpdateChecker interface {
 	CheckForUpdates(ctx context.Context) (bool, error)
 }
 
@@ -24,15 +24,15 @@ type DatabaseInterface interface {
 
 // RescanDatabaseJob triggers a rescan when the vulnerability database is updated
 type RescanDatabaseJob struct {
-	feedChecker FeedCheckerInterface
-	db          DatabaseInterface
-	scanQueue   ScanQueueInterface
+	dbUpdater DatabaseUpdateChecker
+	db        DatabaseInterface
+	scanQueue ScanQueueInterface
 }
 
 // NewRescanDatabaseJob creates a new rescan database job
-func NewRescanDatabaseJob(feedChecker FeedCheckerInterface, db DatabaseInterface, scanQueue ScanQueueInterface) *RescanDatabaseJob {
-	if feedChecker == nil {
-		panic("RescanDatabaseJob requires a non-nil FeedChecker")
+func NewRescanDatabaseJob(dbUpdater DatabaseUpdateChecker, db DatabaseInterface, scanQueue ScanQueueInterface) *RescanDatabaseJob {
+	if dbUpdater == nil {
+		panic("RescanDatabaseJob requires a non-nil DatabaseUpdateChecker")
 	}
 	if db == nil {
 		panic("RescanDatabaseJob requires a non-nil database")
@@ -42,9 +42,9 @@ func NewRescanDatabaseJob(feedChecker FeedCheckerInterface, db DatabaseInterface
 	}
 
 	return &RescanDatabaseJob{
-		feedChecker: feedChecker,
-		db:          db,
-		scanQueue:   scanQueue,
+		dbUpdater: dbUpdater,
+		db:        db,
+		scanQueue: scanQueue,
 	}
 }
 
@@ -56,7 +56,7 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	log.Printf("[rescan-database] Checking for vulnerability database updates...")
 
 	// Check if database has been updated
-	hasChanged, err := j.feedChecker.CheckForUpdates(ctx)
+	hasChanged, err := j.dbUpdater.CheckForUpdates(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
@@ -119,5 +119,5 @@ var _ ScanQueueInterface = (*scanning.JobQueue)(nil)
 // Ensure database.DB implements DatabaseInterface
 var _ DatabaseInterface = (*database.DB)(nil)
 
-// Ensure vulndb.FeedChecker implements FeedCheckerInterface
-var _ FeedCheckerInterface = (*vulndb.FeedChecker)(nil)
+// Ensure vulndb.DatabaseUpdater implements DatabaseUpdateChecker
+var _ DatabaseUpdateChecker = (*vulndb.DatabaseUpdater)(nil)
