@@ -284,22 +284,31 @@ func (q *JobQueue) worker() {
 
 // processJob handles a single scan job
 func (q *JobQueue) processJob(job ScanJob) {
-	log.Printf("Processing scan job: image=%s:%s (digest=%s)",
-		job.Image.Repository, job.Image.Tag, job.Image.Digest)
+	log.Printf("Processing scan job: image=%s:%s (digest=%s, forceScan=%v)",
+		job.Image.Repository, job.Image.Tag, job.Image.Digest, job.ForceScan)
 
-	// Check if we already have scan results (unless force scan is requested)
-	if !job.ForceScan {
-		status, err := q.db.GetImageStatus(job.Image.Digest)
-		if err != nil {
-			log.Printf("Error checking status for %s: %v", job.Image.Digest, err)
-		} else if status.HasSBOM() {
-			log.Printf("Image %s already has SBOM (status=%s), skipping SBOM generation", job.Image.Digest, status)
-			// If SBOM exists but vulnerabilities don't, continue to vulnerability scan
-			if !status.HasVulnerabilities() {
-				q.processVulnerabilityScan(job, nil)
-			}
-			return
+	// Check if we already have scan results
+	status, err := q.db.GetImageStatus(job.Image.Digest)
+	if err != nil {
+		log.Printf("Error checking status for %s: %v", job.Image.Digest, err)
+	}
+
+	// If ForceScan is requested and SBOM already exists, skip directly to vulnerability scan
+	// This is used by the rescan-database job when the grype database is updated
+	if job.ForceScan && status.HasSBOM() {
+		log.Printf("Force scan requested for %s with existing SBOM, running vulnerability scan only", job.Image.Digest)
+		q.processVulnerabilityScan(job, nil)
+		return
+	}
+
+	// Skip if SBOM already exists (unless force scan without SBOM)
+	if !job.ForceScan && status.HasSBOM() {
+		log.Printf("Image %s already has SBOM (status=%s), skipping SBOM generation", job.Image.Digest, status)
+		// If SBOM exists but vulnerabilities don't, continue to vulnerability scan
+		if !status.HasVulnerabilities() {
+			q.processVulnerabilityScan(job, nil)
 		}
+		return
 	}
 
 	// Mark image as generating SBOM
