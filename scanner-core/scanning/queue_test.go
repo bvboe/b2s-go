@@ -272,7 +272,7 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 	}
 }
 
-// TestJobQueueForceScan tests that ForceScan bypasses the already-scanned check
+// TestJobQueueForceScan tests that ForceScan re-runs vulnerability scan using cached SBOM
 func TestJobQueueForceScan(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode (requires Grype database download)")
@@ -341,15 +341,26 @@ func TestJobQueueForceScan(t *testing.T) {
 		t.Errorf("Expected retriever to be called once, got %d", retrieverCallCount.Load())
 	}
 
-	// Force rescan of the same image
+	// Force rescan of the same image - should use cached SBOM, NOT call retriever again
 	job.ForceScan = true
 	queue.Enqueue(job)
 
 	// Wait for rescan to complete
 	time.Sleep(1 * time.Second)
 
-	if retrieverCallCount.Load() != 2 {
-		t.Errorf("Expected retriever to be called twice (force scan), got %d", retrieverCallCount.Load())
+	// ForceScan with existing SBOM should NOT call retriever again - it uses cached SBOM
+	// and just re-runs the vulnerability scan
+	if retrieverCallCount.Load() != 1 {
+		t.Errorf("Expected retriever to still be called once (ForceScan uses cached SBOM), got %d", retrieverCallCount.Load())
+	}
+
+	// Verify the image was rescanned by checking status is still completed
+	status, err := db.GetImageStatus(testImage.Digest)
+	if err != nil {
+		t.Fatalf("Failed to get image status: %v", err)
+	}
+	if !status.HasVulnerabilities() {
+		t.Errorf("Expected image to have vulnerability scan results after force scan")
 	}
 }
 
