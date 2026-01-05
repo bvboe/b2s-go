@@ -3,7 +3,6 @@ package vulndb
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,21 +13,18 @@ import (
 
 // Test first run behavior: cache created, hasChanged=false
 func TestFeedChecker_FirstRun(t *testing.T) {
-	// Create mock HTTP server
-	listing := FeedListing{
-		Available: map[string][]DatabaseEntry{
-			"5": {{
-				Built:    "2025-12-27T00:00:00Z",
-				Checksum: "sha256:abc123",
-				URL:      "https://example.com/db.tar.gz",
-				Version:  5,
-			}},
-		},
+	// Create mock HTTP server returning v6 format
+	dbInfo := DatabaseInfo{
+		Status:        "active",
+		SchemaVersion: "v6.1.3",
+		Built:         "2025-12-27T00:00:00Z",
+		Path:          "vulnerability-db_v6.1.3_2025-12-27T00:00:00Z.tar.zst",
+		Checksum:      "sha256:abc123",
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(listing); err != nil {
+		if err := json.NewEncoder(w).Encode(dbInfo); err != nil {
 			t.Fatalf("Failed to encode response: %v", err)
 		}
 	}))
@@ -64,8 +60,8 @@ func TestFeedChecker_FirstRun(t *testing.T) {
 		t.Fatalf("Failed to load cache: %v", err)
 	}
 
-	if cached.Listing.Available["5"][0].Checksum != "sha256:abc123" {
-		t.Errorf("Expected checksum 'sha256:abc123', got '%s'", cached.Listing.Available["5"][0].Checksum)
+	if cached.DatabaseInfo.Checksum != "sha256:abc123" {
+		t.Errorf("Expected checksum 'sha256:abc123', got '%s'", cached.DatabaseInfo.Checksum)
 	}
 }
 
@@ -76,17 +72,14 @@ func TestFeedChecker_DatabaseChanged(t *testing.T) {
 	cacheFile := filepath.Join(tmpDir, "cache.json")
 
 	// Write initial cache with old checksum
-	initialCache := CachedListing{
+	initialCache := CachedDatabaseInfo{
 		LastChecked: time.Now().UTC(),
-		Listing: FeedListing{
-			Available: map[string][]DatabaseEntry{
-				"5": {{
-					Built:    "2025-12-26T00:00:00Z",
-					Checksum: "sha256:old_checksum",
-					URL:      "https://example.com/old.tar.gz",
-					Version:  5,
-				}},
-			},
+		DatabaseInfo: DatabaseInfo{
+			Status:        "active",
+			SchemaVersion: "v6.1.2",
+			Built:         "2025-12-26T00:00:00Z",
+			Path:          "vulnerability-db_v6.1.2_2025-12-26T00:00:00Z.tar.zst",
+			Checksum:      "sha256:old_checksum",
 		},
 	}
 	data, _ := json.MarshalIndent(initialCache, "", "  ")
@@ -95,20 +88,17 @@ func TestFeedChecker_DatabaseChanged(t *testing.T) {
 	}
 
 	// Create mock server with new checksum
-	newListing := FeedListing{
-		Available: map[string][]DatabaseEntry{
-			"5": {{
-				Built:    "2025-12-27T00:00:00Z",
-				Checksum: "sha256:new_checksum",
-				URL:      "https://example.com/new.tar.gz",
-				Version:  5,
-			}},
-		},
+	newDbInfo := DatabaseInfo{
+		Status:        "active",
+		SchemaVersion: "v6.1.3",
+		Built:         "2025-12-27T00:00:00Z",
+		Path:          "vulnerability-db_v6.1.3_2025-12-27T00:00:00Z.tar.zst",
+		Checksum:      "sha256:new_checksum",
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(newListing); err != nil {
+		if err := json.NewEncoder(w).Encode(newDbInfo); err != nil {
 			t.Fatalf("Failed to encode response: %v", err)
 		}
 	}))
@@ -138,8 +128,8 @@ func TestFeedChecker_DatabaseChanged(t *testing.T) {
 		t.Fatalf("Failed to load cache: %v", err)
 	}
 
-	if cached.Listing.Available["5"][0].Checksum != "sha256:new_checksum" {
-		t.Errorf("Expected checksum 'sha256:new_checksum', got '%s'", cached.Listing.Available["5"][0].Checksum)
+	if cached.DatabaseInfo.Checksum != "sha256:new_checksum" {
+		t.Errorf("Expected checksum 'sha256:new_checksum', got '%s'", cached.DatabaseInfo.Checksum)
 	}
 }
 
@@ -149,31 +139,29 @@ func TestFeedChecker_NoChange(t *testing.T) {
 	tmpDir := t.TempDir()
 	cacheFile := filepath.Join(tmpDir, "cache.json")
 
-	// Write cache with same checksum as server will return
-	listing := FeedListing{
-		Available: map[string][]DatabaseEntry{
-			"5": {{
-				Built:    "2025-12-27T00:00:00Z",
-				Checksum: "sha256:same_checksum",
-				URL:      "https://example.com/db.tar.gz",
-				Version:  5,
-			}},
-		},
+	// Database info that will be used for both cache and server
+	dbInfo := DatabaseInfo{
+		Status:        "active",
+		SchemaVersion: "v6.1.3",
+		Built:         "2025-12-27T00:00:00Z",
+		Path:          "vulnerability-db_v6.1.3_2025-12-27T00:00:00Z.tar.zst",
+		Checksum:      "sha256:same_checksum",
 	}
 
-	cachedListing := CachedListing{
-		LastChecked: time.Now().UTC(),
-		Listing:     listing,
+	// Write cache with same checksum as server will return
+	cachedInfo := CachedDatabaseInfo{
+		LastChecked:  time.Now().UTC(),
+		DatabaseInfo: dbInfo,
 	}
-	data, _ := json.MarshalIndent(cachedListing, "", "  ")
+	data, _ := json.MarshalIndent(cachedInfo, "", "  ")
 	if err := os.WriteFile(cacheFile, data, 0644); err != nil {
 		t.Fatalf("Failed to write cache: %v", err)
 	}
 
-	// Create mock server returning same listing
+	// Create mock server returning same info
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(listing); err != nil {
+		if err := json.NewEncoder(w).Encode(dbInfo); err != nil {
 			t.Fatalf("Failed to encode response: %v", err)
 		}
 	}))
@@ -205,17 +193,14 @@ func TestFeedChecker_NetworkFailure(t *testing.T) {
 	cacheFile := filepath.Join(tmpDir, "cache.json")
 
 	// Write initial cache
-	initialCache := CachedListing{
+	initialCache := CachedDatabaseInfo{
 		LastChecked: time.Now().UTC(),
-		Listing: FeedListing{
-			Available: map[string][]DatabaseEntry{
-				"5": {{
-					Built:    "2025-12-26T00:00:00Z",
-					Checksum: "sha256:original_checksum",
-					URL:      "https://example.com/db.tar.gz",
-					Version:  5,
-				}},
-			},
+		DatabaseInfo: DatabaseInfo{
+			Status:        "active",
+			SchemaVersion: "v6.1.3",
+			Built:         "2025-12-26T00:00:00Z",
+			Path:          "vulnerability-db_v6.1.3_2025-12-26T00:00:00Z.tar.zst",
+			Checksum:      "sha256:original_checksum",
 		},
 	}
 	data, _ := json.MarshalIndent(initialCache, "", "  ")
@@ -252,7 +237,7 @@ func TestFeedChecker_NetworkFailure(t *testing.T) {
 		t.Fatalf("Failed to load cache: %v", err)
 	}
 
-	if cached.Listing.Available["5"][0].Checksum != "sha256:original_checksum" {
+	if cached.DatabaseInfo.Checksum != "sha256:original_checksum" {
 		t.Error("Cache should not be modified on error")
 	}
 }
@@ -269,20 +254,17 @@ func TestFeedChecker_CorruptedCache(t *testing.T) {
 	}
 
 	// Create mock server
-	listing := FeedListing{
-		Available: map[string][]DatabaseEntry{
-			"5": {{
-				Built:    "2025-12-27T00:00:00Z",
-				Checksum: "sha256:new_checksum",
-				URL:      "https://example.com/db.tar.gz",
-				Version:  5,
-			}},
-		},
+	dbInfo := DatabaseInfo{
+		Status:        "active",
+		SchemaVersion: "v6.1.3",
+		Built:         "2025-12-27T00:00:00Z",
+		Path:          "vulnerability-db_v6.1.3_2025-12-27T00:00:00Z.tar.zst",
+		Checksum:      "sha256:new_checksum",
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(listing); err != nil {
+		if err := json.NewEncoder(w).Encode(dbInfo); err != nil {
 			t.Fatalf("Failed to encode response: %v", err)
 		}
 	}))
@@ -312,7 +294,7 @@ func TestFeedChecker_CorruptedCache(t *testing.T) {
 		t.Fatalf("Failed to load recreated cache: %v", err)
 	}
 
-	if cached.Listing.Available["5"][0].Checksum != "sha256:new_checksum" {
+	if cached.DatabaseInfo.Checksum != "sha256:new_checksum" {
 		t.Error("Cache should be recreated with new data")
 	}
 }
@@ -324,7 +306,7 @@ func TestFeedChecker_ContextCancellation(t *testing.T) {
 		// Delay to allow context cancellation
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"available":{}}`)
+		_, _ = w.Write([]byte(`{"status":"active","schemaVersion":"v6.1.3","built":"2025-12-27T00:00:00Z","path":"db.tar.zst","checksum":"sha256:abc"}`))
 	}))
 	defer server.Close()
 
@@ -361,19 +343,16 @@ func TestFeedChecker_AtomicWrite(t *testing.T) {
 		cacheFile: cacheFile,
 	}
 
-	listing := FeedListing{
-		Available: map[string][]DatabaseEntry{
-			"5": {{
-				Built:    "2025-12-27T00:00:00Z",
-				Checksum: "sha256:test",
-				URL:      "https://example.com/db.tar.gz",
-				Version:  5,
-			}},
-		},
+	dbInfo := DatabaseInfo{
+		Status:        "active",
+		SchemaVersion: "v6.1.3",
+		Built:         "2025-12-27T00:00:00Z",
+		Path:          "vulnerability-db_v6.1.3_2025-12-27T00:00:00Z.tar.zst",
+		Checksum:      "sha256:test",
 	}
 
 	// Save cache
-	if err := fc.saveCache(listing); err != nil {
+	if err := fc.saveCache(dbInfo); err != nil {
 		t.Fatalf("Failed to save cache: %v", err)
 	}
 
@@ -394,70 +373,32 @@ func TestFeedChecker_AtomicWrite(t *testing.T) {
 		t.Fatalf("Failed to load cache: %v", err)
 	}
 
-	if cached.Listing.Available["5"][0].Checksum != "sha256:test" {
-		t.Errorf("Expected checksum 'sha256:test', got '%s'", cached.Listing.Available["5"][0].Checksum)
+	if cached.DatabaseInfo.Checksum != "sha256:test" {
+		t.Errorf("Expected checksum 'sha256:test', got '%s'", cached.DatabaseInfo.Checksum)
 	}
 }
 
-// Test missing schema version
-func TestFeedChecker_MissingSchemaVersion(t *testing.T) {
-	tmpDir := t.TempDir()
-	cacheFile := filepath.Join(tmpDir, "cache.json")
-
-	// Write cache with schema version 5
-	initialCache := CachedListing{
-		LastChecked: time.Now().UTC(),
-		Listing: FeedListing{
-			Available: map[string][]DatabaseEntry{
-				"5": {{
-					Built:    "2025-12-26T00:00:00Z",
-					Checksum: "sha256:old",
-					URL:      "https://example.com/db.tar.gz",
-					Version:  5,
-				}},
-			},
-		},
-	}
-	data, _ := json.MarshalIndent(initialCache, "", "  ")
-	if err := os.WriteFile(cacheFile, data, 0644); err != nil {
-		t.Fatalf("Failed to write cache: %v", err)
-	}
-
-	// Server returns listing without schema version 5
-	newListing := FeedListing{
-		Available: map[string][]DatabaseEntry{
-			"6": {{ // Different schema version
-				Built:    "2025-12-27T00:00:00Z",
-				Checksum: "sha256:new",
-				URL:      "https://example.com/db.tar.gz",
-				Version:  6,
-			}},
-		},
-	}
-
+// Test missing checksum in response
+func TestFeedChecker_MissingChecksum(t *testing.T) {
+	// Create mock server returning invalid response (no checksum)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(newListing); err != nil {
-			t.Fatalf("Failed to encode response: %v", err)
-		}
+		_, _ = w.Write([]byte(`{"status":"active","schemaVersion":"v6.1.3","built":"2025-12-27T00:00:00Z","path":"db.tar.zst"}`))
 	}))
 	defer server.Close()
 
+	// Create feed checker
+	tmpDir := t.TempDir()
 	fc := &FeedChecker{
 		feedURL:    server.URL,
-		cacheFile:  cacheFile,
+		cacheFile:  filepath.Join(tmpDir, "cache.json"),
 		httpClient: server.Client(),
 	}
 
-	// Check for updates
-	hasChanged, err := fc.CheckForUpdates(context.Background())
-	if err != nil {
-		t.Fatalf("CheckForUpdates failed: %v", err)
-	}
-
-	// Should treat as no change (since we can't compare)
-	if hasChanged {
-		t.Error("Expected hasChanged=false when schema version is missing")
+	// Check for updates - should fail because checksum is missing
+	_, err := fc.CheckForUpdates(context.Background())
+	if err == nil {
+		t.Error("Expected error for missing checksum")
 	}
 }
 
@@ -488,5 +429,26 @@ func TestNewFeedChecker_EmptyCacheDir(t *testing.T) {
 	_, err := NewFeedChecker("")
 	if err == nil {
 		t.Error("Expected error for empty cacheDir")
+	}
+}
+
+// Test truncateChecksum helper function
+func TestTruncateChecksum(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"sha256:abc123def456", "sha256:abc123def456"},                         // Short - no truncation (14 chars)
+		{"sha256:abcdefghijklmnopqrstuvwxyz", "sha256:abcdefghijklm..."},       // Long - truncated at 20 chars
+		{"sha256:d46d2d9b09d90042801d80f4fdee067c79046d64b12d6fcf650a1955cd6b7a43", "sha256:d46d2d9b09d90..."},
+		{"", ""},                                                                // Empty
+		{"short", "short"},                                                      // Very short
+	}
+
+	for _, test := range tests {
+		result := truncateChecksum(test.input)
+		if result != test.expected {
+			t.Errorf("truncateChecksum(%q) = %q, want %q", test.input, result, test.expected)
+		}
 	}
 }

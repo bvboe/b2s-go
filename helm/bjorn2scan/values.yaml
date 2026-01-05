@@ -63,12 +63,16 @@ scanServer:
     initialDelaySeconds: 5
     periodSeconds: 10
 
+  # Readiness probe using /ready endpoint which checks vulnerability database availability
+  # The database download can take 60-90 seconds on first startup
   readinessProbe:
     httpGet:
-      path: /health
+      path: /ready
       port: 8080
-    initialDelaySeconds: 5
-    periodSeconds: 5
+    initialDelaySeconds: 10      # Wait for startup initialization
+    periodSeconds: 10            # Check every 10 seconds
+    failureThreshold: 12         # Allow up to 2 minutes for database download (12 * 10s)
+    successThreshold: 1
 
   nodeSelector: {}
 

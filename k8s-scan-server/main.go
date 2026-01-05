@@ -335,6 +335,22 @@ func main() {
 	}
 	log.Printf("Grype will use persistent storage at: %s/grype/", dataDir)
 
+	// Initialize database readiness state
+	dbReadinessState := corehandlers.NewDatabaseReadinessState(grypeCfg)
+
+	// Initialize vulnerability database at startup (before accepting scans)
+	log.Printf("Initializing vulnerability database (this may take a few minutes on first run)...")
+	dbStatus, err := grype.InitializeDatabase(grypeCfg)
+	if err != nil {
+		// Log but don't fail - the scan queue will retry on each scan
+		log.Printf("Warning: Failed to initialize vulnerability database: %v", err)
+		log.Printf("Scans will attempt to download the database on first use")
+		dbReadinessState.SetReady(dbStatus)
+	} else {
+		log.Printf("Vulnerability database ready: schema=%s, built=%v", dbStatus.SchemaVersion, dbStatus.Built)
+		dbReadinessState.SetReady(dbStatus)
+	}
+
 	// Create scan queue for automatic SBOM generation and vulnerability scanning
 	// Using default queue config (unbounded queue with single worker)
 	queueConfig := scanning.QueueConfig{
@@ -399,6 +415,9 @@ func main() {
 
 	// Register standard handlers
 	corehandlers.RegisterHandlers(mux, infoProvider)
+
+	// Register database readiness handlers (/ready, /api/db/status, /api/debug/db/reinit)
+	corehandlers.RegisterDatabaseReadinessHandlers(mux, dbReadinessState)
 
 	// Register database handlers with SBOM routing override
 	// The k8s-scan-server routes SBOM requests to pod-scanner on the appropriate node

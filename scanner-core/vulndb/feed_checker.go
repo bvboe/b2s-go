@@ -14,33 +14,27 @@ import (
 )
 
 const (
-	// DefaultFeedURL is the Anchore Grype vulnerability database feed URL
-	DefaultFeedURL = "https://toolbox-data.anchore.io/grype/databases/listing.json"
-
-	// GrypeSchemaVersion is the current Grype database schema version
-	GrypeSchemaVersion = "5"
+	// DefaultFeedURL is the Grype v6 vulnerability database feed URL
+	// This endpoint returns the latest database info for schema v6
+	DefaultFeedURL = "https://grype.anchore.io/databases/v6/latest.json"
 
 	// CacheFilename is the name of the cache file
-	CacheFilename = "grype_feed_cache.json"
+	CacheFilename = "grype_feed_cache_v6.json"
 )
 
-// FeedListing represents the Anchore database feed listing
-type FeedListing struct {
-	Available map[string][]DatabaseEntry `json:"available"`
+// DatabaseInfo represents the v6 database feed response
+type DatabaseInfo struct {
+	Status        string `json:"status"`
+	SchemaVersion string `json:"schemaVersion"`
+	Built         string `json:"built"`
+	Path          string `json:"path"`
+	Checksum      string `json:"checksum"`
 }
 
-// DatabaseEntry represents a single database entry in the feed
-type DatabaseEntry struct {
-	Built    string `json:"built"`
-	Checksum string `json:"checksum"`
-	URL      string `json:"url"`
-	Version  int    `json:"version"`
-}
-
-// CachedListing includes the listing and metadata
-type CachedListing struct {
-	LastChecked time.Time   `json:"last_checked"`
-	Listing     FeedListing `json:"listing"`
+// CachedDatabaseInfo includes the database info and metadata
+type CachedDatabaseInfo struct {
+	LastChecked  time.Time    `json:"last_checked"`
+	DatabaseInfo DatabaseInfo `json:"database_info"`
 }
 
 // FeedChecker monitors the Grype vulnerability database feed
@@ -86,19 +80,22 @@ func (fc *FeedChecker) CheckForUpdates(ctx context.Context) (bool, error) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
-	// 1. Fetch current listing from Anchore
-	currentListing, err := fc.fetchListing(ctx)
+	// 1. Fetch current database info from Anchore
+	currentInfo, err := fc.fetchDatabaseInfo(ctx)
 	if err != nil {
-		return false, fmt.Errorf("failed to fetch listing: %w", err)
+		return false, fmt.Errorf("failed to fetch database info: %w", err)
 	}
 
-	// 2. Load cached listing (if exists)
+	log.Printf("[feed-checker] Current database: schema=%s, built=%s, checksum=%s",
+		currentInfo.SchemaVersion, currentInfo.Built, truncateChecksum(currentInfo.Checksum))
+
+	// 2. Load cached info (if exists)
 	cached, err := fc.loadCache()
 	if err != nil {
-		// First run - save listing and return false (don't trigger rescan)
+		// First run - save info and return false (don't trigger rescan)
 		if os.IsNotExist(err) {
-			log.Println("[feed-checker] First run detected, caching listing without triggering rescan")
-			if saveErr := fc.saveCache(*currentListing); saveErr != nil {
+			log.Println("[feed-checker] First run detected, caching database info without triggering rescan")
+			if saveErr := fc.saveCache(*currentInfo); saveErr != nil {
 				return false, fmt.Errorf("failed to save initial cache: %w", saveErr)
 			}
 			return false, nil
@@ -106,20 +103,21 @@ func (fc *FeedChecker) CheckForUpdates(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("failed to load cache: %w", err)
 	}
 
-	// 3. Get latest checksum from both listings
-	cachedChecksum := fc.getLatestChecksum(cached.Listing, GrypeSchemaVersion)
-	currentChecksum := fc.getLatestChecksum(*currentListing, GrypeSchemaVersion)
+	// 3. Compare checksums
+	cachedChecksum := cached.DatabaseInfo.Checksum
+	currentChecksum := currentInfo.Checksum
 
-	// 4. Compare checksums
 	hasChanged := cachedChecksum != currentChecksum && cachedChecksum != "" && currentChecksum != ""
 
-	// 5. Save current listing to cache
-	if err := fc.saveCache(*currentListing); err != nil {
+	// 4. Save current info to cache
+	if err := fc.saveCache(*currentInfo); err != nil {
 		return hasChanged, fmt.Errorf("failed to save cache: %w", err)
 	}
 
 	if hasChanged {
-		log.Printf("[feed-checker] Database update detected: %s -> %s", cachedChecksum, currentChecksum)
+		log.Printf("[feed-checker] Database update detected: %s -> %s",
+			truncateChecksum(cachedChecksum), truncateChecksum(currentChecksum))
+		log.Printf("[feed-checker] New database built: %s", currentInfo.Built)
 	} else {
 		log.Println("[feed-checker] No database changes detected")
 	}
@@ -127,8 +125,8 @@ func (fc *FeedChecker) CheckForUpdates(ctx context.Context) (bool, error) {
 	return hasChanged, nil
 }
 
-// fetchListing retrieves the current feed from Anchore
-func (fc *FeedChecker) fetchListing(ctx context.Context) (*FeedListing, error) {
+// fetchDatabaseInfo retrieves the current database info from Anchore
+func (fc *FeedChecker) fetchDatabaseInfo(ctx context.Context) (*DatabaseInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", fc.feedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -155,22 +153,27 @@ func (fc *FeedChecker) fetchListing(ctx context.Context) (*FeedListing, error) {
 	}
 
 	// Parse JSON
-	var listing FeedListing
-	if err := json.Unmarshal(body, &listing); err != nil {
+	var info DatabaseInfo
+	if err := json.Unmarshal(body, &info); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
-	return &listing, nil
+	// Validate response
+	if info.Checksum == "" {
+		return nil, fmt.Errorf("invalid response: missing checksum")
+	}
+
+	return &info, nil
 }
 
-// loadCache reads the cached listing from disk
-func (fc *FeedChecker) loadCache() (*CachedListing, error) {
+// loadCache reads the cached database info from disk
+func (fc *FeedChecker) loadCache() (*CachedDatabaseInfo, error) {
 	data, err := os.ReadFile(fc.cacheFile)
 	if err != nil {
 		return nil, err
 	}
 
-	var cached CachedListing
+	var cached CachedDatabaseInfo
 	if err := json.Unmarshal(data, &cached); err != nil {
 		// Treat corrupted cache as first run - delete and recreate
 		log.Printf("[feed-checker] Warning: corrupted cache, recreating: %v", err)
@@ -183,11 +186,11 @@ func (fc *FeedChecker) loadCache() (*CachedListing, error) {
 	return &cached, nil
 }
 
-// saveCache writes the listing to disk atomically
-func (fc *FeedChecker) saveCache(listing FeedListing) error {
-	cached := CachedListing{
-		LastChecked: time.Now().UTC(),
-		Listing:     listing,
+// saveCache writes the database info to disk atomically
+func (fc *FeedChecker) saveCache(info DatabaseInfo) error {
+	cached := CachedDatabaseInfo{
+		LastChecked:  time.Now().UTC(),
+		DatabaseInfo: info,
 	}
 
 	data, err := json.MarshalIndent(cached, "", "  ")
@@ -210,14 +213,10 @@ func (fc *FeedChecker) saveCache(listing FeedListing) error {
 	return nil
 }
 
-// getLatestChecksum returns the checksum of the most recent database for the given schema version
-func (fc *FeedChecker) getLatestChecksum(listing FeedListing, schemaVersion string) string {
-	entries, ok := listing.Available[schemaVersion]
-	if !ok || len(entries) == 0 {
-		log.Printf("[feed-checker] Warning: no entries for schema version %s", schemaVersion)
-		return ""
+// truncateChecksum returns a shortened version of the checksum for logging
+func truncateChecksum(checksum string) string {
+	if len(checksum) > 20 {
+		return checksum[:20] + "..."
 	}
-
-	// Entries are sorted newest first (by convention)
-	return entries[0].Checksum
+	return checksum
 }
