@@ -56,12 +56,15 @@ scanServer:
       cpu: 200m
       memory: 512Mi  # Increased to handle vulnerability scanning workload
 
+  # Liveness probe - checks if the process is alive
+  # Note: initialDelaySeconds must be long enough for database download (60-90s on first startup)
   livenessProbe:
     httpGet:
       path: /health
       port: 8080
-    initialDelaySeconds: 5
+    initialDelaySeconds: 120     # Allow time for initial database download
     periodSeconds: 10
+    failureThreshold: 3
 
   # Readiness probe using /ready endpoint which checks vulnerability database availability
   # The database download can take 60-90 seconds on first startup
