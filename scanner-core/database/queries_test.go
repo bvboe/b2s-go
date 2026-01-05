@@ -97,11 +97,14 @@ func TestGetScannedContainerInstances(t *testing.T) {
 		if inst.Digest != "sha256:abc123" {
 			t.Errorf("Expected digest=sha256:abc123, got %s", inst.Digest)
 		}
+		if inst.Status != string(StatusCompleted) {
+			t.Errorf("Expected status=completed, got %s", inst.Status)
+		}
 	}
 }
 
-func TestGetScannedContainerInstances_OnlyCompleted(t *testing.T) {
-	dbPath := "/tmp/test_scanned_completed_" + time.Now().Format("20060102150405") + ".db"
+func TestGetScannedContainerInstances_IncludesAllStatuses(t *testing.T) {
+	dbPath := "/tmp/test_scanned_all_statuses_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -162,18 +165,27 @@ func TestGetScannedContainerInstances_OnlyCompleted(t *testing.T) {
 		t.Fatalf("Failed to add pending instance: %v", err)
 	}
 
-	// Get scanned instances - should only return completed
+	// Get scanned instances - should return both completed and pending
 	instances, err := db.GetScannedContainerInstances()
 	if err != nil {
 		t.Fatalf("Failed to get scanned instances: %v", err)
 	}
 
-	if len(instances) != 1 {
-		t.Errorf("Expected 1 instance (only completed), got %d", len(instances))
+	if len(instances) != 2 {
+		t.Errorf("Expected 2 instances (both completed and pending), got %d", len(instances))
 	}
 
-	if len(instances) > 0 && instances[0].Pod != "completed-pod" {
-		t.Errorf("Expected completed-pod, got %s", instances[0].Pod)
+	// Verify statuses are included correctly (instances ordered by namespace, pod, container)
+	statusMap := make(map[string]string)
+	for _, inst := range instances {
+		statusMap[inst.Pod] = inst.Status
+	}
+
+	if statusMap["completed-pod"] != string(StatusCompleted) {
+		t.Errorf("Expected completed-pod status=completed, got %s", statusMap["completed-pod"])
+	}
+	if statusMap["pending-pod"] != string(StatusPending) {
+		t.Errorf("Expected pending-pod status=pending, got %s", statusMap["pending-pod"])
 	}
 }
 

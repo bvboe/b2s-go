@@ -66,7 +66,7 @@ bjorn2scan_deployment{deployment_uuid="def-456",deployment_name="prod-cluster",d
 ### 3. Container Instance Metrics
 
 #### `bjorn2scan_scanned_instance`
-Gauge metric for each scanned container instance (value always 1 per instance).
+Gauge metric for each container instance (value always 1 per instance). Includes all container instances regardless of scan status.
 
 **Labels**:
 - `deployment_uuid`: Unique deployment identifier
@@ -85,11 +85,14 @@ Gauge metric for each scanned container instance (value always 1 per instance).
 - `image_tag`: Image tag
 - `image_digest`: Image digest (SHA256)
 - `instance_type`: Type of instance ("CONTAINER")
+- `scan_status`: Current scan status (e.g., "pending", "generating_sbom", "completed", "sbom_failed", "vuln_scan_failed")
 
 **Example**:
 ```
-bjorn2scan_scanned_instance{deployment_uuid="abc-123",host_name="node-1",namespace="frontend",pod="web-app-xyz",container="nginx",distro="debian",image_repo="nginx",image_tag="1.25",image_digest="sha256:abc123..."} 1
+bjorn2scan_scanned_instance{deployment_uuid="abc-123",host_name="node-1",namespace="frontend",pod="web-app-xyz",container="nginx",distro="debian",image_repo="nginx",image_tag="1.25",image_digest="sha256:abc123...",scan_status="completed"} 1
 ```
+
+**Use Case for scan_status**: This label allows monitoring scan progress and identifying containers with failed or pending scans. You can create alerts when too many containers have failed scans or track scan completion rates.
 
 ### 4. Vulnerability Metrics
 
@@ -167,6 +170,21 @@ count(count by (image_digest) (bjorn2scan_scanned_instance))
 #### Count Instances by Namespace
 ```promql
 count by (namespace) (bjorn2scan_scanned_instance)
+```
+
+#### Count Instances by Scan Status
+```promql
+count by (scan_status) (bjorn2scan_scanned_instance)
+```
+
+#### Count Failed Scans
+```promql
+count(bjorn2scan_scanned_instance{scan_status=~"sbom_failed|vuln_scan_failed"})
+```
+
+#### Count Pending Scans
+```promql
+count(bjorn2scan_scanned_instance{scan_status="pending"})
 ```
 
 ## Implementation Architecture
