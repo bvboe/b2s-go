@@ -14,6 +14,7 @@ type InfoProvider interface {
 	GetVersion() string
 	GetDeploymentIP() string   // primary outbound IP for agent, node IP for k8s
 	GetConsoleURL() string     // web UI URL (empty if disabled)
+	GetGrypeDBBuilt() string   // grype vulnerability database build timestamp (RFC3339 format, empty if unavailable)
 }
 
 // DatabaseProvider provides access to container instance data
@@ -110,6 +111,7 @@ func (c *Collector) collectDeploymentMetric() (MetricFamily, error) {
 	version := c.infoProvider.GetVersion()
 	deploymentIP := c.infoProvider.GetDeploymentIP()
 	consoleURL := c.infoProvider.GetConsoleURL()
+	grypeDBBuilt := c.infoProvider.GetGrypeDBBuilt()
 
 	labels := map[string]string{
 		"deployment_uuid":    c.deploymentUUID,
@@ -126,6 +128,11 @@ func (c *Collector) collectDeploymentMetric() (MetricFamily, error) {
 	// Only include deployment_console if not empty
 	if consoleURL != "" {
 		labels["deployment_console"] = consoleURL
+	}
+
+	// Only include grype_db_built if not empty
+	if grypeDBBuilt != "" {
+		labels["grype_db_built"] = grypeDBBuilt
 	}
 
 	return MetricFamily{

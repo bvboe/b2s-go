@@ -14,6 +14,7 @@ type MockInfoProvider struct {
 	version        string
 	deploymentIP   string
 	consoleURL     string
+	grypeDBBuilt   string
 }
 
 func (m *MockInfoProvider) GetDeploymentName() string {
@@ -34,6 +35,10 @@ func (m *MockInfoProvider) GetDeploymentIP() string {
 
 func (m *MockInfoProvider) GetConsoleURL() string {
 	return m.consoleURL
+}
+
+func (m *MockInfoProvider) GetGrypeDBBuilt() string {
+	return m.grypeDBBuilt
 }
 
 // MockDatabaseProvider implements DatabaseProvider for testing
@@ -132,6 +137,60 @@ func TestCollector_KubernetesType(t *testing.T) {
 	}
 	if !strings.Contains(metrics, `deployment_name="production-cluster"`) {
 		t.Error("Expected cluster name as deployment_name")
+	}
+}
+
+func TestCollector_GrypeDBBuiltLabel(t *testing.T) {
+	testCases := []struct {
+		name           string
+		grypeDBBuilt   string
+		expectLabel    bool
+		expectedValue  string
+	}{
+		{
+			name:          "With grype_db_built",
+			grypeDBBuilt:  "2025-12-27T10:30:00Z",
+			expectLabel:   true,
+			expectedValue: `grype_db_built="2025-12-27T10:30:00Z"`,
+		},
+		{
+			name:          "Without grype_db_built (empty)",
+			grypeDBBuilt:  "",
+			expectLabel:   false,
+			expectedValue: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			infoProvider := &MockInfoProvider{
+				deploymentName: "test-cluster",
+				deploymentType: "kubernetes",
+				version:        "1.0.0",
+				grypeDBBuilt:   tc.grypeDBBuilt,
+			}
+			deploymentUUID := "test-uuid"
+			config := CollectorConfig{
+				DeploymentEnabled: true,
+			}
+
+			collector := NewCollector(infoProvider, deploymentUUID, nil, config)
+			data, err := collector.Collect()
+			if err != nil {
+				t.Fatalf("Failed to collect metrics: %v", err)
+			}
+
+			metrics := FormatPrometheus(data)
+
+			hasLabel := strings.Contains(metrics, `grype_db_built=`)
+			if hasLabel != tc.expectLabel {
+				t.Errorf("Expected grype_db_built label present=%v, got=%v", tc.expectLabel, hasLabel)
+			}
+
+			if tc.expectLabel && !strings.Contains(metrics, tc.expectedValue) {
+				t.Errorf("Expected label value %s", tc.expectedValue)
+			}
+		})
 	}
 }
 

@@ -46,15 +46,18 @@ Gauge metric providing deployment information (value always 1).
 - `bjorn2scan_version`: Version of bjorn2scan
 - `deployment_ip`: IP address where scanner runs (primary outbound IP for agent, node IP for k8s). Omitted if unavailable.
 - `deployment_console`: URL of the web UI console (e.g., http://192.168.1.10:9999/). Omitted if web UI is disabled or URL cannot be determined.
+- `grype_db_built`: Build timestamp of the Grype vulnerability database in RFC3339 format (e.g., "2025-12-27T10:30:00Z"). Omitted if database status is unavailable.
 
 **Example**:
 ```
-# Agent deployment with web UI enabled
-bjorn2scan_deployment{deployment_uuid="abc-123",deployment_name="my-server",deployment_type="agent",bjorn2scan_version="0.1.54",deployment_ip="192.168.1.10",deployment_console="http://192.168.1.10:9999/"} 1
+# Agent deployment with web UI enabled and grype database status
+bjorn2scan_deployment{deployment_uuid="abc-123",deployment_name="my-server",deployment_type="agent",bjorn2scan_version="0.1.54",deployment_ip="192.168.1.10",deployment_console="http://192.168.1.10:9999/",grype_db_built="2025-12-27T10:30:00Z"} 1
 
 # Kubernetes deployment with ClusterIP service
-bjorn2scan_deployment{deployment_uuid="def-456",deployment_name="prod-cluster",deployment_type="kubernetes",bjorn2scan_version="0.1.54",deployment_ip="10.0.1.5",deployment_console="http://bjorn2scan.default.svc.cluster.local:80/"} 1
+bjorn2scan_deployment{deployment_uuid="def-456",deployment_name="prod-cluster",deployment_type="kubernetes",bjorn2scan_version="0.1.54",deployment_ip="10.0.1.5",deployment_console="http://bjorn2scan.default.svc.cluster.local:80/",grype_db_built="2025-12-27T10:30:00Z"} 1
 ```
+
+**Use Case for grype_db_built**: This label allows monitoring the age of the vulnerability database across all deployments. You can create alerts when the database is too old or track how often it's being updated.
 
 **Configuration**:
 - Web UI: Enable/disable via `web_ui_enabled` (agent config) or `scanServer.config.webUIEnabled` (Helm)
@@ -269,6 +272,16 @@ sum by (namespace) (bjorn2scan_vulnerability_risk)
 ### Deployment info
 ```promql
 bjorn2scan_deployment
+```
+
+### Grype database age monitoring
+```promql
+# Get the grype database build timestamp for all deployments
+bjorn2scan_deployment{grype_db_built!=""}
+
+# Extract the grype_db_built label for alerting (use with alertmanager)
+# Example alert: Database older than 7 days
+# This requires parsing the RFC3339 timestamp in your alerting rules
 ```
 
 ## Grafana Dashboard

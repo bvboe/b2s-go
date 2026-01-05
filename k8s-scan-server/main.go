@@ -54,6 +54,8 @@ type K8sScanServerInfo struct {
 	deploymentIP     string
 	cachedConsoleURL string
 	consoleMu        sync.RWMutex // Protects cachedConsoleURL
+	// Database readiness state for grype DB status
+	dbReadinessState *corehandlers.DatabaseReadinessState
 }
 
 func NewK8sScanServerInfo(port string, webUIEnabled bool, customConsoleURL string, k8sClient kubernetes.Interface, serviceName, servicePort string) *K8sScanServerInfo {
@@ -177,6 +179,24 @@ func (k *K8sScanServerInfo) GetConsoleURL() string {
 	k.consoleMu.RLock()
 	defer k.consoleMu.RUnlock()
 	return k.cachedConsoleURL
+}
+
+// SetDBReadinessState sets the database readiness state for grype DB status reporting.
+func (k *K8sScanServerInfo) SetDBReadinessState(state *corehandlers.DatabaseReadinessState) {
+	k.dbReadinessState = state
+}
+
+// GetGrypeDBBuilt returns the grype vulnerability database build timestamp in RFC3339 format.
+// Returns empty string if the database status is unavailable.
+func (k *K8sScanServerInfo) GetGrypeDBBuilt() string {
+	if k.dbReadinessState == nil {
+		return ""
+	}
+	status := k.dbReadinessState.GetStatus()
+	if status == nil || status.Built.IsZero() {
+		return ""
+	}
+	return status.Built.Format(time.RFC3339)
 }
 
 // detectConsoleURL determines the console URL based on service configuration.
@@ -404,6 +424,9 @@ func main() {
 	}
 
 	infoProvider := NewK8sScanServerInfo(port, cfg.WebUIEnabled, consoleURL, clientset, serviceName, servicePort)
+
+	// Connect database readiness state for grype DB status reporting in metrics
+	infoProvider.SetDBReadinessState(dbReadinessState)
 
 	// Start periodic refresh for console URL detection (only if auto-detecting)
 	// This handles LoadBalancer IPs that aren't available immediately at startup

@@ -49,6 +49,8 @@ type AgentInfo struct {
 	// Cached values computed at startup
 	deploymentIP string
 	consoleURL   string
+	// Grype database status getter (returns RFC3339 timestamp or empty string)
+	grypeDBStatusGetter func() string
 }
 
 func NewAgentInfo(port string, webUIEnabled bool) *AgentInfo {
@@ -140,6 +142,20 @@ func (a *AgentInfo) GetDeploymentIP() string {
 // GetConsoleURL returns the cached console URL.
 func (a *AgentInfo) GetConsoleURL() string {
 	return a.consoleURL
+}
+
+// SetGrypeDBStatusGetter sets a callback function to get the grype database build timestamp.
+func (a *AgentInfo) SetGrypeDBStatusGetter(getter func() string) {
+	a.grypeDBStatusGetter = getter
+}
+
+// GetGrypeDBBuilt returns the grype vulnerability database build timestamp in RFC3339 format.
+// Returns empty string if the database status is unavailable.
+func (a *AgentInfo) GetGrypeDBBuilt() string {
+	if a.grypeDBStatusGetter == nil {
+		return ""
+	}
+	return a.grypeDBStatusGetter()
 }
 
 // registerUpdaterHandlers registers HTTP handlers for the updater
@@ -292,6 +308,12 @@ func main() {
 		DBRootDir: "/var/lib/bjorn2scan/cache",
 	}
 
+	// Create database updater for grype DB status and rescan job
+	dbUpdater, err := vulndb.NewDatabaseUpdater(grypeCfg.DBRootDir)
+	if err != nil {
+		log.Printf("Warning: failed to create database updater: %v", err)
+	}
+
 	// Initialize scan queue with SBOM and vulnerability scanning
 	// Using default queue config (unbounded queue with single worker)
 	queueConfig := scanning.QueueConfig{
@@ -374,38 +396,45 @@ func main() {
 	}
 
 	// Initialize scheduler for periodic jobs
-	if cfg.JobsEnabled && cfg.JobsRescanDatabaseEnabled {
+	if cfg.JobsEnabled && cfg.JobsRescanDatabaseEnabled && dbUpdater != nil {
 		log.Println("Initializing scheduled jobs...")
 		sched := scheduler.New()
 
 		// Add rescan database job - uses grype's native update mechanism
-		dbUpdater, err := vulndb.NewDatabaseUpdater(grypeCfg.DBRootDir)
-		if err != nil {
-			log.Printf("Warning: failed to create database updater: %v", err)
-		} else {
-			rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
-			if err := sched.AddJob(
-				rescanJob,
-				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
-				scheduler.JobConfig{
-					Enabled: true,
-					Timeout: cfg.JobsRescanDatabaseTimeout,
-				},
-			); err != nil {
-				log.Fatalf("Failed to add rescan database job: %v", err)
-			}
-			log.Printf("Scheduled rescan database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
-
-			// Start scheduler
-			if err := sched.Start(ctx); err != nil {
-				log.Fatalf("Failed to start scheduler: %v", err)
-			}
-			log.Println("Scheduler started")
+		rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
+		if err := sched.AddJob(
+			rescanJob,
+			scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
+			scheduler.JobConfig{
+				Enabled: true,
+				Timeout: cfg.JobsRescanDatabaseTimeout,
+			},
+		); err != nil {
+			log.Fatalf("Failed to add rescan database job: %v", err)
 		}
+		log.Printf("Scheduled rescan database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
+
+		// Start scheduler
+		if err := sched.Start(ctx); err != nil {
+			log.Fatalf("Failed to start scheduler: %v", err)
+		}
+		log.Println("Scheduler started")
 	}
 
 	// Setup HTTP server
 	infoProvider := NewAgentInfo(cfg.Port, cfg.WebUIEnabled)
+
+	// Wire up grype database status getter for metrics
+	if dbUpdater != nil {
+		infoProvider.SetGrypeDBStatusGetter(func() string {
+			status, err := dbUpdater.GetCurrentStatus(context.Background())
+			if err != nil || status == nil || status.Built.IsZero() {
+				return ""
+			}
+			return status.Built.Format(time.RFC3339)
+		})
+	}
+
 	mux := http.NewServeMux()
 	handlers.RegisterHandlers(mux, infoProvider)
 	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
