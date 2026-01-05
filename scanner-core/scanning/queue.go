@@ -391,7 +391,7 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 	ctx, cancel := context.WithTimeout(q.ctx, 5*time.Minute)
 	defer cancel()
 
-	vulnJSON, err := grype.ScanVulnerabilitiesWithConfig(ctx, sbomJSON, q.grypeCfg)
+	scanResult, err := grype.ScanVulnerabilitiesWithConfig(ctx, sbomJSON, q.grypeCfg)
 	if err != nil {
 		log.Printf("Error scanning vulnerabilities for %s:%s: %v",
 			job.Image.Repository, job.Image.Tag, err)
@@ -402,9 +402,9 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 		return
 	}
 
-	// Store the vulnerability report
+	// Store the vulnerability report with grype DB version info
 	// StoreVulnerabilities will automatically update status to StatusCompleted
-	if err := q.db.StoreVulnerabilities(job.Image.Digest, vulnJSON); err != nil {
+	if err := q.db.StoreVulnerabilities(job.Image.Digest, scanResult.VulnerabilityJSON, scanResult.DBStatus.Built); err != nil {
 		log.Printf("Error storing vulnerabilities for %s:%s: %v",
 			job.Image.Repository, job.Image.Tag, err)
 

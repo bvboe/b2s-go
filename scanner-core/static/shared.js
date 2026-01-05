@@ -359,6 +359,28 @@ function formatRiskNumber(risk) {
     return risk.toFixed(1);
 }
 
+// Format timestamp to a readable date/time string
+// Input is expected to be an ISO 8601 / RFC 3339 timestamp string
+function formatTimestamp(timestamp) {
+    if (!timestamp) return '-';
+    try {
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return '-';
+        // Format as "Jan 5, 2026 14:30" (locale-aware, compact)
+        return date.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        }) + ' ' + date.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+    } catch (e) {
+        return '-';
+    }
+}
+
 // Escape HTML
 function escapeHtml(text) {
     const div = document.createElement('div');

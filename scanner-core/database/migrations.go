@@ -115,6 +115,11 @@ var migrations = []migration{
 		name:    "add_performance_indexes",
 		up:      migrateToV20,
 	},
+	{
+		version: 21,
+		name:    "add_grype_db_built_column",
+		up:      migrateToV21,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -1592,5 +1597,23 @@ func migrateToV20(conn *sql.DB) error {
 	log.Println("  - container_images(created_at): Optimizes ORDER BY in image list queries")
 	log.Println("  - container_instances(created_at): Optimizes ORDER BY in instance list queries")
 	log.Println("  - vulnerabilities(image_id, severity): Optimizes GROUP BY in vulnerability count queries")
+	return nil
+}
+
+// migrateToV21 adds grype_db_built column to track which vulnerability database version was used for scanning
+func migrateToV21(conn *sql.DB) error {
+	log.Println("Migration v21: Adding grype_db_built column to container_images...")
+
+	// Add grype_db_built column to track the vulnerability database version used for scanning
+	// This stores the RFC3339 timestamp of when the grype database was built
+	_, err := conn.Exec(`
+		ALTER TABLE container_images ADD COLUMN grype_db_built TEXT
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add grype_db_built column: %w", err)
+	}
+
+	log.Println("Migration v21: Successfully added grype_db_built column")
+	log.Println("  - grype_db_built: Stores the grype vulnerability database build timestamp used for scanning")
 	return nil
 }

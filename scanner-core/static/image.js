@@ -83,6 +83,8 @@ async function loadImageDetails(imageid) {
         document.getElementById('instances').innerHTML = (data.instances || []).join('<br>') || 'N/A';
         document.getElementById('distro_display_name').textContent = data.distro_display_name || 'Unknown';
         document.getElementById('scan_status').textContent = data.status_description || 'Unknown';
+        document.getElementById('vulns_scanned_at').textContent = formatTimestamp(data.vulns_scanned_at) || '-';
+        document.getElementById('grype_db_built').textContent = formatTimestamp(data.grype_db_built) || '-';
 
     } catch (error) {
         console.error('Error loading image details:', error);

@@ -644,7 +644,9 @@ SELECT
     images.digest as image_id,
     images.status as scan_status,
     images.os_name as distro_display_name,
-    status.description as status_description
+    status.description as status_description,
+    images.vulns_scanned_at,
+    images.grype_db_built
 FROM container_images images
 JOIN scan_status status ON images.status = status.status
 WHERE images.digest = '` + escapedDigest + `'`
@@ -720,6 +722,8 @@ ORDER BY namespace, pod, container`
 			"distro_display_name": imageRow["distro_display_name"],
 			"scan_status":         imageRow["scan_status"],
 			"status_description":  imageRow["status_description"],
+			"vulns_scanned_at":    imageRow["vulns_scanned_at"],
+			"grype_db_built":      imageRow["grype_db_built"],
 		}
 
 		w.Header().Set("Content-Type", "application/json")

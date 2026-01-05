@@ -326,12 +326,20 @@ func (db *DB) UpdateVulnerabilityStatus(digest string, status string, errorMsg s
 }
 
 // StoreVulnerabilities stores the vulnerability scan JSON for an image and marks it as scanned
-func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte) error {
+// grypeDBBuilt is the build timestamp of the grype vulnerability database used for scanning (can be zero for unknown)
+func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt time.Time) error {
 	// Get image ID first
 	var imageID int64
 	err := db.conn.QueryRow(`SELECT id FROM container_images WHERE digest = ?`, digest).Scan(&imageID)
 	if err != nil {
 		return fmt.Errorf("failed to get image ID: %w", err)
+	}
+
+	// Format grype DB built timestamp (empty string if zero)
+	var grypeDBBuiltStr *string
+	if !grypeDBBuilt.IsZero() {
+		s := grypeDBBuilt.UTC().Format(time.RFC3339)
+		grypeDBBuiltStr = &s
 	}
 
 	_, err = db.conn.Exec(`
@@ -340,9 +348,10 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte) error {
 		    status = ?,
 		    status_error = NULL,
 		    vulns_scanned_at = ?,
+		    grype_db_built = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
-	`, string(vulnJSON), StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), digest)
+	`, string(vulnJSON), StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), grypeDBBuiltStr, digest)
 
 	if err != nil {
 		return fmt.Errorf("failed to store vulnerabilities: %w", err)

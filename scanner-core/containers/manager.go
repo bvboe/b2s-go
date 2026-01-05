@@ -59,11 +59,42 @@ func (m *Manager) SetDatabase(db DatabaseInterface) {
 }
 
 // SetScanQueue configures the manager to use a scan queue for SBOM generation
+// After setting the queue, it enqueues scans for any images that were discovered
+// before the queue was connected (catch-up for initial sync)
 func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.scanQueue = queue
 	log.Println("Container manager: scan queue enabled")
+
+	// Catch-up: enqueue scans for images discovered before queue was connected
+	// This handles images from initial sync that couldn't be enqueued
+	if m.db != nil && len(m.instances) > 0 {
+		log.Printf("Checking %d instances for pending scans...", len(m.instances))
+
+		// Track unique images to avoid duplicate scan jobs
+		seenDigests := make(map[string]bool)
+		pendingCount := 0
+
+		for _, instance := range m.instances {
+			if instance.Image.Digest == "" {
+				continue
+			}
+			if seenDigests[instance.Image.Digest] {
+				continue
+			}
+			seenDigests[instance.Image.Digest] = true
+
+			// Check and enqueue scan with retry logic
+			// Note: checkAndEnqueueScan needs the lock released
+			m.mu.Unlock()
+			m.checkAndEnqueueScan(instance)
+			m.mu.Lock()
+			pendingCount++
+		}
+
+		log.Printf("Queued catch-up scans for %d unique images", pendingCount)
+	}
+	m.mu.Unlock()
 }
 
 // makeKey creates a unique key for a container instance
@@ -268,8 +299,11 @@ func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
 		// If complete, no action needed
 
 	case "scanning":
-		// Scan already in progress, no action needed
-		log.Printf("Scan already in progress for image: %s:%s (digest=%s)",
+		// Image is in an intermediate state (generating_sbom).
+		// This typically means a previous scan was interrupted (e.g., pod restart).
+		// Re-enqueue with force scan to resume/restart the scan.
+		log.Printf("Retrying interrupted scan for image: %s:%s (digest=%s)",
 			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
 	}
 }

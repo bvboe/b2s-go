@@ -98,16 +98,18 @@ helm-uninstall: ## Uninstall the Helm release
 
 # Quick Helm deploy for kind (build all + load all + install/upgrade)
 helm-kind-deploy: docker-build-all ## Build and deploy to kind
+	$(eval DEPLOY_NAMESPACE := $(or $(NAMESPACE),$(shell kubectl config view --minify --output 'jsonpath={..namespace}'),default))
 	@echo "============================================"
 	@echo "Deploying to kind with image tag: $(IMAGE_TAG)"
+	@echo "Namespace: $(DEPLOY_NAMESPACE)"
 	@echo "============================================"
 	@echo "Loading images into kind cluster..."
 	kind load docker-image $(SCAN_SERVER_IMAGE):$(IMAGE_TAG)
 	kind load docker-image $(POD_SCANNER_IMAGE):$(IMAGE_TAG)
 	kind load docker-image $(UPDATE_CONTROLLER_IMAGE):$(IMAGE_TAG)
-	@if helm list -n $(NAMESPACE) | grep -q $(HELM_RELEASE); then \
+	@if helm list -n $(DEPLOY_NAMESPACE) | grep -q $(HELM_RELEASE); then \
 		helm upgrade $(HELM_RELEASE) $(HELM_CHART) \
-			--namespace $(NAMESPACE) \
+			--namespace $(DEPLOY_NAMESPACE) \
 			--set scanServer.image.repository=$(SCAN_SERVER_IMAGE) \
 			--set scanServer.image.tag=$(IMAGE_TAG) \
 			--set scanServer.image.pullPolicy=IfNotPresent \
@@ -116,11 +118,11 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 			--set podScanner.image.pullPolicy=IfNotPresent \
 			--set updateController.image.tag=$(IMAGE_TAG) \
 			--set clusterName="Kind Cluster"; \
-		kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(NAMESPACE); \
-		kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(NAMESPACE); \
+		kubectl rollout restart deployment/$(HELM_RELEASE)-scan-server -n $(DEPLOY_NAMESPACE); \
+		kubectl rollout restart daemonset/$(HELM_RELEASE)-pod-scanner -n $(DEPLOY_NAMESPACE); \
 	else \
 		helm install $(HELM_RELEASE) $(HELM_CHART) \
-			--namespace $(NAMESPACE) \
+			--namespace $(DEPLOY_NAMESPACE) \
 			--create-namespace \
 			--set scanServer.image.repository=$(SCAN_SERVER_IMAGE) \
 			--set scanServer.image.tag=$(IMAGE_TAG) \
@@ -134,9 +136,9 @@ helm-kind-deploy: docker-build-all ## Build and deploy to kind
 	@echo "============================================"
 	@echo "Deployment complete!"
 	@echo "Image tag used: $(IMAGE_TAG)"
-	@echo "Check status: kubectl get pods -n $(NAMESPACE)"
-	@echo "View logs: kubectl logs -l app.kubernetes.io/name=bjorn2scan -n $(NAMESPACE)"
-	@echo "Port forward: kubectl port-forward svc/$(HELM_RELEASE) 8080:80 -n $(NAMESPACE)"
+	@echo "Check status: kubectl get pods -n $(DEPLOY_NAMESPACE)"
+	@echo "View logs: kubectl logs -l app.kubernetes.io/name=bjorn2scan -n $(DEPLOY_NAMESPACE)"
+	@echo "Port forward: kubectl port-forward svc/$(HELM_RELEASE) 8080:80 -n $(DEPLOY_NAMESPACE)"
 	@echo "============================================"
 
 # Deploy with Prometheus/Grafana and OTEL metrics on kind

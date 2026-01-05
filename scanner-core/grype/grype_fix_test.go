@@ -18,14 +18,14 @@ func TestScanWithDistro(t *testing.T) {
 
 	// Scan for vulnerabilities
 	ctx := context.Background()
-	vulnJSON, err := ScanVulnerabilities(ctx, sbomJSON)
+	scanResult, err := ScanVulnerabilities(ctx, sbomJSON)
 	if err != nil {
 		t.Fatalf("Failed to scan vulnerabilities: %v", err)
 	}
 
 	// Parse the result
 	var result map[string]interface{}
-	if err := json.Unmarshal(vulnJSON, &result); err != nil {
+	if err := json.Unmarshal(scanResult.VulnerabilityJSON, &result); err != nil {
 		t.Fatalf("Failed to parse vulnerability JSON: %v", err)
 	}
 

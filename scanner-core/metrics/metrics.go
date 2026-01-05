@@ -74,30 +74,35 @@ func (c *Collector) Collect() (*MetricsData, error) {
 		data.Families = append(data.Families, family)
 	}
 
+	// Fetch vulnerability data once for all vulnerability metrics (performance optimization)
+	var vulnInstances []database.VulnerabilityInstance
+	needsVulnData := c.database != nil && (c.config.VulnerabilitiesEnabled ||
+		c.config.VulnerabilityExploitedEnabled ||
+		c.config.VulnerabilityRiskEnabled)
+
+	if needsVulnData {
+		var err error
+		vulnInstances, err = c.database.GetVulnerabilityInstances()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get vulnerability instances: %w", err)
+		}
+	}
+
 	// Collect vulnerability metrics if enabled
 	if c.config.VulnerabilitiesEnabled && c.database != nil {
-		family, err := c.collectVulnerabilityMetrics()
-		if err != nil {
-			return nil, fmt.Errorf("failed to collect vulnerability metrics: %w", err)
-		}
+		family := c.collectVulnerabilityMetrics(vulnInstances)
 		data.Families = append(data.Families, family)
 	}
 
 	// Collect vulnerability exploited metrics if enabled
 	if c.config.VulnerabilityExploitedEnabled && c.database != nil {
-		family, err := c.collectVulnerabilityExploitedMetrics()
-		if err != nil {
-			return nil, fmt.Errorf("failed to collect vulnerability exploited metrics: %w", err)
-		}
+		family := c.collectVulnerabilityExploitedMetrics(vulnInstances)
 		data.Families = append(data.Families, family)
 	}
 
 	// Collect vulnerability risk metrics if enabled
 	if c.config.VulnerabilityRiskEnabled && c.database != nil {
-		family, err := c.collectVulnerabilityRiskMetrics()
-		if err != nil {
-			return nil, fmt.Errorf("failed to collect vulnerability risk metrics: %w", err)
-		}
+		family := c.collectVulnerabilityRiskMetrics(vulnInstances)
 		data.Families = append(data.Families, family)
 	}
 
@@ -203,12 +208,7 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 }
 
 // collectVulnerabilityMetrics generates bjorn2scan_vulnerability metrics for all vulnerabilities in running containers
-func (c *Collector) collectVulnerabilityMetrics() (MetricFamily, error) {
-	instances, err := c.database.GetVulnerabilityInstances()
-	if err != nil {
-		return MetricFamily{}, fmt.Errorf("failed to get vulnerability instances: %w", err)
-	}
-
+func (c *Collector) collectVulnerabilityMetrics(instances []database.VulnerabilityInstance) MetricFamily {
 	metrics := make([]MetricPoint, 0, len(instances))
 
 	for _, instance := range instances {
@@ -260,17 +260,12 @@ func (c *Collector) collectVulnerabilityMetrics() (MetricFamily, error) {
 		Help:    "Bjorn2scan vulnerability information for running container instances",
 		Type:    "gauge",
 		Metrics: metrics,
-	}, nil
+	}
 }
 
 // collectVulnerabilityExploitedMetrics generates bjorn2scan_vulnerability_exploited metrics for vulnerabilities with known exploits
 // Only includes vulnerabilities where known_exploited > 0 (CISA KEV catalog entries)
-func (c *Collector) collectVulnerabilityExploitedMetrics() (MetricFamily, error) {
-	instances, err := c.database.GetVulnerabilityInstances()
-	if err != nil {
-		return MetricFamily{}, fmt.Errorf("failed to get vulnerability instances: %w", err)
-	}
-
+func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.VulnerabilityInstance) MetricFamily {
 	metrics := make([]MetricPoint, 0, len(instances))
 
 	for _, instance := range instances {
@@ -327,17 +322,12 @@ func (c *Collector) collectVulnerabilityExploitedMetrics() (MetricFamily, error)
 		Help:    "Bjorn2scan known exploited vulnerabilities (CISA KEV) in running container instances",
 		Type:    "gauge",
 		Metrics: metrics,
-	}, nil
+	}
 }
 
 // collectVulnerabilityRiskMetrics generates bjorn2scan_vulnerability_risk metrics for all vulnerabilities in running containers
 // Uses risk field (float) to provide risk scores for each vulnerability
-func (c *Collector) collectVulnerabilityRiskMetrics() (MetricFamily, error) {
-	instances, err := c.database.GetVulnerabilityInstances()
-	if err != nil {
-		return MetricFamily{}, fmt.Errorf("failed to get vulnerability instances: %w", err)
-	}
-
+func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.VulnerabilityInstance) MetricFamily {
 	metrics := make([]MetricPoint, 0, len(instances))
 
 	for _, instance := range instances {
@@ -389,5 +379,5 @@ func (c *Collector) collectVulnerabilityRiskMetrics() (MetricFamily, error) {
 		Help:    "Bjorn2scan vulnerability risk scores for running container instances",
 		Type:    "gauge",
 		Metrics: metrics,
-	}, nil
+	}
 }

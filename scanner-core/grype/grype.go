@@ -74,6 +74,12 @@ type DatabaseStatus struct {
 	Error         string    `json:"error,omitempty"`
 }
 
+// ScanResult contains the results of a vulnerability scan
+type ScanResult struct {
+	VulnerabilityJSON []byte         // The raw vulnerability scan JSON output
+	DBStatus          DatabaseStatus // Information about the vulnerability database used
+}
+
 // InitializeDatabase ensures the vulnerability database is downloaded and ready.
 // This should be called at startup before accepting scan requests.
 // Returns the database status and any error encountered.
@@ -257,13 +263,14 @@ func DefaultMatcherConfig() matcher.Config {
 }
 
 // ScanVulnerabilities scans an SBOM for vulnerabilities using Grype library
-// Takes SBOM JSON bytes as input and returns vulnerability report as JSON bytes
-func ScanVulnerabilities(ctx context.Context, sbomJSON []byte) ([]byte, error) {
+// Takes SBOM JSON bytes as input and returns scan result with vulnerability report and DB info
+func ScanVulnerabilities(ctx context.Context, sbomJSON []byte) (*ScanResult, error) {
 	return ScanVulnerabilitiesWithConfig(ctx, sbomJSON, Config{})
 }
 
 // ScanVulnerabilitiesWithConfig scans an SBOM for vulnerabilities using Grype library with custom configuration
-func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Config) ([]byte, error) {
+// Returns a ScanResult containing both the vulnerability JSON and information about the database used
+func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Config) (*ScanResult, error) {
 	log.Printf("Starting vulnerability scan on SBOM (%d bytes)", len(sbomJSON))
 
 	// Write SBOM to temp file so we can use Grype's Provide function
@@ -420,5 +427,16 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 
 	log.Printf("Vulnerability scan complete (%d bytes)", len(reportJSON))
 
-	return reportJSON, nil
+	// Build result with vulnerability JSON and DB status
+	result := &ScanResult{
+		VulnerabilityJSON: reportJSON,
+		DBStatus: DatabaseStatus{
+			Available:     true,
+			Built:         dbStatus.Built,
+			SchemaVersion: dbStatus.SchemaVersion,
+			Path:          dbStatus.Path,
+		},
+	}
+
+	return result, nil
 }

@@ -725,7 +725,7 @@ func TestManagerNoRetryForCompleteData(t *testing.T) {
 	}
 
 	vulnJSON := []byte(`{"vulnerabilities":[]}`)
-	err = db.StoreVulnerabilities("sha256:complete", vulnJSON)
+	err = db.StoreVulnerabilities("sha256:complete", vulnJSON, time.Time{})
 	if err != nil {
 		t.Fatalf("Failed to store vulnerabilities: %v", err)
 	}
