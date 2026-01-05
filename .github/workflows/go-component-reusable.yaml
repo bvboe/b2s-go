@@ -155,6 +155,17 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
 
     steps:
+    - name: Free Disk Space
+      run: |
+        echo "=== Disk space before cleanup ==="
+        df -h /
+        echo ""
+        echo "Cleaning up Docker resources..."
+        docker system prune -af --volumes 2>/dev/null || true
+        echo ""
+        echo "=== Disk space after cleanup ==="
+        df -h /
+
     - name: Checkout code
       uses: actions/checkout@v6
 
@@ -378,11 +389,22 @@ jobs:
     strategy:
       matrix:
         platform: ${{ fromJSON(needs.docker-prep-parallel.outputs.platforms-json) }}
-    
+
     steps:
+    - name: Free Disk Space
+      run: |
+        echo "=== Disk space before cleanup ==="
+        df -h /
+        echo ""
+        echo "Cleaning up Docker resources..."
+        docker system prune -af --volumes 2>/dev/null || true
+        echo ""
+        echo "=== Disk space after cleanup ==="
+        df -h /
+
     - name: Checkout code
       uses: actions/checkout@v6
-    
+
     - name: Prepare platform tag
       id: platform-tag
       run: |
