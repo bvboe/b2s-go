@@ -12,7 +12,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.39.0
 	go.opentelemetry.io/otel/sdk v1.39.0
 	go.opentelemetry.io/otel/sdk/metric v1.39.0
-	google.golang.org/grpc v1.77.0
+	google.golang.org/grpc v1.78.0
 	gopkg.in/ini.v1 v1.67.0
 	modernc.org/sqlite v1.41.0
 )
