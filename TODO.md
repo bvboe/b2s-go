@@ -7,6 +7,9 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Scanner upgrade stability
+- [ ] Scanner stability in general
+- [ ] Grafana data integrity
 - [ ] Add host_ip tracking to metrics (requires storing Kubernetes node IP in database or querying K8s API)
 - [ ] Pick up node tags!
 - [ ] Clean up agent configuration management:

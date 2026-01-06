@@ -396,23 +396,42 @@ func main() {
 	}
 
 	// Initialize scheduler for periodic jobs
-	if cfg.JobsEnabled && cfg.JobsRescanDatabaseEnabled && dbUpdater != nil {
+	var sched *scheduler.Scheduler
+	if cfg.JobsEnabled {
 		log.Println("Initializing scheduled jobs...")
-		sched := scheduler.New()
+		sched = scheduler.New()
 
 		// Add rescan database job - uses grype's native update mechanism
-		rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
-		if err := sched.AddJob(
-			rescanJob,
-			scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
-			scheduler.JobConfig{
-				Enabled: true,
-				Timeout: cfg.JobsRescanDatabaseTimeout,
-			},
-		); err != nil {
-			log.Fatalf("Failed to add rescan database job: %v", err)
+		if cfg.JobsRescanDatabaseEnabled && dbUpdater != nil {
+			rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
+			if err := sched.AddJob(
+				rescanJob,
+				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
+				scheduler.JobConfig{
+					Enabled: true,
+					Timeout: cfg.JobsRescanDatabaseTimeout,
+				},
+			); err != nil {
+				log.Fatalf("Failed to add rescan database job: %v", err)
+			}
+			log.Printf("Scheduled rescan-database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
 		}
-		log.Printf("Scheduled rescan database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
+
+		// Add cleanup orphaned images job
+		if cfg.JobsCleanupEnabled {
+			cleanupJob := jobs.NewCleanupOrphanedImagesJob(db)
+			if err := sched.AddJob(
+				cleanupJob,
+				scheduler.NewIntervalSchedule(cfg.JobsCleanupInterval),
+				scheduler.JobConfig{
+					Enabled: true,
+					Timeout: cfg.JobsCleanupTimeout,
+				},
+			); err != nil {
+				log.Fatalf("Failed to add cleanup job: %v", err)
+			}
+			log.Printf("Scheduled cleanup-orphaned-images job (interval: %v, timeout: %v)", cfg.JobsCleanupInterval, cfg.JobsCleanupTimeout)
+		}
 
 		// Start scheduler
 		if err := sched.Start(ctx); err != nil {
@@ -451,6 +470,9 @@ func main() {
 
 	// Register debug handlers if debug mode is enabled
 	handlers.RegisterDebugHandlers(mux, db, debugConfig, scanQueue)
+
+	// Register jobs debug handlers for listing, triggering, and viewing execution history
+	handlers.RegisterJobsHandlersWithDB(mux, sched, db)
 
 	// Create collector config for metrics
 	collectorConfig := metrics.CollectorConfig{

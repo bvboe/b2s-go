@@ -4,17 +4,19 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
 // mockDatabaseCleanup implements DatabaseCleanup for testing
 type mockDatabaseCleanup struct {
 	called      bool
 	shouldFail  bool
-	cleanupFunc func() (interface{}, error)
-	stats       interface{}
+	cleanupFunc func() (*database.CleanupStats, error)
+	stats       *database.CleanupStats
 }
 
-func (m *mockDatabaseCleanup) CleanupOrphanedImages() (interface{}, error) {
+func (m *mockDatabaseCleanup) CleanupOrphanedImages() (*database.CleanupStats, error) {
 	m.called = true
 	if m.cleanupFunc != nil {
 		return m.cleanupFunc()
@@ -28,10 +30,10 @@ func (m *mockDatabaseCleanup) CleanupOrphanedImages() (interface{}, error) {
 func TestCleanupOrphanedImagesJob(t *testing.T) {
 	t.Run("successful cleanup", func(t *testing.T) {
 		db := &mockDatabaseCleanup{
-			stats: map[string]int{
-				"images_removed":          5,
-				"packages_removed":        123,
-				"vulnerabilities_removed": 456,
+			stats: &database.CleanupStats{
+				ImagesRemoved:          5,
+				PackagesRemoved:        123,
+				VulnerabilitiesRemoved: 456,
 			},
 		}
 		job := NewCleanupOrphanedImagesJob(db)
@@ -52,10 +54,10 @@ func TestCleanupOrphanedImagesJob(t *testing.T) {
 
 	t.Run("no orphaned images", func(t *testing.T) {
 		db := &mockDatabaseCleanup{
-			stats: map[string]int{
-				"images_removed":          0,
-				"packages_removed":        0,
-				"vulnerabilities_removed": 0,
+			stats: &database.CleanupStats{
+				ImagesRemoved:          0,
+				PackagesRemoved:        0,
+				VulnerabilitiesRemoved: 0,
 			},
 		}
 		job := NewCleanupOrphanedImagesJob(db)
@@ -111,10 +113,10 @@ func TestCleanupOrphanedImagesJob(t *testing.T) {
 
 	t.Run("large cleanup", func(t *testing.T) {
 		db := &mockDatabaseCleanup{
-			stats: map[string]int{
-				"images_removed":          1000,
-				"packages_removed":        50000,
-				"vulnerabilities_removed": 100000,
+			stats: &database.CleanupStats{
+				ImagesRemoved:          1000,
+				PackagesRemoved:        50000,
+				VulnerabilitiesRemoved: 100000,
 			},
 		}
 		job := NewCleanupOrphanedImagesJob(db)

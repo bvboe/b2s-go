@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 20
+const currentSchemaVersion = 22
 
 type migration struct {
 	version int
@@ -119,6 +119,11 @@ var migrations = []migration{
 		version: 21,
 		name:    "add_grype_db_built_column",
 		up:      migrateToV21,
+	},
+	{
+		version: 22,
+		name:    "add_job_executions_table",
+		up:      migrateToV22,
 	},
 }
 
@@ -1615,5 +1620,56 @@ func migrateToV21(conn *sql.DB) error {
 
 	log.Println("Migration v21: Successfully added grype_db_built column")
 	log.Println("  - grype_db_built: Stores the grype vulnerability database build timestamp used for scanning")
+	return nil
+}
+
+// migrateToV22 adds job_executions table to track scheduled job execution history
+func migrateToV22(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v22: Creating job_executions table...")
+
+	// Create job_executions table to track job execution history
+	_, err = tx.Exec(`
+		CREATE TABLE job_executions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_name TEXT NOT NULL,
+			started_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			status TEXT NOT NULL DEFAULT 'running',
+			error_message TEXT,
+			duration_ms INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create job_executions table: %w", err)
+	}
+
+	// Create indexes for efficient querying
+	_, err = tx.Exec(`
+		CREATE INDEX idx_job_executions_job_name ON job_executions(job_name);
+		CREATE INDEX idx_job_executions_started_at ON job_executions(started_at);
+		CREATE INDEX idx_job_executions_status ON job_executions(status);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create job_executions indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v22: Successfully created job_executions table")
+	log.Println("  - job_name: Name of the scheduled job")
+	log.Println("  - started_at: When the job started executing")
+	log.Println("  - completed_at: When the job finished")
+	log.Println("  - status: running, completed, or failed")
+	log.Println("  - error_message: Error details if job failed")
+	log.Println("  - duration_ms: Execution duration in milliseconds")
 	return nil
 }

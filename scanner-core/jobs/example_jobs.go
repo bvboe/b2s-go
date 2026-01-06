@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
 // RefreshImagesJob triggers a refresh of all running container images
@@ -50,7 +51,7 @@ type CleanupOrphanedImagesJob struct {
 
 // DatabaseCleanup defines the interface for database cleanup operations
 type DatabaseCleanup interface {
-	CleanupOrphanedImages() (interface{}, error) // Returns CleanupStats
+	CleanupOrphanedImages() (*database.CleanupStats, error)
 }
 
 // NewCleanupOrphanedImagesJob creates a new cleanup job
@@ -75,12 +76,11 @@ func (j *CleanupOrphanedImagesJob) Run(ctx context.Context) error {
 		return fmt.Errorf("cleanup failed: %w", err)
 	}
 
-	// Log summary (the database method already logs details)
-	log.Printf("[cleanup] Cleanup job completed successfully")
-
-	// Check if we actually cleaned anything
-	if stats != nil {
-		log.Printf("[cleanup] Summary: check database logs for details")
+	if stats != nil && stats.ImagesRemoved > 0 {
+		log.Printf("[cleanup] Cleanup completed: removed %d images, %d packages, %d vulnerabilities",
+			stats.ImagesRemoved, stats.PackagesRemoved, stats.VulnerabilitiesRemoved)
+	} else {
+		log.Printf("[cleanup] Cleanup completed: no orphaned images found")
 	}
 
 	return nil
