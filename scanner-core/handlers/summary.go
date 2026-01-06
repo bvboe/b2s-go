@@ -68,6 +68,7 @@ func ScanStatusCountsHandler(provider ImageQueryProvider) http.HandlerFunc {
 }
 
 // buildScanStatusQuery constructs the SQL query for scan status counts
+// Only counts images that have at least one running container instance
 func buildScanStatusQuery(namespaces, vulnStatuses, packageTypes, osNames []string) string {
 	query := `
 SELECT
@@ -76,13 +77,8 @@ SELECT
     status.sort_order,
     COUNT(DISTINCT images.id) as count
 FROM container_images images
-JOIN scan_status status ON images.status = status.status`
-
-	// Add LEFT JOIN for instances only if namespace filter is needed
-	if len(namespaces) > 0 {
-		query += `
-LEFT JOIN container_instances instances ON images.id = instances.image_id`
-	}
+JOIN scan_status status ON images.status = status.status
+JOIN container_instances instances ON images.id = instances.image_id`
 
 	// Build WHERE conditions
 	var conditions []string

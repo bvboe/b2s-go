@@ -67,8 +67,8 @@ func TestScanStatusCountsHandler(t *testing.T) {
 				if !strings.Contains(query, "instances.namespace IN ('default','kube-system')") {
 					t.Error("Expected namespace filter in query")
 				}
-				if !strings.Contains(query, "LEFT JOIN container_instances instances") {
-					t.Error("Expected LEFT JOIN for instances when namespace filter is present")
+				if !strings.Contains(query, "JOIN container_instances instances") {
+					t.Error("Expected JOIN for instances")
 				}
 				return &database.QueryResult{
 					Columns: []string{"status", "description", "sort_order", "count"},
@@ -510,19 +510,17 @@ func TestBuildScanStatusQuery(t *testing.T) {
 				"SELECT",
 				"status.status",
 				"COUNT(DISTINCT images.id)",
+				"JOIN container_instances instances",
 				"GROUP BY status.status",
 				"HAVING count > 0",
 				"ORDER BY status.sort_order",
-			},
-			notInQuery: []string{
-				"LEFT JOIN container_instances",
 			},
 		},
 		{
 			name:       "with namespace filter",
 			namespaces: []string{"default"},
 			expectedInQuery: []string{
-				"LEFT JOIN container_instances instances",
+				"JOIN container_instances instances",
 				"instances.namespace IN ('default')",
 			},
 		},
