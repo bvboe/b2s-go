@@ -43,9 +43,10 @@ func (m *MockInfoProvider) GetGrypeDBBuilt() string {
 
 // MockDatabaseProvider implements DatabaseProvider for testing
 type MockDatabaseProvider struct {
-	instances        []database.ScannedContainerInstance
-	vulnerabilities  []database.VulnerabilityInstance
-	err              error
+	instances         []database.ScannedContainerInstance
+	vulnerabilities   []database.VulnerabilityInstance
+	scanStatusCounts  []database.ImageScanStatusCount
+	err               error
 }
 
 func (m *MockDatabaseProvider) GetScannedContainerInstances() ([]database.ScannedContainerInstance, error) {
@@ -60,6 +61,13 @@ func (m *MockDatabaseProvider) GetVulnerabilityInstances() ([]database.Vulnerabi
 		return nil, m.err
 	}
 	return m.vulnerabilities, nil
+}
+
+func (m *MockDatabaseProvider) GetImageScanStatusCounts() ([]database.ImageScanStatusCount, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.scanStatusCounts, nil
 }
 
 func TestCollector_Collect(t *testing.T) {
@@ -260,7 +268,6 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 				Tag:        "1.21",
 				Digest:     "sha256:abc123",
 				OSName:     "debian",
-				Status:     "completed",
 			},
 			{
 				Namespace:  "kube-system",
@@ -271,7 +278,6 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 				Tag:        "1.8.0",
 				Digest:     "sha256:def456",
 				OSName:     "alpine",
-				Status:     "pending",
 			},
 		},
 	}
@@ -333,14 +339,6 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 		t.Error("Expected instance_type=CONTAINER")
 	}
 
-	// Verify scan_status labels
-	if !strings.Contains(metrics, `scan_status="completed"`) {
-		t.Error("Expected scan_status=completed")
-	}
-	if !strings.Contains(metrics, `scan_status="pending"`) {
-		t.Error("Expected scan_status=pending")
-	}
-
 	// Count the number of scanned instance metrics (should be 2)
 	count := strings.Count(metrics, "bjorn2scan_scanned_instance{")
 	if count != 2 {
@@ -367,7 +365,6 @@ func TestCollector_ScannedInstanceLabels(t *testing.T) {
 				Tag:        "v1.2.3",
 				Digest:     "sha256:xyz789",
 				OSName:     "ubuntu",
-				Status:     "completed",
 			},
 		},
 	}
@@ -437,7 +434,6 @@ func TestCollector_ConfigToggles(t *testing.T) {
 				Tag:        "latest",
 				Digest:     "sha256:abc",
 				OSName:     "alpine",
-				Status:     "completed",
 			},
 		},
 	}
@@ -527,7 +523,6 @@ func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
 				Tag:        "v1.0",
 				Digest:     "sha256:abc",
 				OSName:     `ubuntu"22.04`,
-				Status:     "completed",
 			},
 		},
 	}
@@ -808,7 +803,6 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 				Tag:        "latest",
 				Digest:     "sha256:abc",
 				OSName:     "alpine",
-				Status:     "completed",
 			},
 		},
 		vulnerabilities: []database.VulnerabilityInstance{

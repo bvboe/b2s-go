@@ -443,7 +443,6 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 				Tag:        "1.21",
 				Digest:     "sha256:abc123",
 				OSName:     "debian",
-				Status:     "completed",
 			},
 			{
 				Namespace:  "kube-system",
@@ -454,7 +453,6 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 				Tag:        "1.8.0",
 				Digest:     "sha256:def456",
 				OSName:     "alpine",
-				Status:     "completed",
 			},
 		},
 	}
@@ -508,7 +506,6 @@ func TestOTELExporter_ScannedInstancesDisabled(t *testing.T) {
 				Tag:        "latest",
 				Digest:     "sha256:abc",
 				OSName:     "alpine",
-				Status:     "completed",
 			},
 		},
 	}

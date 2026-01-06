@@ -481,11 +481,12 @@ func main() {
 
 	// Create collector config for metrics
 	collectorConfig := metrics.CollectorConfig{
-		DeploymentEnabled:        cfg.MetricsDeploymentEnabled,
-		ScannedInstancesEnabled:  cfg.MetricsScannedInstancesEnabled,
-		VulnerabilitiesEnabled:   cfg.MetricsVulnerabilitiesEnabled,
+		DeploymentEnabled:             cfg.MetricsDeploymentEnabled,
+		ScannedInstancesEnabled:       cfg.MetricsScannedInstancesEnabled,
+		VulnerabilitiesEnabled:        cfg.MetricsVulnerabilitiesEnabled,
 		VulnerabilityExploitedEnabled: cfg.MetricsVulnerabilityExploitedEnabled,
-		VulnerabilityRiskEnabled: cfg.MetricsVulnerabilityRiskEnabled,
+		VulnerabilityRiskEnabled:      cfg.MetricsVulnerabilityRiskEnabled,
+		ImageScanStatusEnabled:        cfg.MetricsImageScanStatusEnabled,
 	}
 
 	// Register Prometheus metrics endpoint

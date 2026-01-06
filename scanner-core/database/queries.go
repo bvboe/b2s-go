@@ -381,10 +381,9 @@ type ScannedContainerInstance struct {
 	Tag        string `json:"tag"`
 	Digest     string `json:"digest"`
 	OSName     string `json:"os_name"`
-	Status     string `json:"status"`
 }
 
-// GetScannedContainerInstances returns all container instances with their scan status
+// GetScannedContainerInstances returns all container instances where scan is completed
 func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error) {
 	rows, err := db.conn.Query(`
 		SELECT
@@ -395,10 +394,10 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 			ci.repository,
 			ci.tag,
 			img.digest,
-			COALESCE(img.os_name, '') as os_name,
-			img.status
+			COALESCE(img.os_name, '') as os_name
 		FROM container_instances ci
 		JOIN container_images img ON ci.image_id = img.id
+		WHERE img.status = 'completed'
 		ORDER BY ci.namespace, ci.pod, ci.container
 	`)
 	if err != nil {
@@ -422,7 +421,6 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 			&instance.Tag,
 			&instance.Digest,
 			&instance.OSName,
-			&instance.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan container instance row: %w", err)
@@ -431,6 +429,73 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 	}
 
 	return instances, nil
+}
+
+// ImageScanStatusCount represents the count of images by scan status
+type ImageScanStatusCount struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+// GetImageScanStatusCounts returns the count of running images grouped by scan status
+// Only counts images that have at least one running container instance
+func (db *DB) GetImageScanStatusCounts() ([]ImageScanStatusCount, error) {
+	// Get all possible statuses from scan_status table
+	statusRows, err := db.conn.Query(`
+		SELECT status FROM scan_status ORDER BY sort_order
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query scan statuses: %w", err)
+	}
+
+	var allStatuses []string
+	for statusRows.Next() {
+		var status string
+		if err := statusRows.Scan(&status); err != nil {
+			_ = statusRows.Close()
+			return nil, fmt.Errorf("failed to scan status row: %w", err)
+		}
+		allStatuses = append(allStatuses, status)
+	}
+	if err := statusRows.Close(); err != nil {
+		log.Printf("Warning: Failed to close status rows: %v", err)
+	}
+
+	// Get counts for running images (images with at least one container instance)
+	rows, err := db.conn.Query(`
+		SELECT
+			img.status,
+			COUNT(DISTINCT img.id) as count
+		FROM container_images img
+		INNER JOIN container_instances ci ON ci.image_id = img.id
+		GROUP BY img.status
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query image scan status counts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	// Build a map of status -> count
+	statusCounts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan status count row: %w", err)
+		}
+		statusCounts[status] = count
+	}
+
+	// Build result with all statuses (including zeros)
+	result := make([]ImageScanStatusCount, 0, len(allStatuses))
+	for _, status := range allStatuses {
+		result = append(result, ImageScanStatusCount{
+			Status: status,
+			Count:  statusCounts[status], // defaults to 0 if not in map
+		})
+	}
+
+	return result, nil
 }
 
 // VulnerabilityInstance represents a vulnerability found in a running container instance

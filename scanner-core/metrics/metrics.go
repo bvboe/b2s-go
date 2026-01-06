@@ -21,15 +21,17 @@ type InfoProvider interface {
 type DatabaseProvider interface {
 	GetScannedContainerInstances() ([]database.ScannedContainerInstance, error)
 	GetVulnerabilityInstances() ([]database.VulnerabilityInstance, error)
+	GetImageScanStatusCounts() ([]database.ImageScanStatusCount, error)
 }
 
 // CollectorConfig holds configuration for which metrics to collect
 type CollectorConfig struct {
-	DeploymentEnabled        bool
-	ScannedInstancesEnabled  bool
-	VulnerabilitiesEnabled   bool
+	DeploymentEnabled             bool
+	ScannedInstancesEnabled       bool
+	VulnerabilitiesEnabled        bool
 	VulnerabilityExploitedEnabled bool
-	VulnerabilityRiskEnabled bool
+	VulnerabilityRiskEnabled      bool
+	ImageScanStatusEnabled        bool
 }
 
 // Collector collects metrics and formats them for Prometheus
@@ -103,6 +105,15 @@ func (c *Collector) Collect() (*MetricsData, error) {
 	// Collect vulnerability risk metrics if enabled
 	if c.config.VulnerabilityRiskEnabled && c.database != nil {
 		family := c.collectVulnerabilityRiskMetrics(vulnInstances)
+		data.Families = append(data.Families, family)
+	}
+
+	// Collect image scan status metrics if enabled
+	if c.config.ImageScanStatusEnabled && c.database != nil {
+		family, err := c.collectImageScanStatusMetrics()
+		if err != nil {
+			return nil, fmt.Errorf("failed to collect image scan status metrics: %w", err)
+		}
 		data.Families = append(data.Families, family)
 	}
 
@@ -193,7 +204,6 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 				"image_tag":                               instance.Tag,
 				"image_digest":                            instance.Digest,
 				"instance_type":                           "CONTAINER",
-				"scan_status":                             instance.Status,
 			},
 			Value: 1,
 		})
@@ -380,4 +390,32 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 		Type:    "gauge",
 		Metrics: metrics,
 	}
+}
+
+// collectImageScanStatusMetrics generates bjorn2scan_image_scan_status metrics
+// showing the count of running images by scan status
+func (c *Collector) collectImageScanStatusMetrics() (MetricFamily, error) {
+	statusCounts, err := c.database.GetImageScanStatusCounts()
+	if err != nil {
+		return MetricFamily{}, fmt.Errorf("failed to get image scan status counts: %w", err)
+	}
+
+	metrics := make([]MetricPoint, 0, len(statusCounts))
+
+	for _, sc := range statusCounts {
+		metrics = append(metrics, MetricPoint{
+			Labels: map[string]string{
+				"deployment_uuid": c.deploymentUUID,
+				"scan_status":     sc.Status,
+			},
+			Value: float64(sc.Count),
+		})
+	}
+
+	return MetricFamily{
+		Name:    "bjorn2scan_image_scan_status",
+		Help:    "Count of running container images by scan status",
+		Type:    "gauge",
+		Metrics: metrics,
+	}, nil
 }

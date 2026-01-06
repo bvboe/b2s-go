@@ -67,7 +67,8 @@ type Config struct {
 	MetricsScannedInstancesEnabled  bool // Enable bjorn2scan_scanned_instance metric
 	MetricsVulnerabilitiesEnabled   bool // Enable bjorn2scan_vulnerability metric
 	MetricsVulnerabilityExploitedEnabled bool // Enable bjorn2scan_vulnerability_exploited metric
-	MetricsVulnerabilityRiskEnabled bool // Enable bjorn2scan_vulnerability_risk metric
+	MetricsVulnerabilityRiskEnabled      bool // Enable bjorn2scan_vulnerability_risk metric
+	MetricsImageScanStatusEnabled        bool // Enable bjorn2scan_image_scan_status metric
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -123,11 +124,12 @@ func defaultConfig() *Config {
 		OTELMetricsInsecure:     true,
 
 		// Individual metrics - enabled by default
-		MetricsDeploymentEnabled:        true,
-		MetricsScannedInstancesEnabled:  true,
-		MetricsVulnerabilitiesEnabled:   true,
+		MetricsDeploymentEnabled:             true,
+		MetricsScannedInstancesEnabled:       true,
+		MetricsVulnerabilitiesEnabled:        true,
 		MetricsVulnerabilityExploitedEnabled: true,
-		MetricsVulnerabilityRiskEnabled: true,
+		MetricsVulnerabilityRiskEnabled:      true,
+		MetricsImageScanStatusEnabled:        true,
 	}
 }
 
@@ -332,6 +334,10 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("metrics_vulnerability_risk_enabled").String())
 				cfg.MetricsVulnerabilityRiskEnabled = val == "true" || val == "1" || val == "yes"
 			}
+			if section.HasKey("metrics_image_scan_status_enabled") {
+				val := strings.ToLower(section.Key("metrics_image_scan_status_enabled").String())
+				cfg.MetricsImageScanStatusEnabled = val == "true" || val == "1" || val == "yes"
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -456,6 +462,10 @@ func LoadConfig(path string) (*Config, error) {
 	if vulnerabilityRiskEnabledEnv := os.Getenv("METRICS_VULNERABILITY_RISK_ENABLED"); vulnerabilityRiskEnabledEnv != "" {
 		val := strings.ToLower(vulnerabilityRiskEnabledEnv)
 		cfg.MetricsVulnerabilityRiskEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if imageScanStatusEnabledEnv := os.Getenv("METRICS_IMAGE_SCAN_STATUS_ENABLED"); imageScanStatusEnabledEnv != "" {
+		val := strings.ToLower(imageScanStatusEnabledEnv)
+		cfg.MetricsImageScanStatusEnabled = val == "true" || val == "1" || val == "yes"
 	}
 
 	return cfg, nil
