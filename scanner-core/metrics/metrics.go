@@ -38,15 +38,21 @@ type CollectorConfig struct {
 type Collector struct {
 	infoProvider   InfoProvider
 	deploymentUUID string
+	deploymentName string // Cached deployment name for per-instance metrics
 	database       DatabaseProvider
 	config         CollectorConfig
 }
 
 // NewCollector creates a new metrics collector
 func NewCollector(infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig) *Collector {
+	deploymentName := ""
+	if infoProvider != nil {
+		deploymentName = infoProvider.GetDeploymentName()
+	}
 	return &Collector{
 		infoProvider:   infoProvider,
 		deploymentUUID: deploymentUUID,
+		deploymentName: deploymentName,
 		database:       database,
 		config:         config,
 	}
@@ -189,6 +195,7 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
 				"deployment_uuid":                         c.deploymentUUID,
+				"deployment_name":                         c.deploymentName,
 				"deployment_uuid_host_name":               deploymentUUIDHostName,
 				"deployment_uuid_namespace":               deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":         deploymentUUIDNamespaceImage,
@@ -238,6 +245,7 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
 				"deployment_uuid":                      c.deploymentUUID,
+				"deployment_name":                      c.deploymentName,
 				"deployment_uuid_host_name":            deploymentUUIDHostName,
 				"deployment_uuid_namespace":            deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
@@ -300,6 +308,7 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
 				"deployment_uuid":                      c.deploymentUUID,
+				"deployment_name":                      c.deploymentName,
 				"deployment_uuid_host_name":            deploymentUUIDHostName,
 				"deployment_uuid_namespace":            deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
@@ -357,6 +366,7 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
 				"deployment_uuid":                      c.deploymentUUID,
+				"deployment_name":                      c.deploymentName,
 				"deployment_uuid_host_name":            deploymentUUIDHostName,
 				"deployment_uuid_namespace":            deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,

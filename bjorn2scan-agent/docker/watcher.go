@@ -75,6 +75,8 @@ func extractContainerInstance(ctx context.Context, cli *client.Client, container
 			Tag:        tag,
 			Digest:     digest,
 		},
+		NodeName:         hostname, // Use hostname as node name for agent deployments
+		ContainerRuntime: "docker",
 	}
 
 	return instance, nil
@@ -178,6 +180,8 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 									Pod:       "host",
 									Container: containerName,
 								},
+								NodeName:         hostname,
+								ContainerRuntime: "docker",
 							}
 						}
 						manager.RemoveContainerInstance(instance.ID)
