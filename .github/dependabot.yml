@@ -104,22 +104,6 @@ updates:
           - "minor"
           - "patch"
 
-  # Go dependencies for bjorn2scan-agent tests
-  - package-ecosystem: "gomod"
-    directory: "/bjorn2scan-agent/test"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:00"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "go"
-      - "tests"
-    commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
-
   # Go dependencies for k8s-update-controller
   - package-ecosystem: "gomod"
     directory: "/k8s-update-controller"
