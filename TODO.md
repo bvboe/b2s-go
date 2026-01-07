@@ -7,6 +7,10 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Use kube-system namespace UID as cluster_id in metrics (Kubernetes mode only)
+  - [ ] Auto-detect cluster ID from kube-system namespace UID
+  - [ ] Fall back to hostname or configurable ID for non-Kubernetes deployments
+  - [ ] Add cluster_id label to relevant metrics
 - [ ] Scanner upgrade stability
 - [ ] Scanner stability in general
 - [ ] Grafana data integrity
