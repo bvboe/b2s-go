@@ -10,7 +10,8 @@ WORKDIR /workspace/pod-scanner
 COPY pod-scanner/go.mod pod-scanner/go.sum* ./
 
 # Download dependencies (cached unless go.mod/go.sum changes)
-RUN --mount=type=cache,target=/go/pkg/mod \
+# Note: uid=65532 is the nonroot user in Chainguard images
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     go mod download
 
 # Now copy source code (after dependency layers are cached)
@@ -19,8 +20,8 @@ COPY pod-scanner/runtime/ ./runtime/
 COPY pod-scanner/handlers/ ./handlers/
 
 # Build the binary
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
+    --mount=type=cache,target=/home/nonroot/.cache/go-build,uid=65532,gid=65532 \
     CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o pod-scanner .
 
 # Runtime stage

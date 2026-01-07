@@ -5,7 +5,8 @@ WORKDIR /build
 
 # Copy go mod files from subdirectory (context is root)
 COPY k8s-update-controller/go.mod k8s-update-controller/go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
+# Note: uid=65532 is the nonroot user in Chainguard images
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     go mod download
 
 # Copy source code from subdirectory
@@ -13,8 +14,8 @@ COPY k8s-update-controller/ .
 
 # Build the binary
 ARG VERSION=dev
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
+    --mount=type=cache,target=/home/nonroot/.cache/go-build,uid=65532,gid=65532 \
     CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s -X main.version=${VERSION}" \
     -o k8s-update-controller \

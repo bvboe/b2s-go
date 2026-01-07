@@ -11,12 +11,13 @@ COPY scanner-core/go.mod scanner-core/go.sum ./scanner-core/
 COPY bjorn2scan-agent/go.mod bjorn2scan-agent/go.sum* ./bjorn2scan-agent/
 
 # Download dependencies (cached unless go.mod/go.sum changes)
+# Note: uid=65532 is the nonroot user in Chainguard images
 WORKDIR /workspace/scanner-core
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     go mod download
 
 WORKDIR /workspace/bjorn2scan-agent
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     go mod download
 
 # Now copy source code (after dependency layers are cached)
@@ -30,8 +31,8 @@ COPY bjorn2scan-agent/syft/ ./syft/
 COPY bjorn2scan-agent/updater/ ./updater/
 
 # Build the binary
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
+    --mount=type=cache,target=/home/nonroot/.cache/go-build,uid=65532,gid=65532 \
     CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o bjorn2scan-agent .
 
 # Runtime stage

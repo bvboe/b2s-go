@@ -324,14 +324,14 @@
     <div class="container">
         <header>
             <h1>🔍 SQL Debug Console</h1>
-            <div class="subtitle">Execute read-only SQL queries against the bjorn2scan database</div>
+            <div class="subtitle">Execute SQL queries against the bjorn2scan database</div>
         </header>
 
         <div id="warningBanner" class="warning-banner">
             <span style="font-size: 1.5rem;">⚠️</span>
             <div>
                 <strong>Debug Mode Only</strong> - This interface is for development and testing purposes only.
-                Only SELECT queries are allowed. Do not enable in production.
+                All SQL statements are allowed (SELECT, INSERT, UPDATE, DELETE, etc.). Do not enable in production.
             </div>
             <button class="close-btn" onclick="dismissWarning()" title="Dismiss warning">&times;</button>
         </div>
@@ -344,7 +344,7 @@
                 <textarea
                     id="queryInput"
                     class="query-input"
-                    placeholder="Enter your SELECT query here..."
+                    placeholder="Enter your SQL query here..."
                 >SELECT * FROM container_images LIMIT 10;</textarea>
 
                 <div class="button-group">

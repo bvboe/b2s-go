@@ -11,12 +11,13 @@ COPY scanner-core/go.mod scanner-core/go.sum ./scanner-core/
 COPY k8s-scan-server/go.mod k8s-scan-server/go.sum* ./k8s-scan-server/
 
 # Download dependencies (cached unless go.mod/go.sum changes)
+# Note: uid=65532 is the nonroot user in Chainguard images
 WORKDIR /workspace/scanner-core
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     go mod download
 
 WORKDIR /workspace/k8s-scan-server
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     go mod download
 
 # Now copy source code (after dependency layers are cached)
@@ -30,8 +31,8 @@ COPY k8s-scan-server/podscanner/ ./podscanner/
 COPY k8s-scan-server/handlers/ ./handlers/
 
 # Build the binary
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
+    --mount=type=cache,target=/home/nonroot/.cache/go-build,uid=65532,gid=65532 \
     CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o k8s-scan-server .
 
 # Runtime stage
