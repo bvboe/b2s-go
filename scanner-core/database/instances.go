@@ -261,9 +261,11 @@ func (db *DB) GetAllInstances() (interface{}, error) {
 
 // CleanupStats holds statistics about a cleanup operation
 type CleanupStats struct {
-	ImagesRemoved        int // Number of container images deleted
-	PackagesRemoved      int // Number of package entries deleted
-	VulnerabilitiesRemoved int // Number of vulnerability entries deleted
+	ImagesRemoved              int // Number of container images deleted
+	PackagesRemoved            int // Number of package entries deleted
+	VulnerabilitiesRemoved     int // Number of vulnerability entries deleted
+	PackageDetailsRemoved      int // Number of package_details entries deleted
+	VulnerabilityDetailsRemoved int // Number of vulnerability_details entries deleted
 }
 
 // CleanupOrphanedImages removes container_images that have no associated container_instances
@@ -334,6 +336,49 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		return nil, fmt.Errorf("failed to count orphaned vulnerabilities: %w", err)
 	}
 
+	// Delete vulnerability_details for orphaned images (must be done before vulnerabilities)
+	var vulnerabilityDetailsCount int
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM vulnerability_details vd
+		WHERE vd.vulnerability_id IN (
+			SELECT v.id
+			FROM vulnerabilities v
+			WHERE v.image_id IN (
+				SELECT img.id
+				FROM container_images img
+				WHERE NOT EXISTS (
+					SELECT 1
+					FROM container_instances ci
+					WHERE ci.image_id = img.id
+				)
+			)
+		)
+	`).Scan(&vulnerabilityDetailsCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count orphaned vulnerability_details: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		DELETE FROM vulnerability_details
+		WHERE vulnerability_id IN (
+			SELECT v.id
+			FROM vulnerabilities v
+			WHERE v.image_id IN (
+				SELECT img.id
+				FROM container_images img
+				WHERE NOT EXISTS (
+					SELECT 1
+					FROM container_instances ci
+					WHERE ci.image_id = img.id
+				)
+			)
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete vulnerability_details: %w", err)
+	}
+
 	// Delete vulnerabilities for orphaned images
 	_, err = tx.Exec(`
 		DELETE FROM vulnerabilities
@@ -349,6 +394,49 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete vulnerabilities: %w", err)
+	}
+
+	// Delete package_details for orphaned images (must be done before packages)
+	var packageDetailsCount int
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM package_details pd
+		WHERE pd.package_id IN (
+			SELECT p.id
+			FROM packages p
+			WHERE p.image_id IN (
+				SELECT img.id
+				FROM container_images img
+				WHERE NOT EXISTS (
+					SELECT 1
+					FROM container_instances ci
+					WHERE ci.image_id = img.id
+				)
+			)
+		)
+	`).Scan(&packageDetailsCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count orphaned package_details: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		DELETE FROM package_details
+		WHERE package_id IN (
+			SELECT p.id
+			FROM packages p
+			WHERE p.image_id IN (
+				SELECT img.id
+				FROM container_images img
+				WHERE NOT EXISTS (
+					SELECT 1
+					FROM container_instances ci
+					WHERE ci.image_id = img.id
+				)
+			)
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete package_details: %w", err)
 	}
 
 	// Delete packages for orphaned images
@@ -387,13 +475,16 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	}
 
 	stats := &CleanupStats{
-		ImagesRemoved:          orphanedCount,
-		PackagesRemoved:        packagesCount,
-		VulnerabilitiesRemoved: vulnerabilitiesCount,
+		ImagesRemoved:               orphanedCount,
+		PackagesRemoved:             packagesCount,
+		VulnerabilitiesRemoved:      vulnerabilitiesCount,
+		PackageDetailsRemoved:       packageDetailsCount,
+		VulnerabilityDetailsRemoved: vulnerabilityDetailsCount,
 	}
 
-	log.Printf("Cleanup complete: removed %d images, %d packages, %d vulnerabilities",
-		stats.ImagesRemoved, stats.PackagesRemoved, stats.VulnerabilitiesRemoved)
+	log.Printf("Cleanup complete: removed %d images, %d packages (%d details), %d vulnerabilities (%d details)",
+		stats.ImagesRemoved, stats.PackagesRemoved, stats.PackageDetailsRemoved,
+		stats.VulnerabilitiesRemoved, stats.VulnerabilityDetailsRemoved)
 
 	return stats, nil
 }
