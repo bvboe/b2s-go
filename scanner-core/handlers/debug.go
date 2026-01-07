@@ -12,10 +12,10 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 )
 
-// DebugSQLHandler handles POST /debug/sql requests to execute read-only SQL queries.
+// DebugSQLHandler handles POST /debug/sql requests to execute SQL queries.
 //
-// WARNING: This endpoint is for debugging purposes only and should only be enabled
-// in development/testing environments. Do not enable in production.
+// WARNING: This endpoint allows ALL SQL statements including INSERT, UPDATE, DELETE, DROP, etc.
+// Only enable in development/testing environments. Do not enable in production.
 //
 // Request format:
 //
@@ -25,7 +25,7 @@ import (
 //	  "query": "SELECT * FROM images LIMIT 10"
 //	}
 //
-// Response format:
+// Response format for SELECT queries:
 //
 //	{
 //	  "columns": ["column1", "column2"],
@@ -34,6 +34,15 @@ import (
 //	    {"column1": "value3", "column2": "value4"}
 //	  ],
 //	  "row_count": 2
+//	}
+//
+// Response format for INSERT/UPDATE/DELETE queries:
+//
+//	{
+//	  "columns": ["rows_affected"],
+//	  "rows": [{"rows_affected": 5}],
+//	  "row_count": 1,
+//	  "rows_affected": 5
 //	}
 func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -78,8 +87,8 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 			return
 		}
 
-		// Validate SQL is SELECT only
-		valid, err := debug.IsSelectQuery(request.Query)
+		// Validate SQL query
+		valid, err := debug.ValidateQuery(request.Query)
 		if !valid {
 			log.Printf("Invalid SQL query rejected: %v", err)
 			http.Error(w, fmt.Sprintf("Invalid query: %v", err), http.StatusBadRequest)
@@ -87,7 +96,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		}
 
 		// Execute query
-		result, err := db.ExecuteReadOnlyQuery(request.Query)
+		result, err := db.ExecuteQuery(request.Query)
 		if err != nil {
 			log.Printf("Error executing query: %v", err)
 			http.Error(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
@@ -99,6 +108,11 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 			"columns":   result.Columns,
 			"rows":      result.Rows,
 			"row_count": len(result.Rows),
+		}
+
+		// Include rows_affected for write queries
+		if result.RowsAffected > 0 {
+			response["rows_affected"] = result.RowsAffected
 		}
 
 		// Return JSON response
@@ -188,7 +202,7 @@ func DebugMetricsHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.Job
 // If debug mode is not enabled, handlers are not registered (zero overhead).
 //
 // Endpoints:
-//   - POST /api/debug/sql - Execute read-only SQL queries
+//   - POST /api/debug/sql - Execute SQL queries (SELECT, INSERT, UPDATE, DELETE, etc.)
 //   - GET /api/debug/metrics - Retrieve performance metrics
 func RegisterDebugHandlers(mux *http.ServeMux, db *database.DB, debugConfig *debug.DebugConfig, scanQueue *scanning.JobQueue) {
 	if debugConfig == nil || !debugConfig.IsEnabled() {

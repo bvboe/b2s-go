@@ -51,14 +51,7 @@ func TestDebugSQLHandler(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "non-SELECT query",
-			debugEnabled:   true,
-			method:         http.MethodPost,
-			requestBody:    `{"query":"DELETE FROM images"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "SQL injection attempt",
+			name:           "multiple statements (SQL injection attempt)",
 			debugEnabled:   true,
 			method:         http.MethodPost,
 			requestBody:    `{"query":"SELECT * FROM images; DROP TABLE images; --"}`,

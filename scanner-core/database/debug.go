@@ -3,28 +3,45 @@ package database
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
 // QueryResult represents the result of a SQL query with column order preserved.
 type QueryResult struct {
-	Columns []string                 `json:"columns"`
-	Rows    []map[string]interface{} `json:"rows"`
+	Columns      []string                 `json:"columns"`
+	Rows         []map[string]interface{} `json:"rows"`
+	RowsAffected int64                    `json:"rows_affected,omitempty"`
 }
 
-// ExecuteReadOnlyQuery executes a read-only SQL query and returns results with column order preserved.
-// The QueryResult includes both an ordered columns array and row data as maps.
+// ExecuteQuery executes a SQL query and returns results.
+// For SELECT queries, it returns rows with column data.
+// For INSERT/UPDATE/DELETE queries, it returns the number of rows affected.
 //
 // This method is intended for debug/diagnostic purposes only and should only be called
 // from the debug SQL handler after proper validation.
 //
 // WARNING: This method does NOT validate the SQL query. The caller MUST ensure the query
-// is safe before calling this method. Use debug.IsSelectQuery() to validate queries.
-func (db *DB) ExecuteReadOnlyQuery(query string) (*QueryResult, error) {
+// is safe before calling this method. Use debug.ValidateQuery() to validate queries.
+func (db *DB) ExecuteQuery(query string) (*QueryResult, error) {
 	// Log the SQL query for tracking
 	log.Printf("[DEBUG SQL] Executing query: %s", query)
 	start := time.Now()
 
+	// Determine if this is a read query (SELECT) or a write query (INSERT/UPDATE/DELETE/etc.)
+	trimmed := strings.TrimSpace(strings.ToUpper(query))
+	isSelect := strings.HasPrefix(trimmed, "SELECT") ||
+		strings.HasPrefix(trimmed, "PRAGMA") ||
+		strings.HasPrefix(trimmed, "EXPLAIN")
+
+	if isSelect {
+		return db.executeSelectQuery(query, start)
+	}
+	return db.executeWriteQuery(query, start)
+}
+
+// executeSelectQuery handles SELECT queries and returns row data.
+func (db *DB) executeSelectQuery(query string, start time.Time) (*QueryResult, error) {
 	rows, err := db.conn.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
@@ -87,4 +104,33 @@ func (db *DB) ExecuteReadOnlyQuery(query string) (*QueryResult, error) {
 		Columns: columns,
 		Rows:    results,
 	}, nil
+}
+
+// executeWriteQuery handles INSERT/UPDATE/DELETE queries and returns rows affected.
+func (db *DB) executeWriteQuery(query string, start time.Time) (*QueryResult, error) {
+	result, err := db.conn.Exec(query)
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	// Log completion with rows affected and duration
+	duration := time.Since(start)
+	log.Printf("[DEBUG SQL] Query completed: %d rows affected in %v", rowsAffected, duration)
+
+	return &QueryResult{
+		Columns:      []string{"rows_affected"},
+		Rows:         []map[string]interface{}{{"rows_affected": rowsAffected}},
+		RowsAffected: rowsAffected,
+	}, nil
+}
+
+// ExecuteReadOnlyQuery executes a read-only SQL query and returns results with column order preserved.
+// Deprecated: Use ExecuteQuery instead which handles both reads and writes.
+func (db *DB) ExecuteReadOnlyQuery(query string) (*QueryResult, error) {
+	return db.ExecuteQuery(query)
 }
