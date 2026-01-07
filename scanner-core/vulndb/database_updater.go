@@ -16,6 +16,7 @@ import (
 
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype"
+	v6 "github.com/anchore/grype/grype/db/v6"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
 )
@@ -67,9 +68,21 @@ type DatabaseUpdater struct {
 	mu         sync.Mutex
 }
 
+// DatabaseUpdaterConfig holds optional configuration for DatabaseUpdater
+type DatabaseUpdaterConfig struct {
+	// LatestURL overrides the default grype database feed URL
+	// If empty, uses the official Anchore feed
+	LatestURL string
+}
+
 // NewDatabaseUpdater creates a new database updater
 // dbRootDir is the root directory where grype stores its database (e.g., /var/lib/bjorn2scan)
 func NewDatabaseUpdater(dbRootDir string) (*DatabaseUpdater, error) {
+	return NewDatabaseUpdaterWithConfig(dbRootDir, DatabaseUpdaterConfig{})
+}
+
+// NewDatabaseUpdaterWithConfig creates a new database updater with custom configuration
+func NewDatabaseUpdaterWithConfig(dbRootDir string, cfg DatabaseUpdaterConfig) (*DatabaseUpdater, error) {
 	if dbRootDir == "" {
 		return nil, fmt.Errorf("dbRootDir cannot be empty")
 	}
@@ -89,6 +102,9 @@ func NewDatabaseUpdater(dbRootDir string) (*DatabaseUpdater, error) {
 
 	distCfg := distribution.DefaultConfig()
 	distCfg.ID = identification
+	if cfg.LatestURL != "" {
+		distCfg.LatestURL = cfg.LatestURL
+	}
 
 	installCfg := installation.DefaultConfig(identification)
 	installCfg.DBRootDir = grypeDir
@@ -108,7 +124,7 @@ func (du *DatabaseUpdater) SetLoader(loader DatabaseLoader) {
 }
 
 // CheckForUpdates checks if the vulnerability database has been updated
-// It uses grype's native update mechanism and compares the Built timestamp
+// It uses grype's IsUpdateAvailable to properly detect newer databases
 // Returns: (hasChanged bool, error)
 // On first run (no cache), it returns (false, nil) after caching the current state
 func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
@@ -128,7 +144,6 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 			cachedState.Built.Format(time.RFC3339), cachedState.SchemaVersion)
 	}
 
-	// 2. Run grype database update (this checks feed and downloads if needed)
 	log.Printf("[db-updater] Checking for vulnerability database updates...")
 
 	// Log diagnostics BEFORE update
@@ -154,7 +169,50 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		}
 	}()
 
-	// Load with update=true to trigger the update check
+	// 2. Check if database exists and if an update is available
+	grypeDir := filepath.Join(du.dbRootDir, "grype")
+	dbPath := filepath.Join(grypeDir, "6", "vulnerability.db")
+	updateDetected := false // True only when IsUpdateAvailable says a newer version exists
+
+	if _, err := os.Stat(dbPath); err == nil {
+		// Database exists - check if an update is available
+		desc, err := v6.ReadDescription(dbPath)
+		if err != nil {
+			log.Printf("[db-updater] Warning: failed to read database description: %v", err)
+			// Continue with normal load if we can't read description
+		} else {
+			log.Printf("[db-updater] Current database: built=%s, schema=%s",
+				desc.Built.Format(time.RFC3339), desc.SchemaVersion.String())
+
+			// Create distribution client to check for updates
+			client, err := distribution.NewClient(du.distCfg)
+			if err != nil {
+				log.Printf("[db-updater] Warning: failed to create distribution client: %v", err)
+			} else {
+				archive, err := client.IsUpdateAvailable(desc)
+				if err != nil {
+					log.Printf("[db-updater] Warning: failed to check for updates: %v", err)
+				} else if archive != nil {
+					log.Printf("[db-updater] Update available: built=%s, checksum=%s",
+						archive.Built.Format(time.RFC3339), archive.Checksum)
+					updateDetected = true
+
+					// Delete existing database to force re-download
+					log.Printf("[db-updater] Removing existing database to force update...")
+					schemaDir := filepath.Join(grypeDir, "6")
+					if err := os.RemoveAll(schemaDir); err != nil {
+						log.Printf("[db-updater] Warning: failed to remove schema dir: %v", err)
+					}
+				} else {
+					log.Printf("[db-updater] No update available")
+				}
+			}
+		}
+	} else {
+		log.Printf("[db-updater] No existing database found, will download")
+	}
+
+	// 3. Load/download the database
 	dbStatus, err := du.loader(du.distCfg, du.installCfg, true)
 	close(done)
 
@@ -186,7 +244,7 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	// Check for metadata mismatch (URL timestamp vs reported Built time)
 	du.detectMetadataMismatch(dbStatus.Built, diagAfter)
 
-	// 3. Compare with cached state
+	// 4. Compare with cached state
 	hasChanged := false
 	if !isFirstRun && !dbStatus.Built.IsZero() && !cachedState.Built.IsZero() {
 		hasChanged = !dbStatus.Built.Equal(cachedState.Built)
@@ -200,7 +258,13 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		log.Printf("[db-updater] First run detected, caching database state without triggering rescan")
 	}
 
-	// 4. Save current state to cache
+	// If we detected an update via IsUpdateAvailable, ensure hasChanged reflects that
+	if updateDetected && !hasChanged {
+		log.Printf("[db-updater] Update was applied (detected via IsUpdateAvailable)")
+		hasChanged = true
+	}
+
+	// 5. Save current state to cache
 	newState := DatabaseState{
 		LastChecked:   time.Now().UTC(),
 		Built:         dbStatus.Built,
@@ -331,7 +395,7 @@ func (du *DatabaseUpdater) logDatabaseDiagnostics(prefix string) *dbDiagnostics 
 			if _, err := io.Copy(h, f); err == nil {
 				diag.DBChecksum = hex.EncodeToString(h.Sum(nil))[:16]
 			}
-			f.Close()
+			_ = f.Close()
 		}
 	}
 

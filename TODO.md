@@ -7,6 +7,10 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Remove gomezboe.com dependency from grype database update tests
+  - [ ] Replace `scripts/test-grype-db-updater` with self-contained unit tests
+  - [ ] Consider mocking distribution.Client for IsUpdateAvailable tests
+  - [ ] Or set up local test fixtures that don't require external hosting
 - [ ] Use kube-system namespace UID as cluster_id in metrics (Kubernetes mode only)
   - [ ] Auto-detect cluster ID from kube-system namespace UID
   - [ ] Fall back to hostname or configurable ID for non-Kubernetes deployments
