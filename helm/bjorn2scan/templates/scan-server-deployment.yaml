@@ -95,6 +95,10 @@ spec:
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.interval | quote }}
         - name: JOBS_RESCAN_DATABASE_TIMEOUT
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.timeout | quote }}
+        {{- if .Values.scanServer.grypeStorage.separateVolume }}
+        - name: GRYPE_DB_PATH
+          value: {{ .Values.scanServer.grypeStorage.mountPath | quote }}
+        {{- end }}
         volumeMounts:
         - name: data
           mountPath: {{ .Values.scanServer.persistence.mountPath }}

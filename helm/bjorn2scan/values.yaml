@@ -144,6 +144,17 @@ scanServer:
     # Path where data (database, etc.) will be stored
     mountPath: /var/lib/bjorn2scan
 
+  # Grype vulnerability database storage
+  # By default, stores grype DB in /tmp (existing emptyDir) to avoid NFS issues
+  # with grype's in-place database updates (NFS "silly rename" can corrupt the DB)
+  grypeStorage:
+    # Use a separate path from the main persistence volume for grype DB
+    # Set to false to store grype DB on the main persistence volume (not recommended for NFS)
+    separateVolume: true
+    # Path for grype database - /tmp is already an emptyDir that's writable by
+    # the non-root container user. Grype creates a "grype/" subdirectory here.
+    mountPath: /tmp
+
 # Pod Scanner (DaemonSet)
 # Runs on every node to scan local pods using the container runtime API
 # Supports standard Kubernetes, K3s, MicroK8s, and custom distributions

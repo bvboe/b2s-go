@@ -347,13 +347,19 @@ func main() {
 		return podScannerClient.GetSBOMFromNode(ctx, clientset, nodeName, image.Digest)
 	}
 
-	// Configure Grype to use persistent storage
-	// Get the data directory from the database path
-	dataDir := filepath.Dir(dbPath)
-	grypeCfg := grype.Config{
-		DBRootDir: dataDir, // Store Grype database in same persistent volume as SQLite database
+	// Configure Grype database location
+	// GRYPE_DB_PATH allows storing the grype database separately from the main data
+	// This is important for NFS deployments where grype's in-place database updates
+	// can fail due to NFS "silly rename" behavior when files are replaced while open
+	grypeDBPath := os.Getenv("GRYPE_DB_PATH")
+	if grypeDBPath == "" {
+		// Default: use the same directory as the main database
+		grypeDBPath = filepath.Dir(dbPath)
 	}
-	log.Printf("Grype will use persistent storage at: %s/grype/", dataDir)
+	grypeCfg := grype.Config{
+		DBRootDir: grypeDBPath,
+	}
+	log.Printf("Grype database path: %s/grype/", grypeDBPath)
 
 	// Initialize database readiness state
 	dbReadinessState := corehandlers.NewDatabaseReadinessState(grypeCfg)
