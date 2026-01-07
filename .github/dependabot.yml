@@ -120,6 +120,50 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
 
+  # Go dependencies for k8s-update-controller
+  - package-ecosystem: "gomod"
+    directory: "/k8s-update-controller"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm dependencies for scanner-core web UI linting
+  - package-ecosystem: "npm"
+    directory: "/scanner-core/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -175,6 +219,21 @@ updates:
   # Docker base images for bjorn2scan-agent
   - package-ecosystem: "docker"
     directory: "/bjorn2scan-agent"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Docker base images for k8s-update-controller
+  - package-ecosystem: "docker"
+    directory: "/k8s-update-controller"
     schedule:
       interval: "weekly"
       day: "monday"

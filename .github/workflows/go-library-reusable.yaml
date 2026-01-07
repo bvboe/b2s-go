@@ -49,13 +49,6 @@ jobs:
     - name: Run go vet
       run: go vet ./...
 
-    - name: Upload coverage
-      uses: codecov/codecov-action@v5
-      with:
-        files: ./${{ inputs.component-path }}/coverage.out
-        flags: unittests-${{ inputs.component-name }}
-      continue-on-error: true
-
   lint:
     if: inputs.run-lint
     runs-on: ubuntu-latest
