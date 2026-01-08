@@ -64,7 +64,11 @@ func NewAgentInfo(port string, webUIEnabled bool) *AgentInfo {
 
 	// Cache console URL at startup
 	if webUIEnabled && info.deploymentIP != "" {
-		info.consoleURL = fmt.Sprintf("http://%s:%s/", info.deploymentIP, port)
+		if port == "80" {
+			info.consoleURL = fmt.Sprintf("http://%s/", info.deploymentIP)
+		} else {
+			info.consoleURL = fmt.Sprintf("http://%s:%s/", info.deploymentIP, port)
+		}
 	}
 
 	return info

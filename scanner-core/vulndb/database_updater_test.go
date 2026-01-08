@@ -2,7 +2,6 @@ package vulndb
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,10 +26,9 @@ func TestNewDatabaseUpdater(t *testing.T) {
 		t.Error("grype directory should be created")
 	}
 
-	// Verify cache file path
-	expectedCacheFile := filepath.Join(tmpDir, DatabaseCacheFilename)
-	if du.cacheFile != expectedCacheFile {
-		t.Errorf("Expected cache file '%s', got '%s'", expectedCacheFile, du.cacheFile)
+	// Verify currentVersion is nil initially
+	if du.GetCurrentVersion() != nil {
+		t.Error("currentVersion should be nil initially")
 	}
 }
 
@@ -41,7 +39,7 @@ func TestNewDatabaseUpdater_EmptyDir(t *testing.T) {
 	}
 }
 
-func TestDatabaseUpdater_CacheOperations(t *testing.T) {
+func TestDatabaseUpdater_GetCurrentVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	du, err := NewDatabaseUpdater(tmpDir)
@@ -49,117 +47,38 @@ func TestDatabaseUpdater_CacheOperations(t *testing.T) {
 		t.Fatalf("NewDatabaseUpdater failed: %v", err)
 	}
 
-	// Test saving cache
-	state := DatabaseState{
-		LastChecked:   time.Now().UTC(),
-		Built:         time.Date(2025, 12, 27, 0, 0, 0, 0, time.UTC),
-		SchemaVersion: "v6.1.3",
-		Path:          "/test/path",
+	// Initially nil
+	if du.GetCurrentVersion() != nil {
+		t.Error("GetCurrentVersion should return nil before any database load")
 	}
 
-	if err := du.saveCache(state); err != nil {
-		t.Fatalf("saveCache failed: %v", err)
+	// Mock loader sets the version
+	mockBuilt := time.Date(2025, 12, 27, 0, 0, 0, 0, time.UTC)
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		return &DatabaseStatus{
+			Built:         mockBuilt,
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		}, nil
+	})
+
+	// Call CheckForUpdates to populate the version
+	_, _ = du.CheckForUpdates(context.Background())
+
+	// Now it should return the version
+	version := du.GetCurrentVersion()
+	if version == nil {
+		t.Fatal("GetCurrentVersion should return non-nil after CheckForUpdates")
 	}
 
-	// Verify cache file exists
-	if _, err := os.Stat(du.cacheFile); os.IsNotExist(err) {
-		t.Error("Cache file should exist after save")
+	if !version.Built.Equal(mockBuilt) {
+		t.Errorf("Expected built time %v, got %v", mockBuilt, version.Built)
 	}
 
-	// Test loading cache
-	loaded, err := du.loadCache()
-	if err != nil {
-		t.Fatalf("loadCache failed: %v", err)
-	}
-
-	if loaded.SchemaVersion != state.SchemaVersion {
-		t.Errorf("Expected schema version '%s', got '%s'", state.SchemaVersion, loaded.SchemaVersion)
-	}
-
-	if !loaded.Built.Equal(state.Built) {
-		t.Errorf("Expected built time '%v', got '%v'", state.Built, loaded.Built)
-	}
-}
-
-func TestDatabaseUpdater_CorruptedCache(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	// Write corrupted JSON to cache
-	if err := os.WriteFile(du.cacheFile, []byte("not valid json{{{"), 0644); err != nil {
-		t.Fatalf("Failed to write corrupted cache: %v", err)
-	}
-
-	// loadCache should return error and delete corrupted file
-	_, err = du.loadCache()
-	if !os.IsNotExist(err) {
-		t.Errorf("Expected os.ErrNotExist for corrupted cache, got: %v", err)
-	}
-
-	// Corrupted cache file should be deleted
-	if _, err := os.Stat(du.cacheFile); !os.IsNotExist(err) {
-		t.Error("Corrupted cache file should be deleted")
+	if version.SchemaVersion != "v6.1.3" {
+		t.Errorf("Expected schema version v6.1.3, got %s", version.SchemaVersion)
 	}
 }
-
-func TestDatabaseUpdater_NoCacheFirstRun(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	// loadCache should return error for missing cache
-	_, err = du.loadCache()
-	if !os.IsNotExist(err) {
-		t.Errorf("Expected os.ErrNotExist for missing cache, got: %v", err)
-	}
-}
-
-func TestDatabaseUpdater_AtomicWrite(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	state := DatabaseState{
-		LastChecked:   time.Now().UTC(),
-		Built:         time.Date(2025, 12, 27, 0, 0, 0, 0, time.UTC),
-		SchemaVersion: "v6.1.3",
-		Path:          "/test/path",
-	}
-
-	// Save cache
-	if err := du.saveCache(state); err != nil {
-		t.Fatalf("saveCache failed: %v", err)
-	}
-
-	// Verify temp file doesn't exist (was renamed)
-	tempFile := du.cacheFile + ".tmp"
-	if _, err := os.Stat(tempFile); !os.IsNotExist(err) {
-		t.Error("Temp file should not exist after successful write")
-	}
-
-	// Verify cache file is valid JSON
-	data, err := os.ReadFile(du.cacheFile)
-	if err != nil {
-		t.Fatalf("Failed to read cache file: %v", err)
-	}
-
-	var loaded DatabaseState
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		t.Errorf("Cache file should contain valid JSON: %v", err)
-	}
-}
-
-// Tests for CheckForUpdates using mock loader
 
 func TestDatabaseUpdater_CheckForUpdates_FirstRun(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -179,115 +98,24 @@ func TestDatabaseUpdater_CheckForUpdates_FirstRun(t *testing.T) {
 		}, nil
 	})
 
-	// First run should return false (no change detected on first run)
+	// First run should return false (no database existed, so no change to detect)
 	hasChanged, err := du.CheckForUpdates(context.Background())
 	if err != nil {
 		t.Fatalf("CheckForUpdates failed: %v", err)
 	}
 
 	if hasChanged {
-		t.Error("Expected hasChanged=false on first run")
+		t.Error("Expected hasChanged=false on first run (no previous database)")
 	}
 
-	// Cache should be created
-	cached, err := du.loadCache()
-	if err != nil {
-		t.Fatalf("Failed to load cache: %v", err)
+	// Version should be stored in memory
+	version := du.GetCurrentVersion()
+	if version == nil {
+		t.Fatal("Version should be stored after CheckForUpdates")
 	}
 
-	if !cached.Built.Equal(mockBuilt) {
-		t.Errorf("Expected built time %v, got %v", mockBuilt, cached.Built)
-	}
-}
-
-func TestDatabaseUpdater_CheckForUpdates_DatabaseChanged(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	// Pre-populate cache with old timestamp
-	oldBuilt := time.Date(2025, 12, 26, 0, 0, 0, 0, time.UTC)
-	if err := du.saveCache(DatabaseState{
-		LastChecked:   time.Now().UTC(),
-		Built:         oldBuilt,
-		SchemaVersion: "v6.1.2",
-		Path:          "/old/path",
-	}); err != nil {
-		t.Fatalf("Failed to save initial cache: %v", err)
-	}
-
-	// Mock loader returns NEW database status
-	newBuilt := time.Date(2025, 12, 27, 0, 0, 0, 0, time.UTC)
-	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
-		return &DatabaseStatus{
-			Built:         newBuilt,
-			SchemaVersion: "v6.1.3",
-			Path:          "/new/path",
-		}, nil
-	})
-
-	// Should detect change
-	hasChanged, err := du.CheckForUpdates(context.Background())
-	if err != nil {
-		t.Fatalf("CheckForUpdates failed: %v", err)
-	}
-
-	if !hasChanged {
-		t.Error("Expected hasChanged=true when Built timestamp differs")
-	}
-
-	// Cache should be updated
-	cached, err := du.loadCache()
-	if err != nil {
-		t.Fatalf("Failed to load cache: %v", err)
-	}
-
-	if !cached.Built.Equal(newBuilt) {
-		t.Errorf("Expected built time %v, got %v", newBuilt, cached.Built)
-	}
-}
-
-func TestDatabaseUpdater_CheckForUpdates_NoChange(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	// Same timestamp for both cache and mock
-	sameBuilt := time.Date(2025, 12, 27, 0, 0, 0, 0, time.UTC)
-
-	// Pre-populate cache
-	if err := du.saveCache(DatabaseState{
-		LastChecked:   time.Now().UTC(),
-		Built:         sameBuilt,
-		SchemaVersion: "v6.1.3",
-		Path:          "/test/path",
-	}); err != nil {
-		t.Fatalf("Failed to save initial cache: %v", err)
-	}
-
-	// Mock loader returns same timestamp
-	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
-		return &DatabaseStatus{
-			Built:         sameBuilt,
-			SchemaVersion: "v6.1.3",
-			Path:          "/test/path",
-		}, nil
-	})
-
-	// Should NOT detect change
-	hasChanged, err := du.CheckForUpdates(context.Background())
-	if err != nil {
-		t.Fatalf("CheckForUpdates failed: %v", err)
-	}
-
-	if hasChanged {
-		t.Error("Expected hasChanged=false when Built timestamps are equal")
+	if !version.Built.Equal(mockBuilt) {
+		t.Errorf("Expected built time %v, got %v", mockBuilt, version.Built)
 	}
 }
 
@@ -312,44 +140,10 @@ func TestDatabaseUpdater_CheckForUpdates_LoaderError(t *testing.T) {
 	if hasChanged {
 		t.Error("Expected hasChanged=false on error")
 	}
-}
 
-func TestDatabaseUpdater_CheckForUpdates_ZeroTimestamps(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	// Pre-populate cache with valid timestamp
-	oldBuilt := time.Date(2025, 12, 26, 0, 0, 0, 0, time.UTC)
-	if err := du.saveCache(DatabaseState{
-		LastChecked:   time.Now().UTC(),
-		Built:         oldBuilt,
-		SchemaVersion: "v6.1.2",
-		Path:          "/old/path",
-	}); err != nil {
-		t.Fatalf("Failed to save initial cache: %v", err)
-	}
-
-	// Mock loader returns zero timestamp (edge case)
-	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
-		return &DatabaseStatus{
-			Built:         time.Time{}, // Zero time
-			SchemaVersion: "v6.1.3",
-			Path:          "/test/path",
-		}, nil
-	})
-
-	// Should NOT detect change when one timestamp is zero
-	hasChanged, err := du.CheckForUpdates(context.Background())
-	if err != nil {
-		t.Fatalf("CheckForUpdates failed: %v", err)
-	}
-
-	if hasChanged {
-		t.Error("Expected hasChanged=false when new Built timestamp is zero")
+	// Version should remain nil on error
+	if du.GetCurrentVersion() != nil {
+		t.Error("Version should be nil after loader error")
 	}
 }
 
@@ -381,5 +175,72 @@ func TestDatabaseUpdater_GetCurrentStatus(t *testing.T) {
 
 	if !status.Built.Equal(mockBuilt) {
 		t.Errorf("Expected built time %v, got %v", mockBuilt, status.Built)
+	}
+
+	// GetCurrentStatus should also update in-memory version
+	version := du.GetCurrentVersion()
+	if version == nil {
+		t.Fatal("GetCurrentVersion should return non-nil after GetCurrentStatus")
+	}
+
+	if !version.Built.Equal(mockBuilt) {
+		t.Errorf("Expected in-memory built time %v, got %v", mockBuilt, version.Built)
+	}
+}
+
+func TestDatabaseUpdater_GetCurrentVersion_ReturnsCopy(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	du, err := NewDatabaseUpdater(tmpDir)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdater failed: %v", err)
+	}
+
+	mockBuilt := time.Date(2025, 12, 27, 0, 0, 0, 0, time.UTC)
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		return &DatabaseStatus{
+			Built:         mockBuilt,
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		}, nil
+	})
+
+	// Populate version
+	_, _ = du.CheckForUpdates(context.Background())
+
+	// Get two copies
+	v1 := du.GetCurrentVersion()
+	v2 := du.GetCurrentVersion()
+
+	// Modify v1
+	v1.SchemaVersion = "modified"
+
+	// v2 should not be affected (they should be independent copies)
+	if v2.SchemaVersion == "modified" {
+		t.Error("GetCurrentVersion should return a copy, not the same pointer")
+	}
+}
+
+func TestNewDatabaseUpdaterWithConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DatabaseUpdaterConfig{
+		LatestURL: "https://custom.example.com/grype/db",
+	}
+
+	du, err := NewDatabaseUpdaterWithConfig(tmpDir, cfg)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdaterWithConfig failed: %v", err)
+	}
+
+	// Verify grype directory was created
+	grypeDir := filepath.Join(tmpDir, "grype")
+	if _, err := os.Stat(grypeDir); os.IsNotExist(err) {
+		t.Error("grype directory should be created")
+	}
+
+	// Verify the custom URL was set (we can check via the distCfg)
+	if du.distCfg.LatestURL != cfg.LatestURL {
+		t.Errorf("Expected LatestURL '%s', got '%s'", cfg.LatestURL, du.distCfg.LatestURL)
 	}
 }

@@ -38,6 +38,14 @@ import (
 // version is set at build time via ldflags
 var version = "dev"
 
+// formatConsoleURL creates a console URL, omitting port 80 for cleaner URLs
+func formatConsoleURL(host, port string) string {
+	if port == "80" {
+		return fmt.Sprintf("http://%s/", host)
+	}
+	return fmt.Sprintf("http://%s:%s/", host, port)
+}
+
 type InfoResponse struct {
 	Version   string `json:"version"`
 	PodName   string `json:"pod_name"`
@@ -227,19 +235,19 @@ func (k *K8sScanServerInfo) detectConsoleURL() string {
 						if port == "" && len(svc.Spec.Ports) > 0 {
 							port = fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
 						}
-						return fmt.Sprintf("http://%s:%s/", ingress.IP, port)
+						return formatConsoleURL(ingress.IP, port)
 					}
 					if ingress.Hostname != "" {
 						port := k.servicePort
 						if port == "" && len(svc.Spec.Ports) > 0 {
 							port = fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
 						}
-						return fmt.Sprintf("http://%s:%s/", ingress.Hostname, port)
+						return formatConsoleURL(ingress.Hostname, port)
 					}
 				}
 
 			case corev1.ServiceTypeNodePort:
-				// Use Node IP + NodePort
+				// Use Node IP + NodePort (NodePort is never 80, so always include it)
 				if k.deploymentIP != "" && len(svc.Spec.Ports) > 0 {
 					nodePort := svc.Spec.Ports[0].NodePort
 					return fmt.Sprintf("http://%s:%d/", k.deploymentIP, nodePort)
@@ -251,7 +259,7 @@ func (k *K8sScanServerInfo) detectConsoleURL() string {
 				if port == "" && len(svc.Spec.Ports) > 0 {
 					port = fmt.Sprintf("%d", svc.Spec.Ports[0].Port)
 				}
-				return fmt.Sprintf("http://%s.%s.svc.cluster.local:%s/", k.serviceName, namespace, port)
+				return formatConsoleURL(fmt.Sprintf("%s.%s.svc.cluster.local", k.serviceName, namespace), port)
 			}
 		}
 	}
@@ -262,7 +270,7 @@ func (k *K8sScanServerInfo) detectConsoleURL() string {
 		if port == "" {
 			port = "80"
 		}
-		return fmt.Sprintf("http://%s.%s.svc.cluster.local:%s/", k.serviceName, namespace, port)
+		return formatConsoleURL(fmt.Sprintf("%s.%s.svc.cluster.local", k.serviceName, namespace), port)
 	}
 
 	return ""
