@@ -318,6 +318,14 @@ func main() {
 		log.Printf("Warning: failed to create database updater: %v", err)
 	}
 
+	// Initialize grype database status at startup (for metrics)
+	// This ensures grype_db_built is available in metrics immediately
+	if dbUpdater != nil {
+		if _, err := dbUpdater.GetCurrentStatus(context.Background()); err != nil {
+			log.Printf("Warning: failed to get initial database status: %v", err)
+		}
+	}
+
 	// Initialize scan queue with SBOM and vulnerability scanning
 	// Using default queue config (unbounded queue with single worker)
 	queueConfig := scanning.QueueConfig{
@@ -448,13 +456,14 @@ func main() {
 	infoProvider := NewAgentInfo(cfg.Port, cfg.WebUIEnabled)
 
 	// Wire up grype database status getter for metrics
+	// Uses GetCurrentVersion() which returns cached in-memory value (fast)
 	if dbUpdater != nil {
 		infoProvider.SetGrypeDBStatusGetter(func() string {
-			status, err := dbUpdater.GetCurrentStatus(context.Background())
-			if err != nil || status == nil || status.Built.IsZero() {
+			version := dbUpdater.GetCurrentVersion()
+			if version == nil || version.Built.IsZero() {
 				return ""
 			}
-			return status.Built.Format(time.RFC3339)
+			return version.Built.Format(time.RFC3339)
 		})
 	}
 
