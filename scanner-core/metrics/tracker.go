@@ -20,10 +20,16 @@ type MetricTrackerStore interface {
 
 // MetricTracker tracks metric last-seen times for staleness detection
 // It persists data to the database for survival across restarts
+//
+// Staleness behavior:
+// 1. When a metric is present in source data, its last-seen time is updated
+// 2. When a metric disappears from source, emit NaN immediately (stale marker)
+// 3. Continue emitting NaN for the staleness window duration
+// 4. After stalenessWindow passes, remove from tracking (metric disappears completely)
 type MetricTracker struct {
 	mu              sync.RWMutex
 	lastSeen        map[string]time.Time // metric key -> last seen timestamp
-	stalenessWindow time.Duration        // how long until a metric is considered stale
+	stalenessWindow time.Duration        // how long to emit NaN after metric disappears
 	store           MetricTrackerStore   // database interface for persistence
 	storageKey      string               // key used for database storage
 	lastSavedHash   string               // hash of last saved data to avoid unnecessary writes
@@ -31,7 +37,7 @@ type MetricTracker struct {
 
 // MetricTrackerConfig holds configuration for the MetricTracker
 type MetricTrackerConfig struct {
-	StalenessWindow time.Duration      // Duration after which metrics are stale (default: 60 min)
+	StalenessWindow time.Duration      // Duration to emit NaN after metric disappears (default: 60 min)
 	Store           MetricTrackerStore // Database interface for persistence
 	StorageKey      string             // Key used for database storage (default: "metrics")
 }
@@ -146,6 +152,11 @@ func generateMetricKey(familyName string, labels map[string]string) string {
 
 // ProcessMetrics processes metrics data, updates last-seen times, and adds stale markers
 // Returns the processed metrics data with stale metrics included
+//
+// Staleness logic:
+// - Metrics present in data: update last-seen time
+// - Metrics missing from data but within staleness window: emit NaN (stale marker)
+// - Metrics missing and past staleness window: remove from tracking (metric disappears)
 func (mt *MetricTracker) ProcessMetrics(data *MetricsData) *MetricsData {
 	if data == nil {
 		return nil
@@ -168,19 +179,23 @@ func (mt *MetricTracker) ProcessMetrics(data *MetricsData) *MetricsData {
 		mt.lastSeen[key] = now
 	}
 
-	// Find stale metrics (in lastSeen but not in current, and older than staleness window)
+	// Find stale and expired metrics
+	// Stale: metric missing but within staleness window - emit NaN
+	// Expired: metric missing and past staleness window - remove from tracking
 	staleMetrics := make(map[string]time.Time)
 	expiredMetrics := make([]string, 0)
-	staleThreshold := now.Add(-mt.stalenessWindow)
+	stalenessThreshold := now.Add(-mt.stalenessWindow)
 
 	for key, lastTime := range mt.lastSeen {
 		if _, exists := currentMetrics[key]; !exists {
-			if lastTime.Before(staleThreshold) {
-				// Metric is stale - mark for NaN emission and removal from tracking
-				staleMetrics[key] = lastTime
+			// Metric is missing from current data
+			if lastTime.Before(stalenessThreshold) {
+				// Past staleness window - remove from tracking
 				expiredMetrics = append(expiredMetrics, key)
+			} else {
+				// Within staleness window - emit NaN
+				staleMetrics[key] = lastTime
 			}
-			// If not yet past staleness window, keep tracking but don't emit
 		}
 	}
 
@@ -198,13 +213,17 @@ func (mt *MetricTracker) ProcessMetrics(data *MetricsData) *MetricsData {
 	// Add stale metrics to the output with NaN value
 	if len(staleMetrics) > 0 {
 		data = mt.addStaleMetrics(data, staleMetrics)
-		log.Printf("[metric-tracker] Marked %d metrics as stale", len(staleMetrics))
+		log.Printf("[metric-tracker] Marked %d metrics as stale (NaN)", len(staleMetrics))
+	}
+	if len(expiredMetrics) > 0 {
+		log.Printf("[metric-tracker] Purged %d expired metrics", len(expiredMetrics))
 	}
 
 	return data
 }
 
 // addStaleMetrics adds stale metrics to the data with NaN values
+// It creates a copy of the data to avoid modifying the input
 func (mt *MetricTracker) addStaleMetrics(data *MetricsData, staleMetrics map[string]time.Time) *MetricsData {
 	// Parse stale metric keys and group by family
 	staleByFamily := make(map[string][]MetricPoint)
@@ -220,18 +239,31 @@ func (mt *MetricTracker) addStaleMetrics(data *MetricsData, staleMetrics map[str
 		})
 	}
 
-	// Add stale metrics to existing families or create new ones
-	for i := range data.Families {
-		family := &data.Families[i]
+	// Create a copy of the families slice to avoid modifying the input
+	newFamilies := make([]MetricFamily, len(data.Families))
+	for i, family := range data.Families {
+		// Copy family with new Metrics slice
+		newFamilies[i] = MetricFamily{
+			Name: family.Name,
+			Help: family.Help,
+			Type: family.Type,
+		}
 		if stalePoints, ok := staleByFamily[family.Name]; ok {
-			family.Metrics = append(family.Metrics, stalePoints...)
+			// Combine existing metrics with stale metrics
+			newFamilies[i].Metrics = make([]MetricPoint, len(family.Metrics)+len(stalePoints))
+			copy(newFamilies[i].Metrics, family.Metrics)
+			copy(newFamilies[i].Metrics[len(family.Metrics):], stalePoints)
 			delete(staleByFamily, family.Name)
+		} else {
+			// Just copy existing metrics
+			newFamilies[i].Metrics = make([]MetricPoint, len(family.Metrics))
+			copy(newFamilies[i].Metrics, family.Metrics)
 		}
 	}
 
 	// Add any remaining stale metrics as new families
 	for familyName, points := range staleByFamily {
-		data.Families = append(data.Families, MetricFamily{
+		newFamilies = append(newFamilies, MetricFamily{
 			Name:    familyName,
 			Help:    "Stale metric",
 			Type:    "gauge",
@@ -239,7 +271,7 @@ func (mt *MetricTracker) addStaleMetrics(data *MetricsData, staleMetrics map[str
 		})
 	}
 
-	return data
+	return &MetricsData{Families: newFamilies}
 }
 
 // parseMetricKey parses a metric key back into family name and labels

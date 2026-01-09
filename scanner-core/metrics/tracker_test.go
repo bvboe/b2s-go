@@ -196,10 +196,8 @@ func TestProcessMetrics_StaleMetrics(t *testing.T) {
 	}
 	mt.ProcessMetrics(data1)
 
-	// Wait for staleness window to pass
-	time.Sleep(150 * time.Millisecond)
-
-	// Second call with only 1 metric (pod2 is gone)
+	// Immediately call with only 1 metric (pod2 is gone)
+	// Should emit NaN for pod2 right away (within staleness window)
 	data2 := &MetricsData{
 		Families: []MetricFamily{
 			{
@@ -233,9 +231,41 @@ func TestProcessMetrics_StaleMetrics(t *testing.T) {
 		t.Error("Expected to find stale metric for pod2")
 	}
 
-	// Stale metric should be removed from tracking
+	// Stale metric should still be tracked (within staleness window)
+	if mt.GetTrackedCount() != 2 {
+		t.Errorf("Expected 2 tracked metrics (stale still tracked within window), got %d", mt.GetTrackedCount())
+	}
+
+	// NaN should be emitted on subsequent calls too (within staleness window)
+	result2 := mt.ProcessMetrics(data2)
+	foundStale2 := false
+	for _, m := range result2.Families[0].Metrics {
+		if m.Labels["pod"] == "pod2" {
+			if !math.IsNaN(m.Value) {
+				t.Errorf("Expected NaN value on second call, got %f", m.Value)
+			}
+			foundStale2 = true
+		}
+	}
+	if !foundStale2 {
+		t.Error("Expected stale metric to still be emitted on second call")
+	}
+
+	// Wait for staleness window to pass
+	time.Sleep(150 * time.Millisecond)
+
+	// After staleness window, metric should be removed from tracking
+	mt.ProcessMetrics(data2)
 	if mt.GetTrackedCount() != 1 {
-		t.Errorf("Expected 1 tracked metric after stale removal, got %d", mt.GetTrackedCount())
+		t.Errorf("Expected 1 tracked metric after staleness window, got %d", mt.GetTrackedCount())
+	}
+
+	// Stale metric should no longer appear in output
+	result3 := mt.ProcessMetrics(data2)
+	for _, m := range result3.Families[0].Metrics {
+		if m.Labels["pod"] == "pod2" {
+			t.Error("Expected pod2 metric to be gone after staleness window")
+		}
 	}
 }
 
