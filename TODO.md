@@ -7,6 +7,12 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Rerun code-simplifier analysis and address suggestions
+  - [ ] High priority: Extract shared SQL filter building logic (~200 lines saved)
+  - [ ] High priority: Consolidate CSV export functions (~100 lines saved)
+  - [ ] High priority: Extract vulnerability label building in metrics
+  - [ ] Medium priority: Create URL path parsing and pagination helpers
+  - [ ] See conversation from 2026-01-09 for full analysis
 - [ ] Remove gomezboe.com dependency from grype database update tests
   - [ ] Replace `scripts/test-grype-db-updater` with self-contained unit tests
   - [ ] Consider mocking distribution.Client for IsUpdateAvailable tests
