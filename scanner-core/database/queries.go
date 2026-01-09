@@ -588,3 +588,30 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 
 	return instances, nil
 }
+
+// LoadMetricStaleness loads the metric staleness data from the database
+// Returns empty string if no data exists
+func (db *DB) LoadMetricStaleness(key string) (string, error) {
+	var data string
+	err := db.conn.QueryRow(`SELECT data FROM metric_staleness WHERE key = ?`, key).Scan(&data)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to load metric staleness: %w", err)
+	}
+	return data, nil
+}
+
+// SaveMetricStaleness saves the metric staleness data to the database
+// Uses INSERT OR REPLACE to handle both insert and update cases
+func (db *DB) SaveMetricStaleness(key string, data string) error {
+	_, err := db.conn.Exec(`
+		INSERT OR REPLACE INTO metric_staleness (key, data, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+	`, key, data)
+	if err != nil {
+		return fmt.Errorf("failed to save metric staleness: %w", err)
+	}
+	return nil
+}

@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 22
+const currentSchemaVersion = 23
 
 type migration struct {
 	version int
@@ -124,6 +124,11 @@ var migrations = []migration{
 		version: 22,
 		name:    "add_job_executions_table",
 		up:      migrateToV22,
+	},
+	{
+		version: 23,
+		name:    "add_metric_staleness_table",
+		up:      migrateToV23,
 	},
 }
 
@@ -1671,5 +1676,40 @@ func migrateToV22(conn *sql.DB) error {
 	log.Println("  - status: running, completed, or failed")
 	log.Println("  - error_message: Error details if job failed")
 	log.Println("  - duration_ms: Execution duration in milliseconds")
+	return nil
+}
+
+// migrateToV23 adds metric_staleness table for tracking metric last-seen times
+// This enables proper staleness handling for OTLP push metrics
+func migrateToV23(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v23: Creating metric_staleness table...")
+
+	// Create metric_staleness table with single row for JSON blob storage
+	// key='metrics' stores JSON map of metric_key -> last_seen_timestamp
+	_, err = tx.Exec(`
+		CREATE TABLE metric_staleness (
+			key TEXT PRIMARY KEY,
+			data TEXT NOT NULL,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create metric_staleness table: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v23: Successfully created metric_staleness table")
+	log.Println("  - key: Storage key (e.g., 'metrics')")
+	log.Println("  - data: JSON blob containing metric_key -> last_seen_timestamp map")
+	log.Println("  - updated_at: Last modification timestamp")
 	return nil
 }

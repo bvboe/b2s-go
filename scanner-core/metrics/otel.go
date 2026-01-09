@@ -128,6 +128,11 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 	}, nil
 }
 
+// SetTracker sets the metric tracker on the internal collector for staleness detection
+func (e *OTELExporter) SetTracker(tracker *MetricTracker) {
+	e.collector.SetTracker(tracker)
+}
+
 // Start begins pushing metrics to the OTEL collector
 func (e *OTELExporter) Start() {
 	go e.pushMetrics()

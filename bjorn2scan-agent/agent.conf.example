@@ -222,3 +222,19 @@ metrics_vulnerability_exploited_enabled=true
 # Warning: Similar to bjorn2scan_vulnerability, this can generate high metric cardinality
 # Environment variable: METRICS_VULNERABILITY_RISK_ENABLED
 metrics_vulnerability_risk_enabled=true
+
+# Enable bjorn2scan_image_scan_status metric (default: true)
+# This metric reports scan status counts per image (pending, complete, failed)
+# Useful for monitoring scan coverage and detecting problematic images
+# Environment variable: METRICS_IMAGE_SCAN_STATUS_ENABLED
+metrics_image_scan_status_enabled=true
+
+# Metrics staleness window (default: 60m)
+# Duration after which metrics are considered stale and marked with NaN
+# This affects both /metrics endpoint and OTLP push to ensure consistency
+# When a metric (e.g., container, vulnerability) hasn't been seen within this window,
+# it will be marked as stale (NaN value) to create gaps in Grafana rather than
+# showing flat lines of old data
+# Format: Go duration string (e.g., "30m", "60m", "1h", "2h")
+# Environment variable: METRICS_STALENESS_WINDOW
+metrics_staleness_window=60m

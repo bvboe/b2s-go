@@ -41,6 +41,7 @@ type Collector struct {
 	deploymentName string // Cached deployment name for per-instance metrics
 	database       DatabaseProvider
 	config         CollectorConfig
+	tracker        *MetricTracker // Optional tracker for staleness detection
 }
 
 // NewCollector creates a new metrics collector
@@ -56,6 +57,12 @@ func NewCollector(infoProvider InfoProvider, deploymentUUID string, database Dat
 		database:       database,
 		config:         config,
 	}
+}
+
+// SetTracker sets the metric tracker for staleness detection
+// When set, the Collect method will process metrics through the tracker
+func (c *Collector) SetTracker(tracker *MetricTracker) {
+	c.tracker = tracker
 }
 
 // Collect generates structured metrics data
@@ -121,6 +128,11 @@ func (c *Collector) Collect() (*MetricsData, error) {
 			return nil, fmt.Errorf("failed to collect image scan status metrics: %w", err)
 		}
 		data.Families = append(data.Families, family)
+	}
+
+	// Process through tracker for staleness detection if configured
+	if c.tracker != nil {
+		data = c.tracker.ProcessMetrics(data)
 	}
 
 	return data, nil

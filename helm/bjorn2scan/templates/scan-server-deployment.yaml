@@ -89,6 +89,8 @@ spec:
           value: {{ .Values.scanServer.config.metrics.vulnerabilityRiskEnabled | quote }}
         - name: METRICS_IMAGE_SCAN_STATUS_ENABLED
           value: {{ .Values.scanServer.config.metrics.imageScanStatusEnabled | quote }}
+        - name: METRICS_STALENESS_WINDOW
+          value: {{ .Values.scanServer.config.metrics.stalenessWindow | quote }}
         - name: JOBS_RESCAN_DATABASE_ENABLED
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.enabled | quote }}
         - name: JOBS_RESCAN_DATABASE_INTERVAL

@@ -497,8 +497,16 @@ func main() {
 		ImageScanStatusEnabled:        cfg.MetricsImageScanStatusEnabled,
 	}
 
-	// Register Prometheus metrics endpoint
-	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String(), db, collectorConfig)
+	// Create metric tracker for staleness detection (shared between /metrics and OTEL)
+	metricTracker := metrics.NewMetricTracker(metrics.MetricTrackerConfig{
+		StalenessWindow: cfg.MetricsStalenessWindow,
+		Store:           db,
+		StorageKey:      "metrics",
+	})
+	log.Printf("Metric staleness tracking enabled (window: %v)", cfg.MetricsStalenessWindow)
+
+	// Register Prometheus metrics endpoint with staleness tracking
+	metrics.RegisterMetricsHandlerWithTracker(mux, infoProvider, deploymentUUID.String(), db, collectorConfig, metricTracker)
 
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter
@@ -518,6 +526,8 @@ func main() {
 		if err != nil {
 			log.Printf("Warning: Failed to initialize OTEL exporter: %v (continuing without OTEL)", err)
 		} else {
+			// Set the same tracker for consistent staleness detection
+			otelExporter.SetTracker(metricTracker)
 			otelExporter.Start()
 			log.Println("OpenTelemetry metrics exporter started")
 		}

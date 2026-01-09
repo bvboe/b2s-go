@@ -63,12 +63,15 @@ type Config struct {
 	OTELMetricsInsecure     bool
 
 	// Individual metric toggles
-	MetricsDeploymentEnabled        bool // Enable bjorn2scan_deployment metric
-	MetricsScannedInstancesEnabled  bool // Enable bjorn2scan_scanned_instance metric
-	MetricsVulnerabilitiesEnabled   bool // Enable bjorn2scan_vulnerability metric
+	MetricsDeploymentEnabled             bool // Enable bjorn2scan_deployment metric
+	MetricsScannedInstancesEnabled       bool // Enable bjorn2scan_scanned_instance metric
+	MetricsVulnerabilitiesEnabled        bool // Enable bjorn2scan_vulnerability metric
 	MetricsVulnerabilityExploitedEnabled bool // Enable bjorn2scan_vulnerability_exploited metric
 	MetricsVulnerabilityRiskEnabled      bool // Enable bjorn2scan_vulnerability_risk metric
 	MetricsImageScanStatusEnabled        bool // Enable bjorn2scan_image_scan_status metric
+
+	// Metrics staleness tracking
+	MetricsStalenessWindow time.Duration // Duration after which metrics are considered stale (default: 60m)
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -130,6 +133,9 @@ func defaultConfig() *Config {
 		MetricsVulnerabilityExploitedEnabled: true,
 		MetricsVulnerabilityRiskEnabled:      true,
 		MetricsImageScanStatusEnabled:        true,
+
+		// Metrics staleness - 60 minutes by default
+		MetricsStalenessWindow: 60 * time.Minute,
 	}
 }
 
@@ -338,6 +344,13 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("metrics_image_scan_status_enabled").String())
 				cfg.MetricsImageScanStatusEnabled = val == "true" || val == "1" || val == "yes"
 			}
+
+			// Metrics staleness window
+			if section.HasKey("metrics_staleness_window") {
+				if duration, err := time.ParseDuration(section.Key("metrics_staleness_window").String()); err == nil {
+					cfg.MetricsStalenessWindow = duration
+				}
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -466,6 +479,13 @@ func LoadConfig(path string) (*Config, error) {
 	if imageScanStatusEnabledEnv := os.Getenv("METRICS_IMAGE_SCAN_STATUS_ENABLED"); imageScanStatusEnabledEnv != "" {
 		val := strings.ToLower(imageScanStatusEnabledEnv)
 		cfg.MetricsImageScanStatusEnabled = val == "true" || val == "1" || val == "yes"
+	}
+
+	// Metrics staleness window
+	if stalenessWindowEnv := os.Getenv("METRICS_STALENESS_WINDOW"); stalenessWindowEnv != "" {
+		if duration, err := time.ParseDuration(stalenessWindowEnv); err == nil {
+			cfg.MetricsStalenessWindow = duration
+		}
 	}
 
 	return cfg, nil

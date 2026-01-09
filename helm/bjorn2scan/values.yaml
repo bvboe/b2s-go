@@ -105,6 +105,7 @@ scanServer:
       vulnerabilityExploitedEnabled: true  # Enable bjorn2scan_vulnerability_exploited metric (known exploited vulnerabilities)
       vulnerabilityRiskEnabled: true  # Enable bjorn2scan_vulnerability_risk metric (risk scores)
       imageScanStatusEnabled: true  # Enable bjorn2scan_image_scan_status metric (scan status counts)
+      stalenessWindow: "60m"  # Duration after which metrics are considered stale (e.g., 60m, 1h, 30m)
 
     # Scheduled Jobs Configuration
     jobs:
