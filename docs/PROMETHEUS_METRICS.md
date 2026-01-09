@@ -73,7 +73,7 @@ Gauge metric for each container instance (value always 1 per instance). Includes
 - `deployment_uuid_host_name`: Hierarchical label combining deployment UUID and host name
 - `deployment_uuid_namespace`: Hierarchical label combining deployment UUID and namespace
 - `deployment_uuid_namespace_image`: Hierarchical label for deployment, namespace, and image
-- `deployment_uuid_namespace_image_id`: Hierarchical label for deployment, namespace, and image digest
+- `deployment_uuid_namespace_image_digest`: Hierarchical label for deployment, namespace, and image digest
 - `deployment_uuid_namespace_pod`: Hierarchical label for deployment, namespace, and pod
 - `deployment_uuid_namespace_pod_container`: Full hierarchical label for container instance
 - `host_name`: Node where container runs

@@ -197,7 +197,7 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
 			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
-		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
+		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod)
@@ -211,7 +211,7 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 				"deployment_uuid_host_name":               deploymentUUIDHostName,
 				"deployment_uuid_namespace":               deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":         deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_id":      deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_image_digest":      deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
 				"host_name":                               instance.NodeName,
@@ -246,7 +246,7 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
 			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
-		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
+		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod)
@@ -261,7 +261,7 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 				"deployment_uuid_host_name":            deploymentUUIDHostName,
 				"deployment_uuid_namespace":            deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_id":   deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_image_digest":   deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":        deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
 				"host_name":                            instance.NodeName,
@@ -309,7 +309,7 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
 			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
-		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
+		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod)
@@ -324,7 +324,7 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 				"deployment_uuid_host_name":            deploymentUUIDHostName,
 				"deployment_uuid_namespace":            deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_id":   deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_image_digest":   deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":        deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
 				"host_name":                            instance.NodeName,
@@ -367,7 +367,7 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
 			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
-		deploymentUUIDNamespaceImageID := fmt.Sprintf("%s.%s.%s",
+		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Pod)
@@ -382,7 +382,7 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 				"deployment_uuid_host_name":            deploymentUUIDHostName,
 				"deployment_uuid_namespace":            deploymentUUIDNamespace,
 				"deployment_uuid_namespace_image":      deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_id":   deploymentUUIDNamespaceImageID,
+				"deployment_uuid_namespace_image_digest":   deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":        deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
 				"host_name":                            instance.NodeName,
