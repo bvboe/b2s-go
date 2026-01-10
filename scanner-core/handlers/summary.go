@@ -126,7 +126,10 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Parse query parameters
 		params := r.URL.Query()
 
-		// Pagination
+		// Export format
+		format := params.Get("format")
+
+		// Pagination (skip for CSV export - export all data)
 		page, _ := strconv.Atoi(params.Get("page"))
 		if page < 1 {
 			page = 1
@@ -136,6 +139,12 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			pageSize = 100
 		}
 		offset := (page - 1) * pageSize
+
+		// For CSV export, get all results
+		if format == "csv" {
+			pageSize = -1
+			offset = 0
+		}
 
 		// Filters (multiselect - comma separated)
 		namespaces := parseMultiSelect(params.Get("namespaces"))
@@ -149,9 +158,6 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		if sortOrder != "ASC" && sortOrder != "DESC" {
 			sortOrder = "ASC"
 		}
-
-		// Export format
-		format := params.Get("format")
 
 		// Build query
 		query, countQuery := buildNamespaceSummaryQuery(namespaces, vulnStatuses, packageTypes, osNames, sortBy, sortOrder, pageSize, offset)
@@ -308,8 +314,8 @@ LEFT JOIN (
         SUM(CASE WHEN LOWER(severity) = 'low' THEN count ELSE 0 END) as low_count,
         SUM(CASE WHEN LOWER(severity) = 'negligible' THEN count ELSE 0 END) as negligible_count,
         SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
-        SUM(risk) as total_risk,
-        SUM(known_exploited) as exploit_count
+        SUM(risk * count) as total_risk,
+        SUM(known_exploited * count) as exploit_count
     FROM vulnerabilities
     %s
     GROUP BY image_id
@@ -387,8 +393,10 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 		mainQuery += " ORDER BY namespace ASC"
 	}
 
-	// Add pagination
-	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	// Add pagination (skip if limit <= 0 for full export)
+	if limit > 0 {
+		mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	return mainQuery, countQuery
 }
@@ -400,7 +408,10 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Parse query parameters
 		params := r.URL.Query()
 
-		// Pagination
+		// Export format
+		format := params.Get("format")
+
+		// Pagination (skip for CSV export - export all data)
 		page, _ := strconv.Atoi(params.Get("page"))
 		if page < 1 {
 			page = 1
@@ -410,6 +421,12 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			pageSize = 100
 		}
 		offset := (page - 1) * pageSize
+
+		// For CSV export, get all results
+		if format == "csv" {
+			pageSize = -1
+			offset = 0
+		}
 
 		// Filters (multiselect - comma separated)
 		namespaces := parseMultiSelect(params.Get("namespaces"))
@@ -423,9 +440,6 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		if sortOrder != "ASC" && sortOrder != "DESC" {
 			sortOrder = "ASC"
 		}
-
-		// Export format
-		format := params.Get("format")
 
 		// Build query
 		query, countQuery := buildDistributionSummaryQuery(namespaces, vulnStatuses, packageTypes, osNames, sortBy, sortOrder, pageSize, offset)
@@ -582,8 +596,8 @@ LEFT JOIN (
         SUM(CASE WHEN LOWER(severity) = 'low' THEN count ELSE 0 END) as low_count,
         SUM(CASE WHEN LOWER(severity) = 'negligible' THEN count ELSE 0 END) as negligible_count,
         SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
-        SUM(risk) as total_risk,
-        SUM(known_exploited) as exploit_count
+        SUM(risk * count) as total_risk,
+        SUM(known_exploited * count) as exploit_count
     FROM vulnerabilities
     %s
     GROUP BY image_id
@@ -663,8 +677,10 @@ WHERE status.status = 'completed'
 		mainQuery += " ORDER BY os_name ASC"
 	}
 
-	// Add pagination
-	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	// Add pagination (skip if limit <= 0 for full export)
+	if limit > 0 {
+		mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	return mainQuery, countQuery
 }

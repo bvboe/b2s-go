@@ -980,3 +980,40 @@ func TestBuildPodsQuery(t *testing.T) {
 		})
 	}
 }
+
+// TestRiskAndExploitCalculation verifies that total_risk and exploit_count
+// are calculated by multiplying by vulnerability count (for consistency with metrics)
+func TestRiskAndExploitCalculation(t *testing.T) {
+	t.Run("images query multiplies risk by count", func(t *testing.T) {
+		mainQuery, _ := buildImagesQuery(
+			"", nil, nil, nil, nil, "", "ASC", 50, 0,
+		)
+
+		// Verify risk calculation uses count multiplier
+		if !strings.Contains(mainQuery, "SUM(risk * count) as total_risk") {
+			t.Error("Expected images query to calculate total_risk as SUM(risk * count)")
+		}
+
+		// Verify exploit calculation uses count multiplier
+		if !strings.Contains(mainQuery, "SUM(known_exploited * count) as exploit_count") {
+			t.Error("Expected images query to calculate exploit_count as SUM(known_exploited * count)")
+		}
+	})
+
+	t.Run("pods query multiplies risk by count", func(t *testing.T) {
+		mainQuery, _ := buildPodsQuery(
+			"", nil, nil, nil, nil, "", "ASC", 50, 0,
+		)
+
+		// Verify risk calculation uses count multiplier
+		if !strings.Contains(mainQuery, "SUM(risk * count) as total_risk") {
+			t.Error("Expected pods query to calculate total_risk as SUM(risk * count)")
+		}
+
+		// Verify exploit calculation uses count multiplier
+		if !strings.Contains(mainQuery, "SUM(known_exploited * count) as exploit_count") {
+			t.Error("Expected pods query to calculate exploit_count as SUM(known_exploited * count)")
+		}
+	})
+}
+

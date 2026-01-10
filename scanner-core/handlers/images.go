@@ -64,7 +64,10 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Parse query parameters
 		params := r.URL.Query()
 
-		// Pagination
+		// Export format
+		format := params.Get("format")
+
+		// Pagination (skip for CSV export - export all data)
 		page, _ := strconv.Atoi(params.Get("page"))
 		if page < 1 {
 			page = 1
@@ -74,6 +77,12 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 			pageSize = 50
 		}
 		offset := (page - 1) * pageSize
+
+		// For CSV export, get all results
+		if format == "csv" {
+			pageSize = -1
+			offset = 0
+		}
 
 		// Search
 		search := params.Get("search")
@@ -90,9 +99,6 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 		if sortOrder != "ASC" && sortOrder != "DESC" {
 			sortOrder = "ASC"
 		}
-
-		// Export format
-		format := params.Get("format")
 
 		// Build query
 		query, countQuery := buildImagesQuery(search, namespaces, vulnStatuses, packageTypes, osNames, sortBy, sortOrder, pageSize, offset)
@@ -180,8 +186,8 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
           SUM(CASE WHEN LOWER(severity) = 'low' THEN count ELSE 0 END) as low_count,
           SUM(CASE WHEN LOWER(severity) = 'negligible' THEN count ELSE 0 END) as negligible_count,
           SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
-          SUM(risk) as total_risk,
-          SUM(known_exploited) as exploit_count
+          SUM(risk * count) as total_risk,
+          SUM(known_exploited * count) as exploit_count
       FROM vulnerabilities
       %s
       GROUP BY image_id
@@ -310,8 +316,10 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 		mainQuery += " ORDER BY status.sort_order ASC, image ASC"
 	}
 
-	// Add pagination
-	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	// Add pagination (skip if limit <= 0 for full export)
+	if limit > 0 {
+		mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	return mainQuery, countQuery
 }
@@ -322,7 +330,10 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Parse query parameters
 		params := r.URL.Query()
 
-		// Pagination
+		// Export format
+		format := params.Get("format")
+
+		// Pagination (skip for CSV export - export all data)
 		page, _ := strconv.Atoi(params.Get("page"))
 		if page < 1 {
 			page = 1
@@ -332,6 +343,12 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 			pageSize = 50
 		}
 		offset := (page - 1) * pageSize
+
+		// For CSV export, get all results
+		if format == "csv" {
+			pageSize = -1
+			offset = 0
+		}
 
 		// Search
 		search := params.Get("search")
@@ -348,9 +365,6 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		if sortOrder != "ASC" && sortOrder != "DESC" {
 			sortOrder = "ASC"
 		}
-
-		// Export format
-		format := params.Get("format")
 
 		// Build query
 		query, countQuery := buildPodsQuery(search, namespaces, vulnStatuses, packageTypes, osNames, sortBy, sortOrder, pageSize, offset)
@@ -422,8 +436,8 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
           SUM(CASE WHEN LOWER(severity) = 'low' THEN count ELSE 0 END) as low_count,
           SUM(CASE WHEN LOWER(severity) = 'negligible' THEN count ELSE 0 END) as negligible_count,
           SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
-          SUM(risk) as total_risk,
-          SUM(known_exploited) as exploit_count
+          SUM(risk * count) as total_risk,
+          SUM(known_exploited * count) as exploit_count
       FROM vulnerabilities
       %s
       GROUP BY image_id
@@ -554,8 +568,10 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 		mainQuery += " ORDER BY status.sort_order ASC, instances.namespace ASC, instances.pod ASC, instances.container ASC"
 	}
 
-	// Add pagination
-	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	// Add pagination (skip if limit <= 0 for full export)
+	if limit > 0 {
+		mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	return mainQuery, countQuery
 }
@@ -754,7 +770,16 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 		// Parse query parameters
 		params := r.URL.Query()
 
-		// Pagination
+		// Export format
+		format := params.Get("format")
+
+		// Handle raw JSON export from Grype
+		if format == "json" {
+			exportRawVulnerabilitiesJSON(w, provider, digest)
+			return
+		}
+
+		// Pagination (skip for CSV export - export all data)
 		page, _ := strconv.Atoi(params.Get("page"))
 		if page < 1 {
 			page = 1
@@ -764,6 +789,12 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 			pageSize = 100
 		}
 		offset := (page - 1) * pageSize
+
+		// For CSV export, get all results
+		if format == "csv" {
+			pageSize = -1
+			offset = 0
+		}
 
 		// Filters
 		severities := parseMultiSelect(params.Get("severity"))
@@ -775,15 +806,6 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 		sortOrder := params.Get("sortOrder")
 		if sortOrder != "ASC" && sortOrder != "DESC" {
 			sortOrder = "ASC"
-		}
-
-		// Export format
-		format := params.Get("format")
-
-		// Handle raw JSON export from Grype
-		if format == "json" {
-			exportRawVulnerabilitiesJSON(w, provider, digest)
-			return
 		}
 
 		// Build query
@@ -930,12 +952,18 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 			// User clicked severity - it becomes primary, vulnerability becomes secondary
 			mainQuery += severityCase + " " + sortOrder + ",\n"
 			mainQuery += "    v.cve_id ASC"
-			return mainQuery + fmt.Sprintf("\nLIMIT %d OFFSET %d", limit, offset), countQuery
+			if limit > 0 {
+				mainQuery += fmt.Sprintf("\nLIMIT %d OFFSET %d", limit, offset)
+			}
+			return mainQuery, countQuery
 		case "vulnerability_id":
 			// User clicked vulnerability - it becomes primary, severity becomes secondary
 			mainQuery += "    v.cve_id " + sortOrder + ",\n"
 			mainQuery += severityCase + " ASC"
-			return mainQuery + fmt.Sprintf("\nLIMIT %d OFFSET %d", limit, offset), countQuery
+			if limit > 0 {
+				mainQuery += fmt.Sprintf("\nLIMIT %d OFFSET %d", limit, offset)
+			}
+			return mainQuery, countQuery
 		case "artifact_name":
 			dbColumn = "v.package_name"
 		case "artifact_version":
@@ -964,8 +992,10 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 		mainQuery += "    v.cve_id ASC"
 	}
 
-	// Add pagination
-	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	// Add pagination (skip if limit <= 0 for full export)
+	if limit > 0 {
+		mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	return mainQuery, countQuery
 }
@@ -1042,7 +1072,16 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Parse query parameters
 		params := r.URL.Query()
 
-		// Pagination
+		// Export format
+		format := params.Get("format")
+
+		// Handle raw JSON export from Syft
+		if format == "json" {
+			exportRawSBOMJSON(w, provider, digest)
+			return
+		}
+
+		// Pagination (skip for CSV export - export all data)
 		page, _ := strconv.Atoi(params.Get("page"))
 		if page < 1 {
 			page = 1
@@ -1053,6 +1092,12 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 		}
 		offset := (page - 1) * pageSize
 
+		// For CSV export, get all results
+		if format == "csv" {
+			pageSize = -1
+			offset = 0
+		}
+
 		// Filters
 		packageTypes := parseMultiSelect(params.Get("type"))
 
@@ -1061,15 +1106,6 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 		sortOrder := params.Get("sortOrder")
 		if sortOrder != "ASC" && sortOrder != "DESC" {
 			sortOrder = "ASC"
-		}
-
-		// Export format
-		format := params.Get("format")
-
-		// Handle raw JSON export from Syft
-		if format == "json" {
-			exportRawSBOMJSON(w, provider, digest)
-			return
 		}
 
 		// Build query
@@ -1188,8 +1224,10 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 		mainQuery += " ORDER BY p.name ASC, p.version ASC, p.type ASC"
 	}
 
-	// Add pagination
-	mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	// Add pagination (skip if limit <= 0 for full export)
+	if limit > 0 {
+		mainQuery += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
 
 	return mainQuery, countQuery
 }

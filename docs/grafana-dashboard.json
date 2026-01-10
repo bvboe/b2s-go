@@ -86,7 +86,20 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "0"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -629,7 +642,6 @@
     }
   ],
   "preload": false,
-  "refresh": "5s",
   "schemaVersion": 42,
   "tags": [],
   "templating": {
@@ -703,7 +715,7 @@
   "timezone": "browser",
   "title": "Bjorn2Scan",
   "uid": "adtgfct",
-  "version": 12,
+  "version": 13,
   "weekStart": "",
   "id": null
 }

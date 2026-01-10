@@ -520,3 +520,143 @@ func TestGetLastUpdatedTimestamp(t *testing.T) {
 		t.Error("Expected non-empty timestamp after updating image")
 	}
 }
+
+// TestRiskAndExploitCalculationWithCount tests that total_risk and exploit_count
+// are correctly calculated by multiplying by vulnerability count.
+// This ensures consistency between API responses and Prometheus metrics.
+func TestRiskAndExploitCalculationWithCount(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_risk_calc_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = Close(db) }()
+
+	// Add a container instance
+	instance := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "test-pod",
+			Container: "test-container",
+		},
+		Image: containers.ImageID{
+			Repository: "test/image",
+			Tag:        "v1.0",
+			Digest:     "sha256:risk-test-123",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+
+	_, err = db.AddInstance(instance)
+	if err != nil {
+		t.Fatalf("Failed to add instance: %v", err)
+	}
+
+	// Store SBOM and complete scan
+	err = db.StoreSBOM("sha256:risk-test-123", []byte(`{"test":"sbom"}`))
+	if err != nil {
+		t.Fatalf("Failed to store SBOM: %v", err)
+	}
+
+	imageID, _, err := db.GetOrCreateImage(instance.Image)
+	if err != nil {
+		t.Fatalf("Failed to get image ID: %v", err)
+	}
+
+	err = db.ParseAndStoreImageData(imageID)
+	if err != nil {
+		t.Fatalf("Failed to parse image data: %v", err)
+	}
+
+	err = db.UpdateStatus("sha256:risk-test-123", StatusCompleted, "")
+	if err != nil {
+		t.Fatalf("Failed to update status: %v", err)
+	}
+
+	conn := db.GetConnection()
+
+	// Insert test vulnerabilities with known values:
+	// Vuln A: risk=10.0, known_exploited=1, count=3
+	//   -> contributes 30.0 to total_risk, 3 to exploit_count
+	// Vuln B: risk=5.0, known_exploited=0, count=2
+	//   -> contributes 10.0 to total_risk, 0 to exploit_count
+	// Vuln C: risk=7.5, known_exploited=1, count=1
+	//   -> contributes 7.5 to total_risk, 1 to exploit_count
+	//
+	// Expected totals:
+	//   total_risk = 30.0 + 10.0 + 7.5 = 47.5
+	//   exploit_count = 3 + 0 + 1 = 4
+
+	_, err = conn.Exec(`
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
+		VALUES (?, 'CVE-2024-0001', 'pkg-a', '1.0.0', 'apk', 'Critical', 'fixed', '1.0.1', 3, 10.0, 1)
+	`, imageID)
+	if err != nil {
+		t.Fatalf("Failed to insert vulnerability A: %v", err)
+	}
+
+	_, err = conn.Exec(`
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
+		VALUES (?, 'CVE-2024-0002', 'pkg-b', '2.0.0', 'deb', 'High', 'not-fixed', '', 2, 5.0, 0)
+	`, imageID)
+	if err != nil {
+		t.Fatalf("Failed to insert vulnerability B: %v", err)
+	}
+
+	_, err = conn.Exec(`
+		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
+		VALUES (?, 'CVE-2024-0003', 'pkg-c', '3.0.0', 'rpm', 'Medium', 'fixed', '3.0.1', 1, 7.5, 1)
+	`, imageID)
+	if err != nil {
+		t.Fatalf("Failed to insert vulnerability C: %v", err)
+	}
+
+	// Query the aggregated values using the same SQL pattern as the API
+	// This tests the SUM(risk * count) and SUM(known_exploited * count) calculations
+	query := `
+		SELECT
+			SUM(risk * count) as total_risk,
+			SUM(known_exploited * count) as exploit_count,
+			SUM(CASE WHEN LOWER(severity) = 'critical' THEN count ELSE 0 END) as critical_count,
+			SUM(CASE WHEN LOWER(severity) = 'high' THEN count ELSE 0 END) as high_count,
+			SUM(CASE WHEN LOWER(severity) = 'medium' THEN count ELSE 0 END) as medium_count
+		FROM vulnerabilities
+		WHERE image_id = ?
+	`
+
+	var totalRisk float64
+	var exploitCount, criticalCount, highCount, mediumCount int
+	err = conn.QueryRow(query, imageID).Scan(&totalRisk, &exploitCount, &criticalCount, &highCount, &mediumCount)
+	if err != nil {
+		t.Fatalf("Failed to query aggregated values: %v", err)
+	}
+
+	// Verify total_risk = (10.0 * 3) + (5.0 * 2) + (7.5 * 1) = 47.5
+	expectedRisk := 47.5
+	if totalRisk != expectedRisk {
+		t.Errorf("Expected total_risk=%.1f, got %.1f", expectedRisk, totalRisk)
+	}
+
+	// Verify exploit_count = (1 * 3) + (0 * 2) + (1 * 1) = 4
+	expectedExploits := 4
+	if exploitCount != expectedExploits {
+		t.Errorf("Expected exploit_count=%d, got %d", expectedExploits, exploitCount)
+	}
+
+	// Also verify vulnerability counts are correct
+	if criticalCount != 3 {
+		t.Errorf("Expected critical_count=3, got %d", criticalCount)
+	}
+	if highCount != 2 {
+		t.Errorf("Expected high_count=2, got %d", highCount)
+	}
+	if mediumCount != 1 {
+		t.Errorf("Expected medium_count=1, got %d", mediumCount)
+	}
+
+	t.Logf("Integration test passed: total_risk=%.1f, exploit_count=%d", totalRisk, exploitCount)
+}

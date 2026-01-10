@@ -705,3 +705,39 @@ func TestHelperFunctions(t *testing.T) {
 		}
 	})
 }
+
+// TestSummaryRiskAndExploitCalculation verifies that summary queries
+// calculate total_risk and exploit_count by multiplying by vulnerability count
+func TestSummaryRiskAndExploitCalculation(t *testing.T) {
+	t.Run("namespace summary query multiplies risk by count", func(t *testing.T) {
+		query, _ := buildNamespaceSummaryQuery(
+			nil, nil, nil, nil, "", "ASC", 50, 0,
+		)
+
+		// Verify risk calculation uses count multiplier
+		if !strings.Contains(query, "SUM(risk * count) as total_risk") {
+			t.Error("Expected namespace summary query to calculate total_risk as SUM(risk * count)")
+		}
+
+		// Verify exploit calculation uses count multiplier
+		if !strings.Contains(query, "SUM(known_exploited * count) as exploit_count") {
+			t.Error("Expected namespace summary query to calculate exploit_count as SUM(known_exploited * count)")
+		}
+	})
+
+	t.Run("distribution summary query multiplies risk by count", func(t *testing.T) {
+		query, _ := buildDistributionSummaryQuery(
+			nil, nil, nil, nil, "", "ASC", 50, 0,
+		)
+
+		// Verify risk calculation uses count multiplier
+		if !strings.Contains(query, "SUM(risk * count) as total_risk") {
+			t.Error("Expected distribution summary query to calculate total_risk as SUM(risk * count)")
+		}
+
+		// Verify exploit calculation uses count multiplier
+		if !strings.Contains(query, "SUM(known_exploited * count) as exploit_count") {
+			t.Error("Expected distribution summary query to calculate exploit_count as SUM(known_exploited * count)")
+		}
+	})
+}

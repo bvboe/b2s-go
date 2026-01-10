@@ -51,10 +51,10 @@ scanServer:
   resources:
     limits:
       cpu: 2000m
-      memory: 1Gi  # Increased for Grype vulnerability database (~500-800MB)
+      memory: 2Gi  # Grype DB (~500-800MB) + metrics collection + concurrent scans
     requests:
       cpu: 200m
-      memory: 512Mi  # Increased to handle vulnerability scanning workload
+      memory: 1Gi  # Baseline for vulnerability scanning workload
 
   # Liveness probe - checks if the process is alive
   # Note: initialDelaySeconds must be long enough for database download (60-90s on first startup)
