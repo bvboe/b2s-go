@@ -2,11 +2,12 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 )
 
-const currentSchemaVersion = 23
+const currentSchemaVersion = 25
 
 type migration struct {
 	version int
@@ -134,6 +135,11 @@ var migrations = []migration{
 		version: 24,
 		name:    "add_architecture_column",
 		up:      migrateToV24,
+	},
+	{
+		version: 25,
+		name:    "populate_architecture_from_existing_sboms",
+		up:      migrateToV25,
 	},
 }
 
@@ -1734,5 +1740,62 @@ func migrateToV24(conn *sql.DB) error {
 
 	log.Println("Migration v24: Successfully added architecture column")
 	log.Println("  - architecture: CPU architecture of the image (e.g., amd64, arm64)")
+	return nil
+}
+
+// migrateToV25 populates architecture from existing SBOMs
+// This extracts architecture from source.metadata.architecture in the SBOM JSON
+func migrateToV25(conn *sql.DB) error {
+	log.Println("Migration v25: Populating architecture from existing SBOMs...")
+
+	// Query all images with SBOM but no architecture
+	rows, err := conn.Query(`
+		SELECT id, sbom FROM container_images
+		WHERE sbom IS NOT NULL AND sbom != '' AND (architecture IS NULL OR architecture = '')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query images: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	// Structure to extract architecture from SBOM
+	type sbomSource struct {
+		Metadata struct {
+			Architecture string `json:"architecture"`
+		} `json:"metadata"`
+	}
+	type sbomDoc struct {
+		Source sbomSource `json:"source"`
+	}
+
+	updated := 0
+	for rows.Next() {
+		var id int64
+		var sbomJSON string
+		if err := rows.Scan(&id, &sbomJSON); err != nil {
+			log.Printf("Warning: Failed to scan row: %v", err)
+			continue
+		}
+
+		var doc sbomDoc
+		if err := json.Unmarshal([]byte(sbomJSON), &doc); err != nil {
+			log.Printf("Warning: Failed to parse SBOM for image %d: %v", id, err)
+			continue
+		}
+
+		arch := doc.Source.Metadata.Architecture
+		if arch == "" {
+			continue
+		}
+
+		_, err = conn.Exec(`UPDATE container_images SET architecture = ? WHERE id = ?`, arch, id)
+		if err != nil {
+			log.Printf("Warning: Failed to update architecture for image %d: %v", id, err)
+			continue
+		}
+		updated++
+	}
+
+	log.Printf("Migration v25: Updated architecture for %d images", updated)
 	return nil
 }

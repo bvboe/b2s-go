@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	// Import SQLite driver for syft RPM database parsing
 	// Syft requires this for scanning images with RPM packages (RHEL, CentOS, Fedora, etc.)
@@ -345,10 +347,88 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 		return nil, fmt.Errorf("failed to encode SBOM to JSON: %w", err)
 	}
 
+	// Get architecture from image config and inject into SBOM
+	// Since we scan a mounted directory, syft doesn't have access to image metadata
+	arch, os := c.getImagePlatform(ctx, img)
+	if arch != "" {
+		sbomBytes, err = injectPlatformIntoSBOM(sbomBytes, arch, os)
+		if err != nil {
+			log.Printf("Warning: failed to inject platform into SBOM: %v", err)
+			// Continue with original SBOM
+		} else {
+			log.Printf("Injected platform into SBOM: arch=%s, os=%s", arch, os)
+		}
+	}
+
 	log.Printf("Successfully generated SBOM for %s (%d bytes, %d packages)",
 		imageRef, len(sbomBytes), s.Artifacts.Packages.PackageCount())
 
 	return sbomBytes, nil
+}
+
+// getImagePlatform extracts architecture and OS from image config
+func (c *ContainerDClient) getImagePlatform(ctx context.Context, img containerd.Image) (arch, os string) {
+	// Get the image config which contains platform info
+	configDesc, err := img.Config(ctx)
+	if err != nil {
+		log.Printf("Warning: failed to get image config: %v", err)
+		return "", ""
+	}
+
+	// Read the config blob
+	contentStore := c.client.ContentStore()
+	configBlob, err := contentStore.ReaderAt(ctx, configDesc)
+	if err != nil {
+		log.Printf("Warning: failed to read config blob: %v", err)
+		return "", ""
+	}
+	defer func() { _ = configBlob.Close() }()
+
+	configData := make([]byte, configDesc.Size)
+	if _, err := configBlob.ReadAt(configData, 0); err != nil {
+		log.Printf("Warning: failed to read config data: %v", err)
+		return "", ""
+	}
+
+	// Parse OCI image config
+	var imgConfig ocispec.Image
+	if err := json.Unmarshal(configData, &imgConfig); err != nil {
+		log.Printf("Warning: failed to parse image config: %v", err)
+		return "", ""
+	}
+
+	return imgConfig.Architecture, imgConfig.OS
+}
+
+// injectPlatformIntoSBOM modifies the SBOM JSON to include architecture and OS
+// in source.metadata, matching the format syft uses for image scans
+func injectPlatformIntoSBOM(sbomBytes []byte, arch, os string) ([]byte, error) {
+	var sbom map[string]interface{}
+	if err := json.Unmarshal(sbomBytes, &sbom); err != nil {
+		return nil, fmt.Errorf("failed to parse SBOM: %w", err)
+	}
+
+	// Get or create source.metadata
+	source, ok := sbom["source"].(map[string]interface{})
+	if !ok {
+		source = make(map[string]interface{})
+		sbom["source"] = source
+	}
+
+	metadata, ok := source["metadata"].(map[string]interface{})
+	if !ok {
+		metadata = make(map[string]interface{})
+		source["metadata"] = metadata
+	}
+
+	// Inject architecture and OS
+	metadata["architecture"] = arch
+	if os != "" {
+		metadata["os"] = os
+	}
+
+	// Re-encode
+	return json.Marshal(sbom)
 }
 
 // Close closes the ContainerD client

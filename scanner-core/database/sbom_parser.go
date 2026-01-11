@@ -43,21 +43,16 @@ func (p SyftPackage) MarshalJSON() ([]byte, error) {
 	return p.Raw, nil
 }
 
-// SyftImageConfig represents the image configuration from Syft SBOM
-type SyftImageConfig struct {
+// SyftImageMetadata represents the image metadata from Syft SBOM
+type SyftImageMetadata struct {
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
 }
 
-// SyftImageTarget represents the target image metadata from Syft SBOM
-type SyftImageTarget struct {
-	Config SyftImageConfig `json:"config"`
-}
-
 // SyftSource represents the source metadata from Syft SBOM
 type SyftSource struct {
-	Type   string          `json:"type"`
-	Target SyftImageTarget `json:"target"`
+	Type     string            `json:"type"`
+	Metadata SyftImageMetadata `json:"metadata"`
 }
 
 // SyftSBOM represents a Syft SBOM document
@@ -282,8 +277,8 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	}
 
 	// Update container_images with architecture information if available
-	if sbom.Source.Target.Config.Architecture != "" {
-		arch := sbom.Source.Target.Config.Architecture
+	if sbom.Source.Metadata.Architecture != "" {
+		arch := sbom.Source.Metadata.Architecture
 		log.Printf("Extracted architecture info for image_id=%d: %s", imageID, arch)
 
 		_, err = tx.Exec(`
