@@ -244,3 +244,155 @@ func TestNewDatabaseUpdaterWithConfig(t *testing.T) {
 		t.Errorf("Expected LatestURL '%s', got '%s'", cfg.LatestURL, du.distCfg.LatestURL)
 	}
 }
+
+// TestDatabaseUpdater_ShouldUseActualDbTimestamp is a TDD test that FAILS with the current
+// implementation and will PASS once we fix the stale timestamp bug.
+//
+// The bug: grype.LoadVulnerabilityDB returns a stale timestamp from grype_db_state.json
+// instead of reading the actual Built timestamp from vulnerability.db.
+//
+// The fix: After loading, re-read the database description to get the actual timestamp.
+//
+// This test verifies that GetCurrentVersion returns the timestamp from the actual
+// database file, not from what the loader returns.
+func TestDatabaseUpdater_ShouldUseActualDbTimestamp(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	du, err := NewDatabaseUpdater(tmpDir)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdater failed: %v", err)
+	}
+
+	// Timestamps representing the bug scenario
+	staleTimestamp := time.Date(2026, 1, 8, 8, 20, 13, 0, time.UTC)  // What loader returns (stale)
+	actualTimestamp := time.Date(2026, 1, 10, 8, 19, 2, 0, time.UTC) // What's in the actual db file
+
+	dbPath := filepath.Join(tmpDir, "grype", "6", "vulnerability.db")
+
+	// Mock loader returns stale timestamp (simulating the grype bug)
+	// but we also set up a mock description reader that returns the actual timestamp
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		return &DatabaseStatus{
+			Built:         staleTimestamp, // Stale! The bug we're fixing.
+			SchemaVersion: "v6.1.3",
+			Path:          dbPath,
+		}, nil
+	})
+
+	// Mock the description reader to return the actual timestamp
+	// (simulating what v6.ReadDescription would return from the real db file)
+	du.SetDescriptionReader(func(path string) (time.Time, error) {
+		return actualTimestamp, nil
+	})
+
+	// Call CheckForUpdates
+	_, err = du.CheckForUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("CheckForUpdates failed: %v", err)
+	}
+
+	// THE KEY ASSERTION: GetCurrentVersion should return the ACTUAL timestamp
+	// from the database file, not the stale timestamp from the loader.
+	version := du.GetCurrentVersion()
+	if version == nil {
+		t.Fatal("Version should not be nil")
+	}
+
+	// This test FAILS with current implementation (returns staleTimestamp)
+	// This test PASSES after fix (returns actualTimestamp)
+	if !version.Built.Equal(actualTimestamp) {
+		t.Errorf("GetCurrentVersion should return actual db timestamp %v, got %v (stale from loader)",
+			actualTimestamp, version.Built)
+	}
+}
+
+// TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale is a TDD test that
+// FAILS with current implementation and PASSES after fix.
+//
+// Scenario:
+// 1. First call: db doesn't exist, loader returns Jan 8, stored as current
+// 2. Second call: db now exists with Jan 10, but loader still returns Jan 8 (bug)
+// 3. Expected: hasChanged=true because actual db (Jan 10) != previous (Jan 8)
+// 4. Current bug: hasChanged=false because loader(Jan 8) == previous(Jan 8)
+func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	du, err := NewDatabaseUpdater(tmpDir)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdater failed: %v", err)
+	}
+
+	oldTimestamp := time.Date(2026, 1, 8, 8, 20, 13, 0, time.UTC)
+	newTimestamp := time.Date(2026, 1, 10, 8, 19, 2, 0, time.UTC)
+
+	grypeDir := filepath.Join(tmpDir, "grype", "6")
+	dbPath := filepath.Join(grypeDir, "vulnerability.db")
+
+	descReaderCalls := 0
+
+	// Loader always returns old timestamp (the bug)
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		return &DatabaseStatus{
+			Built:         oldTimestamp, // Always stale
+			SchemaVersion: "v6.1.3",
+			Path:          dbPath,
+		}, nil
+	})
+
+	// Description reader simulates the actual db file content
+	du.SetDescriptionReader(func(path string) (time.Time, error) {
+		descReaderCalls++
+		if descReaderCalls == 1 {
+			// First read: old database
+			return oldTimestamp, nil
+		}
+		// After "update": new database
+		return newTimestamp, nil
+	})
+
+	// First call: establishes baseline (no db file exists yet)
+	hasChanged, err := du.CheckForUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("First CheckForUpdates failed: %v", err)
+	}
+	if hasChanged {
+		t.Error("First call should return hasChanged=false (initial)")
+	}
+
+	// Verify baseline is stored
+	version := du.GetCurrentVersion()
+	if version == nil || !version.Built.Equal(oldTimestamp) {
+		t.Fatalf("Expected baseline timestamp %v, got %v", oldTimestamp, version)
+	}
+
+	// Simulate: database file now exists (after first download)
+	// This makes dbExisted=true on the second call
+	if err := os.MkdirAll(grypeDir, 0755); err != nil {
+		t.Fatalf("Failed to create grype dir: %v", err)
+	}
+	if err := os.WriteFile(dbPath, []byte("placeholder"), 0644); err != nil {
+		t.Fatalf("Failed to create placeholder db file: %v", err)
+	}
+
+	// Second call: db file now exists with newTimestamp, but loader returns oldTimestamp
+	hasChanged, err = du.CheckForUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("Second CheckForUpdates failed: %v", err)
+	}
+
+	// THE KEY ASSERTION: Should detect the change even though loader returns stale data
+	// This test FAILS with current implementation (hasChanged=false)
+	// This test PASSES after fix (hasChanged=true)
+	if !hasChanged {
+		t.Error("Should detect database change even when loader returns stale timestamp")
+		t.Logf("Loader returned: %v", oldTimestamp)
+		t.Logf("Actual db has: %v", newTimestamp)
+		t.Log("Fix: Re-read db description after loader completes to get actual timestamp")
+	}
+
+	// Verify the in-memory version was updated to the actual timestamp
+	version = du.GetCurrentVersion()
+	if version == nil || !version.Built.Equal(newTimestamp) {
+		t.Errorf("Expected updated timestamp %v, got %v", newTimestamp, version.Built)
+	}
+}

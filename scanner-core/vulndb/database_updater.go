@@ -20,6 +20,10 @@ import (
 // This allows mocking in tests
 type DatabaseLoader func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error)
 
+// DescriptionReader is the function signature for reading the database description
+// This allows mocking in tests to simulate reading the actual db file timestamp
+type DescriptionReader func(dbPath string) (time.Time, error)
+
 // DatabaseStatus mirrors the relevant fields from grype's ProviderStatus
 type DatabaseStatus struct {
 	Built         time.Time
@@ -42,12 +46,13 @@ func defaultDatabaseLoader(distCfg distribution.Config, installCfg installation.
 
 // DatabaseUpdater uses grype's native update mechanism to check for database updates
 type DatabaseUpdater struct {
-	dbRootDir      string
-	distCfg        distribution.Config
-	installCfg     installation.Config
-	loader         DatabaseLoader  // injectable for testing
-	mu             sync.RWMutex
-	currentVersion *DatabaseStatus // in-memory current version for metrics
+	dbRootDir         string
+	distCfg           distribution.Config
+	installCfg        installation.Config
+	loader            DatabaseLoader    // injectable for testing
+	descriptionReader DescriptionReader // injectable for testing (reads actual db timestamp)
+	mu                sync.RWMutex
+	currentVersion    *DatabaseStatus // in-memory current version for metrics
 }
 
 // DatabaseUpdaterConfig holds optional configuration for DatabaseUpdater
@@ -100,6 +105,12 @@ func NewDatabaseUpdaterWithConfig(dbRootDir string, cfg DatabaseUpdaterConfig) (
 // SetLoader sets a custom database loader (for testing)
 func (du *DatabaseUpdater) SetLoader(loader DatabaseLoader) {
 	du.loader = loader
+}
+
+// SetDescriptionReader sets a custom description reader (for testing)
+// This allows tests to mock the actual database file timestamp
+func (du *DatabaseUpdater) SetDescriptionReader(reader DescriptionReader) {
+	du.descriptionReader = reader
 }
 
 // GetCurrentVersion returns the current database version from memory (thread-safe)
@@ -203,24 +214,56 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("failed to update vulnerability database: %w", err)
 	}
 
-	log.Printf("[db-updater] Database ready: built=%s, schema=%s (took %v)",
+	log.Printf("[db-updater] Loader returned: built=%s, schema=%s (took %v)",
 		dbStatus.Built.Format(time.RFC3339), dbStatus.SchemaVersion,
 		time.Since(startTime).Round(time.Millisecond))
 
-	// Store current version in memory for metrics
-	du.currentVersion = dbStatus
+	// 3. Re-read the actual database timestamp from the file
+	// This fixes a bug where grype.LoadVulnerabilityDB returns a stale timestamp
+	// from grype_db_state.json instead of the actual database file
+	actualBuilt := dbStatus.Built
+	if du.descriptionReader != nil {
+		// Use injected reader (for testing)
+		if t, err := du.descriptionReader(dbPath); err == nil {
+			actualBuilt = t
+		} else {
+			log.Printf("[db-updater] Warning: descriptionReader failed: %v", err)
+		}
+	} else {
+		// Use real v6.ReadDescription
+		if desc, err := v6.ReadDescription(dbPath); err == nil {
+			actualBuilt = desc.Built.Time
+		} else {
+			log.Printf("[db-updater] Warning: failed to re-read database description: %v", err)
+		}
+	}
 
-	// 3. Determine if database changed
+	if !actualBuilt.Equal(dbStatus.Built) {
+		log.Printf("[db-updater] Corrected timestamp: loader=%s, actual=%s",
+			dbStatus.Built.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
+	}
+
+	// Store current version in memory for metrics (using actual timestamp)
+	du.currentVersion = &DatabaseStatus{
+		Built:         actualBuilt,
+		SchemaVersion: dbStatus.SchemaVersion,
+		Path:          dbStatus.Path,
+	}
+
+	log.Printf("[db-updater] Database ready: built=%s, schema=%s",
+		actualBuilt.Format(time.RFC3339), dbStatus.SchemaVersion)
+
+	// 4. Determine if database changed
 	if !dbExisted {
 		// First run - database was just downloaded, nothing to rescan yet
 		log.Printf("[db-updater] Initial database download complete, no rescan needed")
 		return false, nil
 	}
 
-	hasChanged := !dbStatus.Built.Equal(builtBefore)
+	hasChanged := !actualBuilt.Equal(builtBefore)
 	if hasChanged {
 		log.Printf("[db-updater] Database updated: %s -> %s",
-			builtBefore.Format(time.RFC3339), dbStatus.Built.Format(time.RFC3339))
+			builtBefore.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
 	} else {
 		log.Printf("[db-updater] No database changes")
 	}
