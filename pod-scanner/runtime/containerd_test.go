@@ -53,6 +53,38 @@ func TestInjectPlatformIntoSBOM(t *testing.T) {
 			wantArch: "arm64",
 			wantOS:   "linux",
 		},
+		{
+			name:     "invalid json",
+			sbom:     `{invalid`,
+			arch:     "arm64",
+			os:       "linux",
+			wantErr:  true,
+		},
+		{
+			name: "preserves existing fields",
+			sbom: `{
+				"source": {
+					"type": "directory",
+					"metadata": {
+						"path": "/tmp/test"
+					}
+				},
+				"artifacts": [{"name": "test"}],
+				"schema": {"version": "1.0.0"}
+			}`,
+			arch:     "arm64",
+			os:       "linux",
+			wantArch: "arm64",
+			wantOS:   "linux",
+		},
+		{
+			name: "empty os string",
+			sbom: `{"source": {"type": "directory"}}`,
+			arch:     "amd64",
+			os:       "",
+			wantArch: "amd64",
+			wantOS:   "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -86,8 +118,15 @@ func TestInjectPlatformIntoSBOM(t *testing.T) {
 				t.Errorf("architecture = %v, want %v", got, tt.wantArch)
 			}
 
-			if got := metadata["os"]; got != tt.wantOS {
-				t.Errorf("os = %v, want %v", got, tt.wantOS)
+			if tt.wantOS != "" {
+				if got := metadata["os"]; got != tt.wantOS {
+					t.Errorf("os = %v, want %v", got, tt.wantOS)
+				}
+			} else {
+				// OS should not be set if empty
+				if _, exists := metadata["os"]; exists {
+					t.Errorf("os should not be set when empty")
+				}
 			}
 		})
 	}
