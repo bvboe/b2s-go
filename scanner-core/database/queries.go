@@ -373,14 +373,15 @@ func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
 
 // ScannedContainerInstance represents a container instance for metrics
 type ScannedContainerInstance struct {
-	Namespace  string `json:"namespace"`
-	Pod        string `json:"pod"`
-	Container  string `json:"container"`
-	NodeName   string `json:"node_name"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Digest     string `json:"digest"`
-	OSName     string `json:"os_name"`
+	Namespace    string `json:"namespace"`
+	Pod          string `json:"pod"`
+	Container    string `json:"container"`
+	NodeName     string `json:"node_name"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
+	Digest       string `json:"digest"`
+	OSName       string `json:"os_name"`
+	Architecture string `json:"architecture"`
 }
 
 // GetScannedContainerInstances returns all container instances where scan is completed
@@ -394,7 +395,8 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 			ci.repository,
 			ci.tag,
 			img.digest,
-			COALESCE(img.os_name, '') as os_name
+			COALESCE(img.os_name, '') as os_name,
+			COALESCE(img.architecture, '') as architecture
 		FROM container_instances ci
 		JOIN container_images img ON ci.image_id = img.id
 		WHERE img.status = 'completed'
@@ -421,6 +423,7 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 			&instance.Tag,
 			&instance.Digest,
 			&instance.OSName,
+			&instance.Architecture,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan container instance row: %w", err)

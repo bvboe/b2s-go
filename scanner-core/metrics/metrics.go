@@ -219,6 +219,7 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 				"pod":                                     instance.Pod,
 				"container":                               instance.Container,
 				"distro":                                  instance.OSName,
+				"architecture":                            instance.Architecture,
 				"image_repo":                              instance.Repository,
 				"image_tag":                               instance.Tag,
 				"image_digest":                            instance.Digest,

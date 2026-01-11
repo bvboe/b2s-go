@@ -130,6 +130,11 @@ var migrations = []migration{
 		name:    "add_metric_staleness_table",
 		up:      migrateToV23,
 	},
+	{
+		version: 24,
+		name:    "add_architecture_column",
+		up:      migrateToV24,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -1711,5 +1716,23 @@ func migrateToV23(conn *sql.DB) error {
 	log.Println("  - key: Storage key (e.g., 'metrics')")
 	log.Println("  - data: JSON blob containing metric_key -> last_seen_timestamp map")
 	log.Println("  - updated_at: Last modification timestamp")
+	return nil
+}
+
+// migrateToV24 adds architecture column to track CPU architecture of scanned images
+// This is extracted from the SBOM (Syft) source.target metadata
+func migrateToV24(conn *sql.DB) error {
+	log.Println("Migration v24: Adding architecture column to container_images...")
+
+	// Add architecture column to track the CPU architecture (e.g., amd64, arm64)
+	_, err := conn.Exec(`
+		ALTER TABLE container_images ADD COLUMN architecture TEXT
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add architecture column: %w", err)
+	}
+
+	log.Println("Migration v24: Successfully added architecture column")
+	log.Println("  - architecture: CPU architecture of the image (e.g., amd64, arm64)")
 	return nil
 }

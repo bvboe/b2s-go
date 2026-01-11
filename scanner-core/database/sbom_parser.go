@@ -43,9 +43,27 @@ func (p SyftPackage) MarshalJSON() ([]byte, error) {
 	return p.Raw, nil
 }
 
+// SyftImageConfig represents the image configuration from Syft SBOM
+type SyftImageConfig struct {
+	Architecture string `json:"architecture"`
+	OS           string `json:"os"`
+}
+
+// SyftImageTarget represents the target image metadata from Syft SBOM
+type SyftImageTarget struct {
+	Config SyftImageConfig `json:"config"`
+}
+
+// SyftSource represents the source metadata from Syft SBOM
+type SyftSource struct {
+	Type   string          `json:"type"`
+	Target SyftImageTarget `json:"target"`
+}
+
 // SyftSBOM represents a Syft SBOM document
 type SyftSBOM struct {
 	Artifacts []SyftPackage `json:"artifacts"`
+	Source    SyftSource    `json:"source"`
 }
 
 // GrypeMatch represents a vulnerability match from Grype
@@ -261,6 +279,21 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 		}
 
 		totalPackages++
+	}
+
+	// Update container_images with architecture information if available
+	if sbom.Source.Target.Config.Architecture != "" {
+		arch := sbom.Source.Target.Config.Architecture
+		log.Printf("Extracted architecture info for image_id=%d: %s", imageID, arch)
+
+		_, err = tx.Exec(`
+			UPDATE container_images
+			SET architecture = ?
+			WHERE id = ?
+		`, arch, imageID)
+		if err != nil {
+			log.Printf("Warning: Failed to update container_images with architecture info: %v", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
