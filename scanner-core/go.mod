@@ -6,6 +6,7 @@ require (
 	github.com/anchore/clio v0.0.0-20251028140840-721eea5390a4
 	github.com/anchore/grype v0.104.4
 	github.com/google/uuid v1.6.0
+	github.com/mattn/go-sqlite3 v1.14.23
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.39.0

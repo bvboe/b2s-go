@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 25
+const currentSchemaVersion = 26
 
 type migration struct {
 	version int
@@ -128,7 +128,7 @@ var migrations = []migration{
 	},
 	{
 		version: 23,
-		name:    "add_metric_staleness_table",
+		name:    "add_metric_staleness_table", // renamed to app_state in v26
 		up:      migrateToV23,
 	},
 	{
@@ -140,6 +140,11 @@ var migrations = []migration{
 		version: 25,
 		name:    "populate_architecture_from_existing_sboms",
 		up:      migrateToV25,
+	},
+	{
+		version: 26,
+		name:    "rename_metric_staleness_to_app_state",
+		up:      migrateToV26,
 	},
 }
 
@@ -1807,3 +1812,18 @@ func migrateToV25(conn *sql.DB) error {
 	log.Printf("Migration v25: Updated architecture for %d images", len(updates))
 	return nil
 }
+
+// migrateToV26 renames metric_staleness table to app_state
+// This table is now used for general application state storage, not just metric staleness
+func migrateToV26(conn *sql.DB) error {
+	log.Println("Migration v26: Renaming metric_staleness table to app_state...")
+
+	_, err := conn.Exec(`ALTER TABLE metric_staleness RENAME TO app_state`)
+	if err != nil {
+		return fmt.Errorf("failed to rename metric_staleness to app_state: %w", err)
+	}
+
+	log.Println("Migration v26: Successfully renamed metric_staleness to app_state")
+	return nil
+}
+

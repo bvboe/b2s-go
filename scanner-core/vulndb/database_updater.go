@@ -2,6 +2,7 @@ package vulndb
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,7 @@ import (
 	v6 "github.com/anchore/grype/grype/db/v6"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
+	_ "github.com/mattn/go-sqlite3" // SQLite driver for direct DB access
 )
 
 // DatabaseLoader is the function signature for loading the vulnerability database
@@ -24,11 +26,47 @@ type DatabaseLoader func(distCfg distribution.Config, installCfg installation.Co
 // This allows mocking in tests to simulate reading the actual db file timestamp
 type DescriptionReader func(dbPath string) (time.Time, error)
 
+// TimestampStore is the interface for persisting the last known grype DB timestamp
+// This is used to track database changes across process restarts
+type TimestampStore interface {
+	LoadGrypeDBTimestamp() (time.Time, error)
+	SaveGrypeDBTimestamp(t time.Time) error
+}
+
 // DatabaseStatus mirrors the relevant fields from grype's ProviderStatus
 type DatabaseStatus struct {
 	Built         time.Time
 	SchemaVersion string
 	Path          string
+}
+
+// readGrypeDBTimestampFromSQLite reads the database build timestamp directly from
+// the grype SQLite database file, bypassing grype's library which may cache stale values.
+// This is the authoritative source for the database timestamp.
+func readGrypeDBTimestampFromSQLite(dbPath string) (time.Time, error) {
+	db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to open grype database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var builtStr string
+	err = db.QueryRow("SELECT build_timestamp FROM db_metadata LIMIT 1").Scan(&builtStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read db_metadata: %w", err)
+	}
+
+	// Parse the timestamp - grype stores it as "2026-01-13 08:06:41+00:00"
+	t, err := time.Parse("2006-01-02 15:04:05-07:00", builtStr)
+	if err != nil {
+		// Try alternative format
+		t, err = time.Parse("2006-01-02 15:04:05+00:00", builtStr)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", builtStr, err)
+		}
+	}
+
+	return t.UTC(), nil
 }
 
 // defaultDatabaseLoader wraps grype.LoadVulnerabilityDB
@@ -51,6 +89,7 @@ type DatabaseUpdater struct {
 	installCfg        installation.Config
 	loader            DatabaseLoader    // injectable for testing
 	descriptionReader DescriptionReader // injectable for testing (reads actual db timestamp)
+	timestampStore    TimestampStore    // persistent storage for tracking DB changes
 	mu                sync.RWMutex
 	currentVersion    *DatabaseStatus // in-memory current version for metrics
 }
@@ -60,6 +99,9 @@ type DatabaseUpdaterConfig struct {
 	// LatestURL overrides the default grype database feed URL
 	// If empty, uses the official Anchore feed
 	LatestURL string
+	// TimestampStore is used to persist the last known grype DB timestamp
+	// This enables reliable change detection across process restarts
+	TimestampStore TimestampStore
 }
 
 // NewDatabaseUpdater creates a new database updater
@@ -95,11 +137,17 @@ func NewDatabaseUpdaterWithConfig(dbRootDir string, cfg DatabaseUpdaterConfig) (
 	installCfg.DBRootDir = grypeDir
 
 	return &DatabaseUpdater{
-		dbRootDir:  dbRootDir,
-		distCfg:    distCfg,
-		installCfg: installCfg,
-		loader:     defaultDatabaseLoader,
+		dbRootDir:      dbRootDir,
+		distCfg:        distCfg,
+		installCfg:     installCfg,
+		loader:         defaultDatabaseLoader,
+		timestampStore: cfg.TimestampStore,
 	}, nil
+}
+
+// SetTimestampStore sets the timestamp store for persistent tracking
+func (du *DatabaseUpdater) SetTimestampStore(store TimestampStore) {
+	du.timestampStore = store
 }
 
 // SetLoader sets a custom database loader (for testing)
@@ -143,18 +191,28 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	grypeDir := filepath.Join(du.dbRootDir, "grype")
 	dbPath := filepath.Join(grypeDir, "6", "vulnerability.db")
 
-	// 1. Read current Built timestamp (if database exists)
-	var builtBefore time.Time
-	dbExisted := false
+	// 1. Get the last known timestamp from persistent storage
+	// This is more reliable than reading from the grype library which may cache stale values
+	var lastKnownTimestamp time.Time
+	if du.timestampStore != nil {
+		if t, err := du.timestampStore.LoadGrypeDBTimestamp(); err == nil && !t.IsZero() {
+			lastKnownTimestamp = t
+			log.Printf("[db-updater] Last known DB timestamp (from persistent store): %s",
+				lastKnownTimestamp.Format(time.RFC3339))
+		} else if err != nil {
+			log.Printf("[db-updater] Warning: failed to load last known timestamp: %v", err)
+		}
+	}
 
+	// 2. Check if database file exists and if update is available
+	dbExisted := false
 	if _, err := os.Stat(dbPath); err == nil {
 		dbExisted = true
 		desc, err := v6.ReadDescription(dbPath)
 		if err != nil {
 			log.Printf("[db-updater] Warning: failed to read database description: %v", err)
 		} else {
-			builtBefore = desc.Built.Time
-			log.Printf("[db-updater] Current database: built=%s, schema=%s",
+			log.Printf("[db-updater] Current database file: built=%s, schema=%s",
 				desc.Built.Format(time.RFC3339), desc.SchemaVersion.String())
 
 			// Check if a newer archive is available
@@ -186,7 +244,7 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		log.Printf("[db-updater] No existing database found, will download")
 	}
 
-	// 2. Load/download the database
+	// 3. Load/download the database
 	startTime := time.Now()
 
 	// Progress indicator for long downloads
@@ -218,29 +276,35 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		dbStatus.Built.Format(time.RFC3339), dbStatus.SchemaVersion,
 		time.Since(startTime).Round(time.Millisecond))
 
-	// 3. Re-read the actual database timestamp from the file
-	// This fixes a bug where grype.LoadVulnerabilityDB returns a stale timestamp
-	// from grype_db_state.json instead of the actual database file
-	actualBuilt := dbStatus.Built
+	// 4. Read the actual database timestamp directly from SQLite
+	// This bypasses grype's library which may cache stale values
+	var actualBuilt time.Time
 	if du.descriptionReader != nil {
 		// Use injected reader (for testing)
 		if t, err := du.descriptionReader(dbPath); err == nil {
 			actualBuilt = t
 		} else {
 			log.Printf("[db-updater] Warning: descriptionReader failed: %v", err)
+			actualBuilt = dbStatus.Built
 		}
 	} else {
-		// Use real v6.ReadDescription
-		if desc, err := v6.ReadDescription(dbPath); err == nil {
-			actualBuilt = desc.Built.Time
+		// Read directly from SQLite - this is the authoritative source
+		if t, err := readGrypeDBTimestampFromSQLite(dbPath); err == nil {
+			actualBuilt = t
+			if !actualBuilt.Equal(dbStatus.Built) {
+				log.Printf("[db-updater] Corrected timestamp: loader=%s, actual=%s",
+					dbStatus.Built.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
+			}
 		} else {
-			log.Printf("[db-updater] Warning: failed to re-read database description: %v", err)
+			log.Printf("[db-updater] Warning: failed to read timestamp from SQLite: %v", err)
+			// Fall back to v6.ReadDescription
+			if desc, err := v6.ReadDescription(dbPath); err == nil {
+				actualBuilt = desc.Built.Time
+			} else {
+				log.Printf("[db-updater] Warning: failed to re-read database description: %v", err)
+				actualBuilt = dbStatus.Built
+			}
 		}
-	}
-
-	if !actualBuilt.Equal(dbStatus.Built) {
-		log.Printf("[db-updater] Corrected timestamp: loader=%s, actual=%s",
-			dbStatus.Built.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
 	}
 
 	// Store current version in memory for metrics (using actual timestamp)
@@ -253,19 +317,37 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	log.Printf("[db-updater] Database ready: built=%s, schema=%s",
 		actualBuilt.Format(time.RFC3339), dbStatus.SchemaVersion)
 
-	// 4. Determine if database changed
-	if !dbExisted {
+	// 5. Determine if database changed by comparing against persistent timestamp
+	// This is more reliable than comparing against in-memory values which may be stale
+	var hasChanged bool
+	if !dbExisted && lastKnownTimestamp.IsZero() {
 		// First run - database was just downloaded, nothing to rescan yet
 		log.Printf("[db-updater] Initial database download complete, no rescan needed")
-		return false, nil
+		hasChanged = false
+	} else if lastKnownTimestamp.IsZero() {
+		// Database existed but we have no persistent record - this is a migration scenario
+		// Don't trigger rescan, just record the current timestamp
+		log.Printf("[db-updater] No persistent timestamp record, initializing tracking")
+		hasChanged = false
+	} else {
+		// Compare actual timestamp against persisted last known timestamp
+		hasChanged = !actualBuilt.Equal(lastKnownTimestamp)
+		if hasChanged {
+			log.Printf("[db-updater] Database updated: %s -> %s",
+				lastKnownTimestamp.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
+		} else {
+			log.Printf("[db-updater] No database changes (persistent comparison)")
+		}
 	}
 
-	hasChanged := !actualBuilt.Equal(builtBefore)
-	if hasChanged {
-		log.Printf("[db-updater] Database updated: %s -> %s",
-			builtBefore.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
-	} else {
-		log.Printf("[db-updater] No database changes")
+	// 6. Save the current timestamp to persistent storage
+	if du.timestampStore != nil {
+		if err := du.timestampStore.SaveGrypeDBTimestamp(actualBuilt); err != nil {
+			log.Printf("[db-updater] Warning: failed to save timestamp to persistent store: %v", err)
+		} else {
+			log.Printf("[db-updater] Saved DB timestamp to persistent store: %s",
+				actualBuilt.Format(time.RFC3339))
+		}
 	}
 
 	return hasChanged, nil

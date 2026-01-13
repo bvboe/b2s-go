@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
 
 var (
@@ -17,18 +19,24 @@ var (
 // Mock implementations for testing
 
 type MockDatabaseUpdater struct {
-	hasChanged bool
-	err        error
+	hasChanged     bool
+	err            error
+	currentVersion *vulndb.DatabaseStatus
 }
 
 func (m *MockDatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	return m.hasChanged, m.err
 }
 
+func (m *MockDatabaseUpdater) GetCurrentVersion() *vulndb.DatabaseStatus {
+	return m.currentVersion
+}
+
 type MockDatabase struct {
-	images    []database.ContainerImage
-	instances map[string]*database.ContainerInstanceRow
-	err       error
+	images             []database.ContainerImage
+	imagesNeedingRescan []database.ContainerImage
+	instances          map[string]*database.ContainerInstanceRow
+	err                error
 }
 
 func (m *MockDatabase) GetImagesByStatus(status database.Status) ([]database.ContainerImage, error) {
@@ -46,6 +54,17 @@ func (m *MockDatabase) GetFirstInstanceForImage(digest string) (*database.Contai
 		return instance, nil
 	}
 	return nil, errNotFound
+}
+
+func (m *MockDatabase) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]database.ContainerImage, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	// If imagesNeedingRescan is explicitly set, use it; otherwise fall back to images
+	if m.imagesNeedingRescan != nil {
+		return m.imagesNeedingRescan, nil
+	}
+	return m.images, nil
 }
 
 type MockScanQueue struct {
@@ -70,10 +89,17 @@ func (m *MockScanQueue) EnqueueForceScan(image containers.ImageID, nodeName stri
 	})
 }
 
-// Test: database has changed, rescans triggered
+// Test: images needing rescan are enqueued
 func TestRescanDatabaseJob_Integration(t *testing.T) {
-	// Setup: mock database updater that returns "changed"
-	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
+	// Setup: mock database updater with a current version
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		},
+	}
 
 	// Setup: mock database with completed images
 	mockDB := &MockDatabase{
@@ -168,10 +194,13 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 	}
 }
 
-// Test: no changes detected, no rescans triggered
-func TestRescanDatabaseJob_NoChanges(t *testing.T) {
-	// Setup: mock database updater that returns "no change"
-	mockDBUpdater := &MockDatabaseUpdater{hasChanged: false}
+// Test: no grype database available, no rescans triggered
+func TestRescanDatabaseJob_NoGrypeDatabase(t *testing.T) {
+	// Setup: mock database updater with no current version (nil)
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged:     false,
+		currentVersion: nil, // No grype database available
+	}
 
 	// Setup: mock database with completed images
 	mockDB := &MockDatabase{
@@ -195,21 +224,28 @@ func TestRescanDatabaseJob_NoChanges(t *testing.T) {
 		t.Fatalf("Job failed: %v", err)
 	}
 
-	// Verify: no rescans enqueued
+	// Verify: no rescans enqueued (no grype DB to scan with)
 	if len(mockQueue.enqueuedScans) != 0 {
 		t.Errorf("Expected 0 rescans, got %d", len(mockQueue.enqueuedScans))
 	}
 }
 
-// Test: no completed images, job succeeds with no work
-func TestRescanDatabaseJob_NoCompletedImages(t *testing.T) {
-	// Setup: mock database updater that returns "changed"
-	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
+// Test: no images needing rescan, job succeeds with no work
+func TestRescanDatabaseJob_NoImagesNeedingRescan(t *testing.T) {
+	// Setup: mock database updater with current version
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		},
+	}
 
-	// Setup: mock database with NO completed images
+	// Setup: mock database with no images needing rescan
 	mockDB := &MockDatabase{
-		images:    []database.ContainerImage{}, // Empty
-		instances: map[string]*database.ContainerInstanceRow{},
+		imagesNeedingRescan: []database.ContainerImage{}, // Empty - all images up to date
+		instances:           map[string]*database.ContainerInstanceRow{},
 	}
 
 	// Setup: mock scan queue
@@ -232,12 +268,19 @@ func TestRescanDatabaseJob_NoCompletedImages(t *testing.T) {
 
 // Test: missing container instances, orphaned images skipped
 func TestRescanDatabaseJob_MissingInstances(t *testing.T) {
-	// Setup: mock database updater that returns "changed"
-	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
+	// Setup: mock database updater with current version
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		},
+	}
 
-	// Setup: mock database with completed images but missing instances
+	// Setup: mock database with images needing rescan but missing instances
 	mockDB := &MockDatabase{
-		images: []database.ContainerImage{
+		imagesNeedingRescan: []database.ContainerImage{
 			{ID: 1, Digest: "sha256:abc123", Status: "completed"},
 			{ID: 2, Digest: "sha256:def456", Status: "completed"}, // No instance
 			{ID: 3, Digest: "sha256:ghi789", Status: "completed"},
@@ -304,16 +347,23 @@ func TestRescanDatabaseJob_UpdaterError(t *testing.T) {
 	}
 }
 
-// Test: database error when getting images
+// Test: database error when getting images needing rescan
 func TestRescanDatabaseJob_DatabaseError(t *testing.T) {
-	// Setup: mock database updater that returns "changed"
-	mockDBUpdater := &MockDatabaseUpdater{hasChanged: true}
+	// Setup: mock database updater with current version
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		},
+	}
 
 	// Setup: mock database that returns error
 	mockDB := &MockDatabase{
-		images:    nil,
-		instances: nil,
-		err:       errDatabase,
+		imagesNeedingRescan: nil,
+		instances:           nil,
+		err:                 errDatabase,
 	}
 
 	mockQueue := &MockScanQueue{}

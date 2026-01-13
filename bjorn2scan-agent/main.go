@@ -313,7 +313,10 @@ func main() {
 	}
 
 	// Create database updater for grype DB status and rescan job
-	dbUpdater, err := vulndb.NewDatabaseUpdater(grypeCfg.DBRootDir)
+	// Pass the database as TimestampStore for persistent tracking of grype DB changes
+	dbUpdater, err := vulndb.NewDatabaseUpdaterWithConfig(grypeCfg.DBRootDir, vulndb.DatabaseUpdaterConfig{
+		TimestampStore: db,
+	})
 	if err != nil {
 		log.Printf("Warning: failed to create database updater: %v", err)
 	}

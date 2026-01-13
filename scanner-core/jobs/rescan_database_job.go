@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
@@ -14,12 +15,14 @@ import (
 // DatabaseUpdateChecker defines the interface for checking vulnerability database updates
 type DatabaseUpdateChecker interface {
 	CheckForUpdates(ctx context.Context) (bool, error)
+	GetCurrentVersion() *vulndb.DatabaseStatus
 }
 
 // DatabaseInterface defines the interface for database operations needed by RescanDatabaseJob
 type DatabaseInterface interface {
 	GetImagesByStatus(status database.Status) ([]database.ContainerImage, error)
 	GetFirstInstanceForImage(digest string) (*database.ContainerInstanceRow, error)
+	GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]database.ContainerImage, error)
 }
 
 // RescanDatabaseJob triggers a rescan when the vulnerability database is updated
@@ -55,31 +58,35 @@ func (j *RescanDatabaseJob) Name() string {
 func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	log.Printf("[rescan-database] Checking for vulnerability database updates...")
 
-	// Check if database has been updated
-	hasChanged, err := j.dbUpdater.CheckForUpdates(ctx)
+	// Check for and download any available updates
+	// This also updates the persistent timestamp tracking
+	_, err := j.dbUpdater.CheckForUpdates(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
 
-	if !hasChanged {
-		log.Printf("[rescan-database] No database changes detected, skipping rescan")
+	// Get the current grype database version
+	currentVersion := j.dbUpdater.GetCurrentVersion()
+	if currentVersion == nil {
+		log.Printf("[rescan-database] No grype database available, skipping rescan")
 		return nil
 	}
 
-	log.Printf("[rescan-database] Database update detected, triggering rescan of all images")
+	log.Printf("[rescan-database] Current grype DB: built=%s", currentVersion.Built.Format(time.RFC3339))
 
-	// Get all completed images (those that have SBOMs)
-	images, err := j.db.GetImagesByStatus(database.StatusCompleted)
+	// Find images that were scanned with an older grype database (or never tracked)
+	// This is more intelligent than rescanning all images - it only rescans those that need it
+	images, err := j.db.GetImagesNeedingRescan(currentVersion.Built)
 	if err != nil {
-		return fmt.Errorf("failed to get completed images: %w", err)
+		return fmt.Errorf("failed to get images needing rescan: %w", err)
 	}
 
 	if len(images) == 0 {
-		log.Printf("[rescan-database] No completed images found, nothing to rescan")
+		log.Printf("[rescan-database] All images are up-to-date with current grype DB, nothing to rescan")
 		return nil
 	}
 
-	log.Printf("[rescan-database] Found %d images to rescan", len(images))
+	log.Printf("[rescan-database] Found %d images scanned with older grype DB, triggering rescan", len(images))
 
 	// Enqueue force scan for each image
 	rescanned := 0

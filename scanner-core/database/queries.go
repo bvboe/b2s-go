@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 )
 
 // Package represents a package from the packages table
@@ -596,7 +597,7 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 // Returns empty string if no data exists
 func (db *DB) LoadMetricStaleness(key string) (string, error) {
 	var data string
-	err := db.conn.QueryRow(`SELECT data FROM metric_staleness WHERE key = ?`, key).Scan(&data)
+	err := db.conn.QueryRow(`SELECT data FROM app_state WHERE key = ?`, key).Scan(&data)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", nil
@@ -610,11 +611,84 @@ func (db *DB) LoadMetricStaleness(key string) (string, error) {
 // Uses INSERT OR REPLACE to handle both insert and update cases
 func (db *DB) SaveMetricStaleness(key string, data string) error {
 	_, err := db.conn.Exec(`
-		INSERT OR REPLACE INTO metric_staleness (key, data, updated_at)
+		INSERT OR REPLACE INTO app_state (key, data, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 	`, key, data)
 	if err != nil {
 		return fmt.Errorf("failed to save metric staleness: %w", err)
 	}
 	return nil
+}
+
+// grypeDBTimestampKey is the key used to store the grype DB timestamp in app_state table
+const grypeDBTimestampKey = "grype_db_timestamp"
+
+// LoadGrypeDBTimestamp loads the last known grype vulnerability database timestamp
+// Returns zero time if no timestamp has been stored yet
+func (db *DB) LoadGrypeDBTimestamp() (time.Time, error) {
+	var data string
+	err := db.conn.QueryRow(`SELECT data FROM app_state WHERE key = ?`, grypeDBTimestampKey).Scan(&data)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return time.Time{}, nil // No timestamp stored yet
+		}
+		return time.Time{}, fmt.Errorf("failed to load grype DB timestamp: %w", err)
+	}
+	if data == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, data)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse grype DB timestamp: %w", err)
+	}
+	return t, nil
+}
+
+// SaveGrypeDBTimestamp saves the grype vulnerability database timestamp
+func (db *DB) SaveGrypeDBTimestamp(t time.Time) error {
+	_, err := db.conn.Exec(`
+		INSERT OR REPLACE INTO app_state (key, data, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+	`, grypeDBTimestampKey, t.Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("failed to save grype DB timestamp: %w", err)
+	}
+	return nil
+}
+
+// GetImagesNeedingRescan returns completed images that were scanned with an older
+// grype vulnerability database, or have never been scanned with a tracked version.
+// This enables intelligent rescanning when the vulnerability database is updated.
+func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]ContainerImage, error) {
+	if currentGrypeDBBuilt.IsZero() {
+		return nil, nil // No current DB timestamp, can't determine what needs rescanning
+	}
+
+	currentTimestamp := currentGrypeDBBuilt.UTC().Format(time.RFC3339)
+
+	rows, err := db.conn.Query(`
+		SELECT id, digest, created_at, updated_at
+		FROM container_images
+		WHERE scan_status = ?
+		  AND sbom IS NOT NULL
+		  AND sbom != ''
+		  AND (grype_db_built IS NULL OR grype_db_built < ?)
+		ORDER BY created_at DESC
+	`, StatusCompleted.String(), currentTimestamp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query images needing rescan: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var images []ContainerImage
+	for rows.Next() {
+		var img ContainerImage
+		err := rows.Scan(&img.ID, &img.Digest, &img.CreatedAt, &img.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		images = append(images, img)
+	}
+
+	return images, rows.Err()
 }

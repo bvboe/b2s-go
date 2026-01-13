@@ -405,7 +405,10 @@ func main() {
 
 		// Add rescan database job - uses grype's native update mechanism
 		if cfg.JobsRescanDatabaseEnabled {
-			dbUpdater, err := vulndb.NewDatabaseUpdater(grypeCfg.DBRootDir)
+			// Pass the database as TimestampStore for persistent tracking of grype DB changes
+			dbUpdater, err := vulndb.NewDatabaseUpdaterWithConfig(grypeCfg.DBRootDir, vulndb.DatabaseUpdaterConfig{
+				TimestampStore: db,
+			})
 			if err != nil {
 				log.Printf("Warning: failed to create database updater: %v", err)
 			} else {

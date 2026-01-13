@@ -12,6 +12,28 @@ import (
 	"github.com/anchore/grype/grype/db/v6/installation"
 )
 
+// mockTimestampStore implements TimestampStore for testing
+type mockTimestampStore struct {
+	timestamp time.Time
+	loadErr   error
+	saveErr   error
+}
+
+func (m *mockTimestampStore) LoadGrypeDBTimestamp() (time.Time, error) {
+	if m.loadErr != nil {
+		return time.Time{}, m.loadErr
+	}
+	return m.timestamp, nil
+}
+
+func (m *mockTimestampStore) SaveGrypeDBTimestamp(t time.Time) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.timestamp = t
+	return nil
+}
+
 func TestNewDatabaseUpdater(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -306,18 +328,23 @@ func TestDatabaseUpdater_ShouldUseActualDbTimestamp(t *testing.T) {
 	}
 }
 
-// TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale is a TDD test that
-// FAILS with current implementation and PASSES after fix.
+// TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale tests that
+// database changes are detected even when grype's loader returns stale timestamps.
 //
 // Scenario:
-// 1. First call: db doesn't exist, loader returns Jan 8, stored as current
+// 1. First call: db doesn't exist, loader returns Jan 8, stored to persistent store
 // 2. Second call: db now exists with Jan 10, but loader still returns Jan 8 (bug)
-// 3. Expected: hasChanged=true because actual db (Jan 10) != previous (Jan 8)
-// 4. Current bug: hasChanged=false because loader(Jan 8) == previous(Jan 8)
+// 3. Expected: hasChanged=true because actual db (Jan 10) != persistent store (Jan 8)
+// 4. Previous bug: hasChanged=false because comparison used in-memory values
 func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	du, err := NewDatabaseUpdater(tmpDir)
+	// Create a mock timestamp store to simulate persistent storage
+	store := &mockTimestampStore{}
+
+	du, err := NewDatabaseUpdaterWithConfig(tmpDir, DatabaseUpdaterConfig{
+		TimestampStore: store,
+	})
 	if err != nil {
 		t.Fatalf("NewDatabaseUpdater failed: %v", err)
 	}
@@ -330,7 +357,7 @@ func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) 
 
 	descReaderCalls := 0
 
-	// Loader always returns old timestamp (the bug)
+	// Loader always returns old timestamp (simulating grype's caching bug)
 	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
 		return &DatabaseStatus{
 			Built:         oldTimestamp, // Always stale
@@ -359,10 +386,15 @@ func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) 
 		t.Error("First call should return hasChanged=false (initial)")
 	}
 
-	// Verify baseline is stored
+	// Verify baseline is stored in persistent store
+	if !store.timestamp.Equal(oldTimestamp) {
+		t.Fatalf("Expected persistent store to have %v, got %v", oldTimestamp, store.timestamp)
+	}
+
+	// Verify in-memory version is also updated
 	version := du.GetCurrentVersion()
 	if version == nil || !version.Built.Equal(oldTimestamp) {
-		t.Fatalf("Expected baseline timestamp %v, got %v", oldTimestamp, version)
+		t.Fatalf("Expected in-memory timestamp %v, got %v", oldTimestamp, version)
 	}
 
 	// Simulate: database file now exists (after first download)
@@ -380,19 +412,25 @@ func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) 
 		t.Fatalf("Second CheckForUpdates failed: %v", err)
 	}
 
-	// THE KEY ASSERTION: Should detect the change even though loader returns stale data
-	// This test FAILS with current implementation (hasChanged=false)
-	// This test PASSES after fix (hasChanged=true)
+	// THE KEY ASSERTION: Should detect the change by comparing against persistent store
+	// The description reader returns newTimestamp (actual db content)
+	// The persistent store has oldTimestamp (from first call)
+	// Therefore hasChanged should be true
 	if !hasChanged {
 		t.Error("Should detect database change even when loader returns stale timestamp")
 		t.Logf("Loader returned: %v", oldTimestamp)
-		t.Logf("Actual db has: %v", newTimestamp)
-		t.Log("Fix: Re-read db description after loader completes to get actual timestamp")
+		t.Logf("Actual db has (from descReader): %v", newTimestamp)
+		t.Logf("Persistent store has: %v", store.timestamp)
 	}
 
 	// Verify the in-memory version was updated to the actual timestamp
 	version = du.GetCurrentVersion()
 	if version == nil || !version.Built.Equal(newTimestamp) {
 		t.Errorf("Expected updated timestamp %v, got %v", newTimestamp, version.Built)
+	}
+
+	// Verify persistent store was updated
+	if !store.timestamp.Equal(newTimestamp) {
+		t.Errorf("Expected persistent store to have %v, got %v", newTimestamp, store.timestamp)
 	}
 }
