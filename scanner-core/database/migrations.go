@@ -1756,7 +1756,6 @@ func migrateToV25(conn *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("failed to query images: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 
 	// Structure to extract architecture from SBOM
 	type sbomSource struct {
@@ -1768,7 +1767,13 @@ func migrateToV25(conn *sql.DB) error {
 		Source sbomSource `json:"source"`
 	}
 
-	updated := 0
+	// Collect all updates first to avoid holding rows open during updates
+	type update struct {
+		id   int64
+		arch string
+	}
+	var updates []update
+
 	for rows.Next() {
 		var id int64
 		var sbomJSON string
@@ -1784,18 +1789,21 @@ func migrateToV25(conn *sql.DB) error {
 		}
 
 		arch := doc.Source.Metadata.Architecture
-		if arch == "" {
-			continue
+		if arch != "" {
+			updates = append(updates, update{id: id, arch: arch})
 		}
+	}
+	_ = rows.Close()
 
-		_, err = conn.Exec(`UPDATE container_images SET architecture = ? WHERE id = ?`, arch, id)
+	// Now apply updates
+	for _, u := range updates {
+		_, err = conn.Exec(`UPDATE container_images SET architecture = ? WHERE id = ?`, u.arch, u.id)
 		if err != nil {
-			log.Printf("Warning: Failed to update architecture for image %d: %v", id, err)
+			log.Printf("Warning: Failed to update architecture for image %d: %v", u.id, err)
 			continue
 		}
-		updated++
 	}
 
-	log.Printf("Migration v25: Updated architecture for %d images", updated)
+	log.Printf("Migration v25: Updated architecture for %d images", len(updates))
 	return nil
 }

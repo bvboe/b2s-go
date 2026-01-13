@@ -7,6 +7,10 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Add integration tests for database migrations with actual data
+  - Migration v25 caused a deadlock bug that only triggered when the database had existing rows
+  - Unit tests with empty/mock data passed, but production crashed (30k+ restarts)
+  - Need tests that populate the database with realistic data before running migrations
 - [ ] Rerun code-simplifier analysis and address suggestions
   - [ ] High priority: Extract shared SQL filter building logic (~200 lines saved)
   - [ ] High priority: Consolidate CSV export functions (~100 lines saved)
