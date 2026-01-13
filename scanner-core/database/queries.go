@@ -669,7 +669,7 @@ func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]Container
 	rows, err := db.conn.Query(`
 		SELECT id, digest, created_at, updated_at
 		FROM container_images
-		WHERE scan_status = ?
+		WHERE status = ?
 		  AND sbom IS NOT NULL
 		  AND sbom != ''
 		  AND (grype_db_built IS NULL OR grype_db_built < ?)

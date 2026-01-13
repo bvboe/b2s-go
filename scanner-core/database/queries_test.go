@@ -660,3 +660,220 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 
 	t.Logf("Integration test passed: total_risk=%.1f, exploit_count=%d", totalRisk, exploitCount)
 }
+
+// TestGetImagesNeedingRescan tests the intelligent rescan query that finds images
+// scanned with an older grype database version.
+func TestGetImagesNeedingRescan(t *testing.T) {
+	dbPath := "/tmp/test_images_needing_rescan_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = Close(db) }()
+
+	// Current grype DB timestamp
+	currentGrypeDBBuilt := time.Date(2026, 1, 10, 8, 0, 0, 0, time.UTC)
+	oldGrypeDBBuilt := time.Date(2026, 1, 8, 8, 0, 0, 0, time.UTC)
+
+	// Image 1: completed, scanned with OLD grype DB - SHOULD be returned
+	img1 := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "old-scan-pod",
+			Container: "nginx",
+		},
+		Image: containers.ImageID{
+			Repository: "nginx",
+			Tag:        "1.21",
+			Digest:     "sha256:old-scan",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+	_, err = db.AddInstance(img1)
+	if err != nil {
+		t.Fatalf("Failed to add instance 1: %v", err)
+	}
+	err = db.StoreSBOM("sha256:old-scan", []byte(`{"test":"sbom"}`))
+	if err != nil {
+		t.Fatalf("Failed to store SBOM 1: %v", err)
+	}
+	err = db.UpdateStatus("sha256:old-scan", StatusCompleted, "")
+	if err != nil {
+		t.Fatalf("Failed to update status 1: %v", err)
+	}
+	// Set grype_db_built to old timestamp
+	_, err = db.conn.Exec(`UPDATE container_images SET grype_db_built = ? WHERE digest = ?`,
+		oldGrypeDBBuilt.UTC().Format(time.RFC3339), "sha256:old-scan")
+	if err != nil {
+		t.Fatalf("Failed to set grype_db_built for image 1: %v", err)
+	}
+
+	// Image 2: completed, scanned with CURRENT grype DB - should NOT be returned
+	img2 := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "current-scan-pod",
+			Container: "redis",
+		},
+		Image: containers.ImageID{
+			Repository: "redis",
+			Tag:        "7.0",
+			Digest:     "sha256:current-scan",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+	_, err = db.AddInstance(img2)
+	if err != nil {
+		t.Fatalf("Failed to add instance 2: %v", err)
+	}
+	err = db.StoreSBOM("sha256:current-scan", []byte(`{"test":"sbom"}`))
+	if err != nil {
+		t.Fatalf("Failed to store SBOM 2: %v", err)
+	}
+	err = db.UpdateStatus("sha256:current-scan", StatusCompleted, "")
+	if err != nil {
+		t.Fatalf("Failed to update status 2: %v", err)
+	}
+	// Set grype_db_built to current timestamp (same as what we're checking against)
+	_, err = db.conn.Exec(`UPDATE container_images SET grype_db_built = ? WHERE digest = ?`,
+		currentGrypeDBBuilt.UTC().Format(time.RFC3339), "sha256:current-scan")
+	if err != nil {
+		t.Fatalf("Failed to set grype_db_built for image 2: %v", err)
+	}
+
+	// Image 3: completed, NULL grype_db_built (never tracked) - SHOULD be returned
+	img3 := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "never-tracked-pod",
+			Container: "alpine",
+		},
+		Image: containers.ImageID{
+			Repository: "alpine",
+			Tag:        "3.19",
+			Digest:     "sha256:never-tracked",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+	_, err = db.AddInstance(img3)
+	if err != nil {
+		t.Fatalf("Failed to add instance 3: %v", err)
+	}
+	err = db.StoreSBOM("sha256:never-tracked", []byte(`{"test":"sbom"}`))
+	if err != nil {
+		t.Fatalf("Failed to store SBOM 3: %v", err)
+	}
+	err = db.UpdateStatus("sha256:never-tracked", StatusCompleted, "")
+	if err != nil {
+		t.Fatalf("Failed to update status 3: %v", err)
+	}
+	// grype_db_built is NULL by default - don't set it
+
+	// Image 4: pending status (not completed) - should NOT be returned
+	img4 := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "pending-pod",
+			Container: "busybox",
+		},
+		Image: containers.ImageID{
+			Repository: "busybox",
+			Tag:        "latest",
+			Digest:     "sha256:pending",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+	_, err = db.AddInstance(img4)
+	if err != nil {
+		t.Fatalf("Failed to add instance 4: %v", err)
+	}
+	// Don't store SBOM or update status - leave as pending
+
+	// Image 5: completed but no SBOM - should NOT be returned
+	img5 := containers.ContainerInstance{
+		ID: containers.ContainerInstanceID{
+			Namespace: "default",
+			Pod:       "no-sbom-pod",
+			Container: "curl",
+		},
+		Image: containers.ImageID{
+			Repository: "curlimages/curl",
+			Tag:        "latest",
+			Digest:     "sha256:no-sbom",
+		},
+		NodeName:         "worker-1",
+		ContainerRuntime: "containerd",
+	}
+	_, err = db.AddInstance(img5)
+	if err != nil {
+		t.Fatalf("Failed to add instance 5: %v", err)
+	}
+	// Mark as completed but don't store SBOM
+	err = db.UpdateStatus("sha256:no-sbom", StatusCompleted, "")
+	if err != nil {
+		t.Fatalf("Failed to update status 5: %v", err)
+	}
+
+	// Query images needing rescan
+	images, err := db.GetImagesNeedingRescan(currentGrypeDBBuilt)
+	if err != nil {
+		t.Fatalf("GetImagesNeedingRescan failed: %v", err)
+	}
+
+	// Should return 2 images: old-scan and never-tracked
+	if len(images) != 2 {
+		t.Errorf("Expected 2 images needing rescan, got %d", len(images))
+		for _, img := range images {
+			t.Logf("  - %s", img.Digest)
+		}
+	}
+
+	// Verify the correct images are returned
+	digests := make(map[string]bool)
+	for _, img := range images {
+		digests[img.Digest] = true
+	}
+
+	if !digests["sha256:old-scan"] {
+		t.Error("Expected sha256:old-scan to need rescan (old grype DB)")
+	}
+	if !digests["sha256:never-tracked"] {
+		t.Error("Expected sha256:never-tracked to need rescan (NULL grype_db_built)")
+	}
+	if digests["sha256:current-scan"] {
+		t.Error("sha256:current-scan should NOT need rescan (current grype DB)")
+	}
+	if digests["sha256:pending"] {
+		t.Error("sha256:pending should NOT need rescan (not completed)")
+	}
+	if digests["sha256:no-sbom"] {
+		t.Error("sha256:no-sbom should NOT need rescan (no SBOM)")
+	}
+}
+
+// TestGetImagesNeedingRescan_ZeroTimestamp tests that a zero timestamp returns nil
+func TestGetImagesNeedingRescan_ZeroTimestamp(t *testing.T) {
+	dbPath := "/tmp/test_rescan_zero_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = Close(db) }()
+
+	// Zero timestamp should return nil without error
+	images, err := db.GetImagesNeedingRescan(time.Time{})
+	if err != nil {
+		t.Fatalf("Expected no error for zero timestamp, got: %v", err)
+	}
+	if images != nil {
+		t.Errorf("Expected nil for zero timestamp, got %d images", len(images))
+	}
+}
