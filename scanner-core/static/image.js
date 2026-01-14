@@ -43,6 +43,7 @@ async function initPage() {
         return;
     }
 
+    await loadConfig();
     await loadImageDetails(currentImageId);
     await loadVulnFilterOptions(currentImageId);
     await loadSBOMFilterOptions(currentImageId);
