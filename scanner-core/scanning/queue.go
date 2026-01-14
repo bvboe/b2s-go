@@ -24,6 +24,12 @@ type ScanJob struct {
 // Returns the SBOM as JSON bytes, or an error
 type SBOMRetriever func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error)
 
+// DBReadinessChecker allows the queue to wait for the vulnerability database to be ready
+// This interface is implemented by handlers.DatabaseReadinessState
+type DBReadinessChecker interface {
+	WaitForReady(ctx context.Context) bool
+}
+
 // QueueFullBehavior defines what happens when the queue reaches max depth
 type QueueFullBehavior int
 
@@ -56,17 +62,18 @@ type QueueMetrics struct {
 
 // JobQueue manages a queue of scan jobs and processes them serially with a single worker
 type JobQueue struct {
-	jobs          []ScanJob
-	jobsMu        sync.Mutex
-	jobsAvailable *sync.Cond
-	sbomRetriever SBOMRetriever
-	db            *database.DB
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	grypeCfg      grype.Config
-	config        QueueConfig
-	metrics       QueueMetrics
+	jobs             []ScanJob
+	jobsMu           sync.Mutex
+	jobsAvailable    *sync.Cond
+	sbomRetriever    SBOMRetriever
+	db               *database.DB
+	ctx              context.Context
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	grypeCfg         grype.Config
+	config           QueueConfig
+	metrics          QueueMetrics
+	dbReadinessState DBReadinessChecker // Allows waiting for grype DB to be ready
 }
 
 // NewJobQueue creates a new job queue with the specified SBOM retriever and configuration
@@ -102,6 +109,12 @@ func NewJobQueue(db *database.DB, sbomRetriever SBOMRetriever, grypeCfg grype.Co
 // Default: unbounded queue (MaxDepth=0), drops new jobs when full (though it never fills)
 func NewJobQueueWithDefaults(db *database.DB, sbomRetriever SBOMRetriever) *JobQueue {
 	return NewJobQueue(db, sbomRetriever, grype.Config{}, QueueConfig{MaxDepth: 0, FullBehavior: QueueFullDrop})
+}
+
+// SetDBReadinessChecker sets the database readiness checker for the queue
+// When set, the queue will wait for the grype database to be ready before processing vulnerability scans
+func (q *JobQueue) SetDBReadinessChecker(checker DBReadinessChecker) {
+	q.dbReadinessState = checker
 }
 
 // Enqueue adds a scan job to the queue with respect to max depth and full behavior
@@ -362,6 +375,16 @@ func (q *JobQueue) processJob(job ScanJob) {
 func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 	log.Printf("Starting vulnerability scan for %s:%s (digest=%s)",
 		job.Image.Repository, job.Image.Tag, job.Image.Digest)
+
+	// Wait for grype DB to be ready before scanning
+	if q.dbReadinessState != nil {
+		log.Printf("Waiting for vulnerability database to be ready...")
+		if !q.dbReadinessState.WaitForReady(q.ctx) {
+			log.Printf("Scan cancelled while waiting for database")
+			return
+		}
+		log.Printf("Vulnerability database is ready, proceeding with scan")
+	}
 
 	// Check if we already have vulnerability results (unless force scan is requested)
 	if !job.ForceScan {

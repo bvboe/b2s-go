@@ -372,18 +372,20 @@ func main() {
 	// Initialize database readiness state
 	dbReadinessState := corehandlers.NewDatabaseReadinessState(grypeCfg)
 
-	// Initialize vulnerability database at startup (before accepting scans)
-	log.Printf("Initializing vulnerability database (this may take a few minutes on first run)...")
-	dbStatus, err := grype.InitializeDatabase(grypeCfg)
-	if err != nil {
-		// Log but don't fail - the scan queue will retry on each scan
-		log.Printf("Warning: Failed to initialize vulnerability database: %v", err)
-		log.Printf("Scans will attempt to download the database on first use")
-		dbReadinessState.SetReady(dbStatus)
-	} else {
-		log.Printf("Vulnerability database ready: schema=%s, built=%v", dbStatus.SchemaVersion, dbStatus.Built)
-		dbReadinessState.SetReady(dbStatus)
-	}
+	// Start async database initialization
+	// This prevents the 2+ minute initial download from blocking server startup
+	go func() {
+		log.Printf("Starting background vulnerability database initialization...")
+		dbStatus, err := grype.InitializeDatabase(grypeCfg)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize vulnerability database: %v", err)
+			log.Printf("Scans will wait for manual database setup")
+			dbReadinessState.SetReady(dbStatus)
+		} else {
+			log.Printf("Vulnerability database ready: schema=%s, built=%v", dbStatus.SchemaVersion, dbStatus.Built)
+			dbReadinessState.SetReady(dbStatus)
+		}
+	}()
 
 	// Create scan queue for automatic SBOM generation and vulnerability scanning
 	// Using default queue config (unbounded queue with single worker)
@@ -393,6 +395,9 @@ func main() {
 	}
 	scanQueue := scanning.NewJobQueue(db, sbomRetriever, grypeCfg, queueConfig)
 	defer scanQueue.Shutdown()
+
+	// Connect scan queue to DB readiness state so it waits for grype DB before processing vuln scans
+	scanQueue.SetDBReadinessChecker(dbReadinessState)
 
 	// Connect scan queue to manager
 	manager.SetScanQueue(scanQueue)

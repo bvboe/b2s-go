@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ type DatabaseReadinessState struct {
 	ready    bool
 	status   *grype.DatabaseStatus
 	grypeCfg grype.Config
+	waitCh   chan struct{} // Closed when ready, allows waiting for readiness
 }
 
 // NewDatabaseReadinessState creates a new readiness state tracker
@@ -22,6 +24,7 @@ func NewDatabaseReadinessState(cfg grype.Config) *DatabaseReadinessState {
 	return &DatabaseReadinessState{
 		grypeCfg: cfg,
 		ready:    false,
+		waitCh:   make(chan struct{}),
 	}
 }
 
@@ -29,8 +32,14 @@ func NewDatabaseReadinessState(cfg grype.Config) *DatabaseReadinessState {
 func (d *DatabaseReadinessState) SetReady(status *grype.DatabaseStatus) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	wasReady := d.ready
 	d.ready = status != nil && status.Available
 	d.status = status
+
+	// Signal waiters when becoming ready for the first time
+	if d.ready && !wasReady && d.waitCh != nil {
+		close(d.waitCh)
+	}
 }
 
 // IsReady returns whether the database is ready
@@ -38,6 +47,27 @@ func (d *DatabaseReadinessState) IsReady() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.ready
+}
+
+// WaitForReady blocks until the database is ready or context is cancelled
+// Returns true if ready, false if context was cancelled
+func (d *DatabaseReadinessState) WaitForReady(ctx context.Context) bool {
+	// Fast path: already ready
+	d.mu.RLock()
+	if d.ready {
+		d.mu.RUnlock()
+		return true
+	}
+	ch := d.waitCh
+	d.mu.RUnlock()
+
+	// Wait for ready signal or context cancellation
+	select {
+	case <-ch:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // GetStatus returns the current database status
