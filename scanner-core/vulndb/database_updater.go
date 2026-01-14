@@ -15,7 +15,7 @@ import (
 	v6 "github.com/anchore/grype/grype/db/v6"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
-	_ "github.com/mattn/go-sqlite3" // SQLite driver for direct DB access
+	// Note: sqlite driver is registered by grype's dependencies (modernc.org/sqlite)
 )
 
 // DatabaseLoader is the function signature for loading the vulnerability database
@@ -43,8 +43,10 @@ type DatabaseStatus struct {
 // readGrypeDBTimestampFromSQLite reads the database build timestamp directly from
 // the grype SQLite database file, bypassing grype's library which may cache stale values.
 // This is the authoritative source for the database timestamp.
+// Uses the pure Go SQLite driver (modernc.org/sqlite) which doesn't require CGO.
 func readGrypeDBTimestampFromSQLite(dbPath string) (time.Time, error) {
-	db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
+	// Use the pure Go SQLite driver (registered as "sqlite" by modernc.org/sqlite)
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to open grype database: %w", err)
 	}
