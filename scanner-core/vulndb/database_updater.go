@@ -58,13 +58,17 @@ func readGrypeDBTimestampFromSQLite(dbPath string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("failed to read db_metadata: %w", err)
 	}
 
-	// Parse the timestamp - grype stores it as "2026-01-13 08:06:41+00:00"
-	t, err := time.Parse("2006-01-02 15:04:05-07:00", builtStr)
+	// Parse the timestamp - grype v6 uses RFC3339 format like "2026-01-16T06:16:58Z"
+	// but older versions used "2026-01-13 08:06:41+00:00"
+	t, err := time.Parse(time.RFC3339, builtStr)
 	if err != nil {
-		// Try alternative format
-		t, err = time.Parse("2006-01-02 15:04:05+00:00", builtStr)
+		// Try legacy format with space separator
+		t, err = time.Parse("2006-01-02 15:04:05-07:00", builtStr)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", builtStr, err)
+			t, err = time.Parse("2006-01-02 15:04:05+00:00", builtStr)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", builtStr, err)
+			}
 		}
 	}
 

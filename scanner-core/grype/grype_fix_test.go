@@ -54,4 +54,23 @@ func TestScanWithDistro(t *testing.T) {
 	if matchCount < 100 {
 		t.Errorf("Expected at least 100 vulnerabilities, got %d", matchCount)
 	}
+
+	// Verify descriptor.db is present (database metadata)
+	if descriptor, ok := result["descriptor"].(map[string]interface{}); ok {
+		t.Logf("Descriptor: name=%v, version=%v", descriptor["name"], descriptor["version"])
+		if db, ok := descriptor["db"].(map[string]interface{}); ok {
+			if status, ok := db["status"].(map[string]interface{}); ok {
+				t.Logf("DB Status: schemaVersion=%v, built=%v", status["schemaVersion"], status["built"])
+			}
+			if providers, ok := db["providers"].(map[string]interface{}); ok {
+				t.Logf("DB Providers count: %d", len(providers))
+			} else {
+				t.Error("descriptor.db.providers is missing")
+			}
+		} else {
+			t.Error("descriptor.db is missing")
+		}
+	} else {
+		t.Error("descriptor is missing")
+	}
 }

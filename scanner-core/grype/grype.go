@@ -24,6 +24,7 @@ import (
 	"github.com/anchore/grype/grype/matcher/stock"
 	grypePkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
+	"github.com/anchore/grype/grype/vulnerability"
 )
 
 // Config holds configuration for the Grype scanner
@@ -402,6 +403,9 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 
 	log.Printf("Found %d vulnerability matches (%d ignored)", remainingMatches.Count(), len(ignoredMatches))
 
+	// Build database info for the output document
+	dbInfo := buildDBInfo(dbStatus, vulnProvider)
+
 	// Build the output document using NewDocument
 	doc, err := models.NewDocument(
 		identification,         // clio.Identification
@@ -411,7 +415,7 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		ignoredMatches,         // ignoredMatches
 		vulnProvider,           // metadataProvider
 		nil,                    // appConfig
-		nil,                    // dbInfo
+		dbInfo,                 // dbInfo
 		models.SortBySeverity,  // sortStrategy
 		false,                  // outputTimestamp
 	)
@@ -439,4 +443,28 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 	}
 
 	return result, nil
+}
+
+// buildDBInfo constructs database metadata for inclusion in the vulnerability report.
+// This matches the format used by the grype CLI for consistency.
+func buildDBInfo(status *vulnerability.ProviderStatus, vp vulnerability.Provider) any {
+	var providers map[string]vulnerability.DataProvenance
+
+	if vp != nil {
+		providers = make(map[string]vulnerability.DataProvenance)
+		if dpr, ok := vp.(vulnerability.StoreMetadataProvider); ok {
+			dps, err := dpr.DataProvenance()
+			if err == nil {
+				providers = dps
+			}
+		}
+	}
+
+	return struct {
+		Status    *vulnerability.ProviderStatus           `json:"status"`
+		Providers map[string]vulnerability.DataProvenance `json:"providers"`
+	}{
+		Status:    status,
+		Providers: providers,
+	}
 }

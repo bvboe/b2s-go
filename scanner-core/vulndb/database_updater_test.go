@@ -2,6 +2,7 @@ package vulndb
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
+	// Note: sqlite driver is already registered by the production code
 )
 
 // mockTimestampStore implements TimestampStore for testing
@@ -432,5 +434,79 @@ func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) 
 	// Verify persistent store was updated
 	if !store.timestamp.Equal(newTimestamp) {
 		t.Errorf("Expected persistent store to have %v, got %v", newTimestamp, store.timestamp)
+	}
+}
+
+// TestReadGrypeDBTimestampFromSQLite_RFC3339Format tests that the timestamp parsing
+// correctly handles RFC3339 format (2026-01-16T06:16:58Z) which grype v6 now uses.
+// This was a bug where the code only handled the old format (2006-01-02 15:04:05+00:00).
+func TestReadGrypeDBTimestampFromSQLite_RFC3339Format(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Create a test SQLite database with RFC3339 timestamp format
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create the db_metadata table as grype v6 does
+	_, err = db.Exec(`CREATE TABLE db_metadata (build_timestamp TEXT)`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// Insert RFC3339 format timestamp (the format grype v6 now uses)
+	rfc3339Timestamp := "2026-01-16T06:16:58Z"
+	_, err = db.Exec(`INSERT INTO db_metadata (build_timestamp) VALUES (?)`, rfc3339Timestamp)
+	if err != nil {
+		t.Fatalf("Failed to insert timestamp: %v", err)
+	}
+	_ = db.Close()
+
+	// Now test that readGrypeDBTimestampFromSQLite can parse it
+	got, err := readGrypeDBTimestampFromSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("readGrypeDBTimestampFromSQLite failed: %v", err)
+	}
+
+	expected := time.Date(2026, 1, 16, 6, 16, 58, 0, time.UTC)
+	if !got.Equal(expected) {
+		t.Errorf("Expected timestamp %v, got %v", expected, got)
+	}
+}
+
+// TestReadGrypeDBTimestampFromSQLite_LegacyFormat tests that the timestamp parsing
+// still handles the legacy format (2006-01-02 15:04:05+00:00) for backwards compatibility.
+func TestReadGrypeDBTimestampFromSQLite_LegacyFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	_, err = db.Exec(`CREATE TABLE db_metadata (build_timestamp TEXT)`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// Insert legacy format timestamp
+	legacyTimestamp := "2026-01-13 08:06:41+00:00"
+	_, err = db.Exec(`INSERT INTO db_metadata (build_timestamp) VALUES (?)`, legacyTimestamp)
+	if err != nil {
+		t.Fatalf("Failed to insert timestamp: %v", err)
+	}
+	_ = db.Close()
+
+	got, err := readGrypeDBTimestampFromSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("readGrypeDBTimestampFromSQLite failed: %v", err)
+	}
+
+	expected := time.Date(2026, 1, 13, 8, 6, 41, 0, time.UTC)
+	if !got.Equal(expected) {
+		t.Errorf("Expected timestamp %v, got %v", expected, got)
 	}
 }
