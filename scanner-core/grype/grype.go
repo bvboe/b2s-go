@@ -2,6 +2,7 @@ package grype
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -368,6 +369,17 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 	// Log directory contents after successful load
 	logDirectoryContents(installCfg.DBRootDir, "[grype-db-post]")
 
+	// Read the actual timestamp from the SQLite database file.
+	// The grype loader may return a cached/stale timestamp that doesn't reflect
+	// the actual database on disk, so we read it directly to get the true value.
+	actualBuilt, err := readActualDBTimestamp(dbStatus.Path)
+	if err != nil {
+		log.Printf("Warning: failed to read actual DB timestamp: %v (using loader value)", err)
+	} else if !actualBuilt.Equal(dbStatus.Built) {
+		log.Printf("Corrected stale timestamp: loader=%v, actual=%v", dbStatus.Built, actualBuilt)
+		dbStatus.Built = actualBuilt
+	}
+
 	// Use Grype's Provide function to get packages and context with proper processing
 	// This handles distro extraction, relationship processing, and package filtering
 	providerConfig := grypePkg.ProviderConfig{}
@@ -467,4 +479,43 @@ func buildDBInfo(status *vulnerability.ProviderStatus, vp vulnerability.Provider
 		Status:    status,
 		Providers: providers,
 	}
+}
+
+// readActualDBTimestamp reads the database build timestamp directly from the grype
+// SQLite database file. This is necessary because grype.LoadVulnerabilityDB may
+// return a cached/stale timestamp that doesn't reflect the actual database on disk.
+func readActualDBTimestamp(dbPath string) (time.Time, error) {
+	// The database path from grype points to the directory, we need the actual db file
+	dbFile := dbPath
+	if info, err := os.Stat(dbPath); err == nil && info.IsDir() {
+		dbFile = filepath.Join(dbPath, "vulnerability.db")
+	}
+
+	db, err := sql.Open("sqlite", dbFile+"?mode=ro")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to open grype database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var builtStr string
+	err = db.QueryRow("SELECT build_timestamp FROM db_metadata LIMIT 1").Scan(&builtStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read db_metadata: %w", err)
+	}
+
+	// Parse the timestamp - grype v6 uses RFC3339 format like "2026-01-16T06:16:58Z"
+	// but older versions used "2026-01-13 08:06:41+00:00"
+	t, err := time.Parse(time.RFC3339, builtStr)
+	if err != nil {
+		// Try legacy format with space separator
+		t, err = time.Parse("2006-01-02 15:04:05-07:00", builtStr)
+		if err != nil {
+			t, err = time.Parse("2006-01-02 15:04:05+00:00", builtStr)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", builtStr, err)
+			}
+		}
+	}
+
+	return t.UTC(), nil
 }
