@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -335,9 +336,14 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		return fmt.Errorf("failed to get image ID: %w", err)
 	}
 
-	// Format grype DB built timestamp (empty string if zero)
+	// Extract grype DB timestamp from the scan JSON itself to ensure consistency
+	// The JSON contains descriptor.db.status.built which is the authoritative source
 	var grypeDBBuiltStr *string
-	if !grypeDBBuilt.IsZero() {
+	if extractedTime := extractGrypeDBBuiltFromJSON(vulnJSON); extractedTime != nil {
+		s := extractedTime.UTC().Format(time.RFC3339)
+		grypeDBBuiltStr = &s
+	} else if !grypeDBBuilt.IsZero() {
+		// Fallback to the passed parameter if extraction fails
 		s := grypeDBBuilt.UTC().Format(time.RFC3339)
 		grypeDBBuiltStr = &s
 	}
@@ -364,6 +370,44 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 	}
 
 	return nil
+}
+
+// extractGrypeDBBuiltFromJSON extracts the grype database build timestamp from the
+// vulnerability scan JSON. This ensures the stored timestamp matches what's in the JSON.
+// Returns nil if extraction fails.
+func extractGrypeDBBuiltFromJSON(vulnJSON []byte) *time.Time {
+	// Parse just enough of the JSON to get descriptor.db.status.built
+	var doc struct {
+		Descriptor struct {
+			DB struct {
+				Status struct {
+					Built string `json:"built"`
+				} `json:"status"`
+			} `json:"db"`
+		} `json:"descriptor"`
+	}
+
+	if err := json.Unmarshal(vulnJSON, &doc); err != nil {
+		return nil
+	}
+
+	if doc.Descriptor.DB.Status.Built == "" {
+		return nil
+	}
+
+	// Parse the timestamp - try RFC3339 first, then legacy formats
+	t, err := time.Parse(time.RFC3339, doc.Descriptor.DB.Status.Built)
+	if err != nil {
+		t, err = time.Parse("2006-01-02 15:04:05-07:00", doc.Descriptor.DB.Status.Built)
+		if err != nil {
+			t, err = time.Parse("2006-01-02 15:04:05+00:00", doc.Descriptor.DB.Status.Built)
+			if err != nil {
+				return nil
+			}
+		}
+	}
+
+	return &t
 }
 
 // GetVulnerabilities retrieves the vulnerability scan JSON for an image by digest

@@ -505,3 +505,63 @@ func TestScanWorkflow(t *testing.T) {
 		t.Error("Retrieved SBOM doesn't match stored SBOM")
 	}
 }
+
+func TestExtractGrypeDBBuiltFromJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		expected string // RFC3339 format or empty for nil
+	}{
+		{
+			name: "RFC3339 format",
+			json: `{"descriptor":{"db":{"status":{"built":"2026-01-17T06:14:49Z"}}}}`,
+			expected: "2026-01-17T06:14:49Z",
+		},
+		{
+			name: "Legacy format with +00:00",
+			json: `{"descriptor":{"db":{"status":{"built":"2026-01-16 06:16:58+00:00"}}}}`,
+			expected: "2026-01-16T06:16:58Z",
+		},
+		{
+			name: "Empty built field",
+			json: `{"descriptor":{"db":{"status":{"built":""}}}}`,
+			expected: "",
+		},
+		{
+			name: "Missing db field",
+			json: `{"descriptor":{}}`,
+			expected: "",
+		},
+		{
+			name: "Invalid JSON",
+			json: `not valid json`,
+			expected: "",
+		},
+		{
+			name: "Real grype output structure",
+			json: `{"matches":[],"source":{},"distro":{},"descriptor":{"name":"grype","version":"0.104.4","db":{"status":{"schemaVersion":"v6.1.3","built":"2026-01-17T06:14:49Z"},"providers":{}}}}`,
+			expected: "2026-01-17T06:14:49Z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractGrypeDBBuiltFromJSON([]byte(tt.json))
+
+			if tt.expected == "" {
+				if result != nil {
+					t.Errorf("Expected nil, got %v", result)
+				}
+			} else {
+				if result == nil {
+					t.Errorf("Expected %s, got nil", tt.expected)
+				} else {
+					got := result.UTC().Format(time.RFC3339)
+					if got != tt.expected {
+						t.Errorf("Expected %s, got %s", tt.expected, got)
+					}
+				}
+			}
+		})
+	}
+}
