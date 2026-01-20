@@ -185,24 +185,53 @@ func CheckDatabase(cfg Config) (*DatabaseStatus, error) {
 	}
 
 	// Look for the vulnerability database file
+	// Grype v6 uses a schema version subdirectory structure: /grype/6/vulnerability.db
+	// Older versions may have the .db file directly in the grype directory
 	hasDB := false
+	var dbPath string
 	for _, entry := range entries {
+		// Check for direct .db file (older grype versions)
 		if entry.Name() == "vulnerability.db" || entry.Name() == "vulnerability-db" {
 			hasDB = true
+			dbPath = filepath.Join(dbDir, entry.Name())
 			break
 		}
-		// v6 uses a different structure - check for any .db file
 		if filepath.Ext(entry.Name()) == ".db" {
 			hasDB = true
+			dbPath = filepath.Join(dbDir, entry.Name())
 			break
+		}
+		// Check for schema version subdirectory (grype v6+)
+		// Schema directories are numeric (e.g., "5", "6")
+		if entry.IsDir() && isNumericDir(entry.Name()) {
+			schemaDir := filepath.Join(dbDir, entry.Name())
+			vulnDBPath := filepath.Join(schemaDir, "vulnerability.db")
+			if _, err := os.Stat(vulnDBPath); err == nil {
+				hasDB = true
+				dbPath = vulnDBPath
+				break
+			}
 		}
 	}
 
 	if !hasDB {
-		return &DatabaseStatus{Available: false, Error: "no database file found", Path: dbDir}, nil
+		return &DatabaseStatus{Available: false, Error: "database does not exist", Path: dbDir}, nil
 	}
 
-	return &DatabaseStatus{Available: true, Path: dbDir}, nil
+	return &DatabaseStatus{Available: true, Path: dbPath}, nil
+}
+
+// isNumericDir checks if a directory name is numeric (schema version like "5", "6")
+func isNumericDir(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // DeleteDatabase removes the vulnerability database, forcing a re-download on next use.

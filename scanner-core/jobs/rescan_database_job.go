@@ -8,6 +8,7 @@ import (
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
@@ -25,11 +26,19 @@ type DatabaseInterface interface {
 	GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]database.ContainerImage, error)
 }
 
+// ReadinessSetter defines the interface for updating database readiness state
+// This allows the rescan-database job to mark the database as ready when it
+// successfully verifies or updates the vulnerability database
+type ReadinessSetter interface {
+	SetReady(status *grype.DatabaseStatus)
+}
+
 // RescanDatabaseJob triggers a rescan when the vulnerability database is updated
 type RescanDatabaseJob struct {
-	dbUpdater DatabaseUpdateChecker
-	db        DatabaseInterface
-	scanQueue ScanQueueInterface
+	dbUpdater       DatabaseUpdateChecker
+	db              DatabaseInterface
+	scanQueue       ScanQueueInterface
+	readinessSetter ReadinessSetter // Optional: updates readiness state when DB is ready
 }
 
 // NewRescanDatabaseJob creates a new rescan database job
@@ -49,6 +58,12 @@ func NewRescanDatabaseJob(dbUpdater DatabaseUpdateChecker, db DatabaseInterface,
 		db:        db,
 		scanQueue: scanQueue,
 	}
+}
+
+// SetReadinessSetter sets the readiness setter for updating database ready state
+// This is optional - if not set, the job will not update readiness state
+func (j *RescanDatabaseJob) SetReadinessSetter(setter ReadinessSetter) {
+	j.readinessSetter = setter
 }
 
 func (j *RescanDatabaseJob) Name() string {
@@ -73,6 +88,17 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	}
 
 	log.Printf("[rescan-database] Current grype DB: built=%s", currentVersion.Built.Format(time.RFC3339))
+
+	// Update readiness state if setter is configured
+	// This ensures the pod becomes ready even if initial download failed but db-updater succeeded
+	if j.readinessSetter != nil {
+		j.readinessSetter.SetReady(&grype.DatabaseStatus{
+			Available:     true,
+			Built:         currentVersion.Built,
+			SchemaVersion: currentVersion.SchemaVersion,
+			Path:          currentVersion.Path,
+		})
+	}
 
 	// Find images that were scanned with an older grype database (or never tracked)
 	// This is more intelligent than rescanning all images - it only rescans those that need it
