@@ -418,6 +418,9 @@ func main() {
 				log.Printf("Warning: failed to create database updater: %v", err)
 			} else {
 				rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
+				// Connect readiness state so db-updater can mark pod ready after successful DB update
+				// This fixes the case where initial download fails but db-updater succeeds later
+				rescanJob.SetReadinessSetter(dbReadinessState)
 				if err := sched.AddJob(
 					rescanJob,
 					scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),

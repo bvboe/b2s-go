@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -72,5 +73,93 @@ func TestScanWithDistro(t *testing.T) {
 		}
 	} else {
 		t.Error("descriptor is missing")
+	}
+}
+
+func TestIsNumericDir(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected bool
+	}{
+		{"6", true},
+		{"5", true},
+		{"10", true},
+		{"123", true},
+		{"0", true},
+		{"v6", false},
+		{"", false},
+		{"abc", false},
+		{"6a", false},
+		{"a6", false},
+		{"grype", false},
+		{"vulnerability.db", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isNumericDir(tt.name)
+			if got != tt.expected {
+				t.Errorf("isNumericDir(%q) = %v, want %v", tt.name, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCheckDatabaseV6Structure(t *testing.T) {
+	// Create a temporary directory structure mimicking grype v6
+	tmpDir := t.TempDir()
+	grypeDir := filepath.Join(tmpDir, "grype")
+	schemaDir := filepath.Join(grypeDir, "6")
+	dbFile := filepath.Join(schemaDir, "vulnerability.db")
+
+	// Create directory structure
+	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+		t.Fatalf("Failed to create schema directory: %v", err)
+	}
+
+	// Create empty database file
+	if err := os.WriteFile(dbFile, []byte("dummy db"), 0644); err != nil {
+		t.Fatalf("Failed to create db file: %v", err)
+	}
+
+	// Test CheckDatabase with v6 structure
+	cfg := Config{DBRootDir: tmpDir}
+	status, err := CheckDatabase(cfg)
+	if err != nil {
+		t.Fatalf("CheckDatabase returned error: %v", err)
+	}
+
+	if !status.Available {
+		t.Errorf("CheckDatabase returned Available=false, error=%q", status.Error)
+	}
+
+	if status.Path != dbFile {
+		t.Errorf("CheckDatabase returned Path=%q, want %q", status.Path, dbFile)
+	}
+}
+
+func TestCheckDatabaseNoDatabase(t *testing.T) {
+	// Create a temporary directory with no database
+	tmpDir := t.TempDir()
+	grypeDir := filepath.Join(tmpDir, "grype")
+
+	// Create empty grype directory
+	if err := os.MkdirAll(grypeDir, 0755); err != nil {
+		t.Fatalf("Failed to create grype directory: %v", err)
+	}
+
+	// Test CheckDatabase with empty directory
+	cfg := Config{DBRootDir: tmpDir}
+	status, err := CheckDatabase(cfg)
+	if err != nil {
+		t.Fatalf("CheckDatabase returned error: %v", err)
+	}
+
+	if status.Available {
+		t.Error("CheckDatabase returned Available=true for empty directory")
+	}
+
+	if status.Error == "" {
+		t.Error("CheckDatabase returned empty error for unavailable database")
 	}
 }
