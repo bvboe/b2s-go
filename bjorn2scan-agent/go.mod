@@ -48,7 +48,7 @@ require (
 	github.com/anchore/go-struct-converter v0.1.0 // indirect
 	github.com/anchore/go-sync v0.0.0-20250714163430-add63db73ad1 // indirect
 	github.com/anchore/go-version v1.2.2-0.20210903204242-51efa5b487c4 // indirect
-	github.com/anchore/grype v0.104.4 // indirect
+	github.com/anchore/grype v0.105.0 // indirect
 	github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115 // indirect
 	github.com/anchore/stereoscope v0.1.18 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
@@ -132,7 +132,7 @@ require (
 	github.com/go-git/go-git/v5 v5.16.4 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-restruct/restruct v1.2.0-alpha // indirect
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/gocsaf/csaf/v3 v3.5.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -266,13 +266,13 @@ require (
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/exp v0.0.0-20250711185948-6ae5c78190dc // indirect
-	golang.org/x/mod v0.31.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/mod v0.32.0 // indirect
+	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/oauth2 v0.33.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	golang.org/x/tools v0.40.0 // indirect
+	golang.org/x/tools v0.41.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	gonum.org/v1/gonum v0.16.0 // indirect
 	google.golang.org/api v0.256.0 // indirect
