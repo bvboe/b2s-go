@@ -311,10 +311,8 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
-		_ = os.Remove(tmpFile.Name())
-	}()
-	defer func() {
 		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
 	}()
 
 	if _, err := tmpFile.Write(sbomJSON); err != nil {
@@ -534,16 +532,22 @@ func readActualDBTimestamp(dbPath string) (time.Time, error) {
 
 	// Parse the timestamp - grype v6 uses RFC3339 format like "2026-01-16T06:16:58Z"
 	// but older versions used "2026-01-13 08:06:41+00:00"
-	t, err := time.Parse(time.RFC3339, builtStr)
-	if err != nil {
-		// Try legacy format with space separator
-		t, err = time.Parse("2006-01-02 15:04:05-07:00", builtStr)
-		if err != nil {
-			t, err = time.Parse("2006-01-02 15:04:05+00:00", builtStr)
-			if err != nil {
-				return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", builtStr, err)
-			}
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05+00:00",
+	}
+
+	var t time.Time
+	var parseErr error
+	for _, format := range formats {
+		t, parseErr = time.Parse(format, builtStr)
+		if parseErr == nil {
+			break
 		}
+	}
+	if parseErr != nil {
+		return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", builtStr, parseErr)
 	}
 
 	return t.UTC(), nil

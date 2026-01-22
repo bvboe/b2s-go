@@ -229,18 +229,29 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 				archive, err := client.IsUpdateAvailable(desc)
 				if err != nil {
 					log.Printf("[db-updater] Warning: failed to check for updates: %v", err)
-				} else if archive != nil && archive.Built.After(desc.Built.Time) {
-					// Newer database available - delete existing to force re-download
-					log.Printf("[db-updater] Update available: archive built=%s (current=%s)",
-						archive.Built.Format(time.RFC3339), desc.Built.Format(time.RFC3339))
-					log.Printf("[db-updater] Removing existing database to force update...")
-					schemaDir := filepath.Join(grypeDir, "6")
-					if err := os.RemoveAll(schemaDir); err != nil {
-						log.Printf("[db-updater] Warning: failed to remove schema dir: %v", err)
-					}
 				} else if archive != nil {
-					log.Printf("[db-updater] Archive available but not newer: archive=%s, current=%s",
-						archive.Built.Format(time.RFC3339), desc.Built.Format(time.RFC3339))
+					// Use persistent timestamp for comparison if available, as v6.ReadDescription
+					// may return stale cached values that don't match the actual database
+					compareTimestamp := desc.Built.Time
+					if !lastKnownTimestamp.IsZero() {
+						compareTimestamp = lastKnownTimestamp
+						log.Printf("[db-updater] Using persistent timestamp for comparison: %s",
+							compareTimestamp.Format(time.RFC3339))
+					}
+
+					if archive.Built.After(compareTimestamp) {
+						// Newer database available - delete existing to force re-download
+						log.Printf("[db-updater] Update available: archive built=%s (current=%s)",
+							archive.Built.Format(time.RFC3339), compareTimestamp.Format(time.RFC3339))
+						log.Printf("[db-updater] Removing existing database to force update...")
+						schemaDir := filepath.Join(grypeDir, "6")
+						if err := os.RemoveAll(schemaDir); err != nil {
+							log.Printf("[db-updater] Warning: failed to remove schema dir: %v", err)
+						}
+					} else {
+						log.Printf("[db-updater] Archive available but not newer: archive=%s, current=%s",
+							archive.Built.Format(time.RFC3339), compareTimestamp.Format(time.RFC3339))
+					}
 				} else {
 					log.Printf("[db-updater] No update available")
 				}
