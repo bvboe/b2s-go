@@ -139,7 +139,7 @@ scanServer:
   # Data persistence
   persistence:
     enabled: true  # Set to false to use emptyDir (for testing only)
-    size: 5Gi
+    size: 15Gi
     storageClassName: ""  # Leave empty to use default storage class
     accessMode: ReadWriteOnce
     # Path where data (database, etc.) will be stored
