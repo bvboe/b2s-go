@@ -80,8 +80,8 @@ async function loadImageDetails(imageid) {
         console.log('Image details loaded:', data);
 
         document.getElementById('image_id').textContent = data.image_id || '';
-        document.getElementById('repositories').innerHTML = (data.repositories || []).join('<br>') || 'N/A';
-        document.getElementById('instances').innerHTML = (data.instances || []).join('<br>') || 'N/A';
+        document.getElementById('references').innerHTML = (data.references || []).join('<br>') || 'N/A';
+        document.getElementById('containers').innerHTML = (data.containers || []).join('<br>') || 'N/A';
         document.getElementById('distro_display_name').textContent = data.distro_display_name || 'Unknown';
         document.getElementById('scan_status').textContent = data.status_description || 'Unknown';
         document.getElementById('vulns_scanned_at').textContent = formatTimestamp(data.vulns_scanned_at) || '-';

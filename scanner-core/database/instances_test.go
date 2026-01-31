@@ -9,9 +9,9 @@ import (
 	_ "github.com/bvboe/b2s-go/scanner-core/sqlitedriver"
 )
 
-func TestAddInstance(t *testing.T) {
+func TestAddContainer(t *testing.T) {
 	// Create temporary database
-	dbPath := "/tmp/test_instances_" + time.Now().Format("20060102150405") + ".db"
+	dbPath := "/tmp/test_containers_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -20,12 +20,12 @@ func TestAddInstance(t *testing.T) {
 	}
 	defer func() { _ = Close(db) }()
 
-	// Test adding a new instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Test adding a new container
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -35,36 +35,36 @@ func TestAddInstance(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	isNew, err := db.AddInstance(instance)
+	isNew, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 	if !isNew {
-		t.Error("Expected AddInstance to return true for new instance")
+		t.Error("Expected AddContainer to return true for new container")
 	}
 
-	// Verify the instance was added
-	allInstances, err := db.GetAllInstances()
+	// Verify the container was added
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get all instances: %v", err)
+		t.Fatalf("Failed to get all containers: %v", err)
 	}
 
-	instanceRows, ok := allInstances.([]ContainerInstanceRow)
+	containerRows, ok := allContainers.([]ContainerRow)
 	if !ok {
-		t.Fatalf("Expected []ContainerInstanceRow, got %T", allInstances)
+		t.Fatalf("Expected []ContainerRow, got %T", allContainers)
 	}
 
-	if len(instanceRows) != 1 {
-		t.Errorf("Expected 1 instance, got %d", len(instanceRows))
+	if len(containerRows) != 1 {
+		t.Errorf("Expected 1 container, got %d", len(containerRows))
 	}
 
-	if instanceRows[0].Namespace != "default" || instanceRows[0].Pod != "test-pod" {
-		t.Errorf("Instance has wrong values: %+v", instanceRows[0])
+	if containerRows[0].Namespace != "default" || containerRows[0].Pod != "test-pod" {
+		t.Errorf("Container has wrong values: %+v", containerRows[0])
 	}
 }
 
-func TestAddInstanceDuplicate(t *testing.T) {
-	dbPath := "/tmp/test_instances_dup_" + time.Now().Format("20060102150405") + ".db"
+func TestAddContainerDuplicate(t *testing.T) {
+	dbPath := "/tmp/test_containers_dup_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -73,11 +73,11 @@ func TestAddInstanceDuplicate(t *testing.T) {
 	}
 	defer func() { _ = Close(db) }()
 
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -87,27 +87,27 @@ func TestAddInstanceDuplicate(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	// Add instance first time
-	isNew, err := db.AddInstance(instance)
+	// Add container first time
+	isNew, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 	if !isNew {
 		t.Error("Expected first add to return true")
 	}
 
-	// Add same instance again (should not be considered new)
-	isNew, err = db.AddInstance(instance)
+	// Add same container again (should not be considered new)
+	isNew, err = db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add duplicate instance: %v", err)
+		t.Fatalf("Failed to add duplicate container: %v", err)
 	}
 	if isNew {
 		t.Error("Expected duplicate add to return false")
 	}
 }
 
-func TestAddInstanceWithImageUpdate(t *testing.T) {
-	dbPath := "/tmp/test_instances_update_" + time.Now().Format("20060102150405") + ".db"
+func TestAddContainerWithImageUpdate(t *testing.T) {
+	dbPath := "/tmp/test_containers_update_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -116,12 +116,12 @@ func TestAddInstanceWithImageUpdate(t *testing.T) {
 	}
 	defer func() { _ = Close(db) }()
 
-	// Add instance with one image
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container with one image
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.20",
@@ -131,44 +131,44 @@ func TestAddInstanceWithImageUpdate(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	isNew, err := db.AddInstance(instance)
+	isNew, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 	if !isNew {
 		t.Error("Expected first add to return true")
 	}
 
-	// Update instance with different image
-	instance.Image.Reference = "nginx:1.21"
-	instance.Image.Digest = "sha256:new456"
+	// Update container with different image
+	container.Image.Reference = "nginx:1.21"
+	container.Image.Digest = "sha256:new456"
 
-	isNew, err = db.AddInstance(instance)
+	isNew, err = db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to update instance: %v", err)
+		t.Fatalf("Failed to update container: %v", err)
 	}
 	if !isNew {
 		t.Error("Expected image update to return true")
 	}
 
-	// Verify the instance was updated
-	allInstances, err := db.GetAllInstances()
+	// Verify the container was updated
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get all instances: %v", err)
+		t.Fatalf("Failed to get all containers: %v", err)
 	}
 
-	instanceRows := allInstances.([]ContainerInstanceRow)
-	if len(instanceRows) != 1 {
-		t.Errorf("Expected 1 instance after update, got %d", len(instanceRows))
+	containerRows := allContainers.([]ContainerRow)
+	if len(containerRows) != 1 {
+		t.Errorf("Expected 1 container after update, got %d", len(containerRows))
 	}
 
-	if instanceRows[0].Reference != "nginx:1.21" || instanceRows[0].Digest != "sha256:new456" {
-		t.Errorf("Instance not updated correctly: reference=%s, digest=%s", instanceRows[0].Reference, instanceRows[0].Digest)
+	if containerRows[0].Reference != "nginx:1.21" || containerRows[0].Digest != "sha256:new456" {
+		t.Errorf("Container not updated correctly: reference=%s, digest=%s", containerRows[0].Reference, containerRows[0].Digest)
 	}
 }
 
-func TestAddInstanceValidation(t *testing.T) {
-	dbPath := "/tmp/test_instances_validation_" + time.Now().Format("20060102150405") + ".db"
+func TestAddContainerValidation(t *testing.T) {
+	dbPath := "/tmp/test_containers_validation_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -179,16 +179,16 @@ func TestAddInstanceValidation(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		instance    containers.ContainerInstance
+		container    containers.Container
 		expectError bool
 	}{
 		{
 			name: "missing digest",
-			instance: containers.ContainerInstance{
-				ID: containers.ContainerInstanceID{
+			container: containers.Container{
+				ID: containers.ContainerID{
 					Namespace: "default",
 					Pod:       "test-pod",
-					Container: "nginx",
+					Name: "nginx",
 				},
 				Image: containers.ImageID{
 					Reference: "nginx:1.21",
@@ -199,11 +199,11 @@ func TestAddInstanceValidation(t *testing.T) {
 		},
 		{
 			name: "missing reference",
-			instance: containers.ContainerInstance{
-				ID: containers.ContainerInstanceID{
+			container: containers.Container{
+				ID: containers.ContainerID{
 					Namespace: "default",
 					Pod:       "test-pod",
-					Container: "nginx",
+					Name: "nginx",
 				},
 				Image: containers.ImageID{
 					Reference: "", // Missing reference
@@ -214,11 +214,11 @@ func TestAddInstanceValidation(t *testing.T) {
 		},
 		{
 			name: "missing namespace",
-			instance: containers.ContainerInstance{
-				ID: containers.ContainerInstanceID{
+			container: containers.Container{
+				ID: containers.ContainerID{
 					Namespace: "", // Missing namespace
 					Pod:       "test-pod",
-					Container: "nginx",
+					Name: "nginx",
 				},
 				Image: containers.ImageID{
 					Reference: "nginx:1.21",
@@ -228,12 +228,12 @@ func TestAddInstanceValidation(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "valid instance",
-			instance: containers.ContainerInstance{
-				ID: containers.ContainerInstanceID{
+			name: "valid container",
+			container: containers.Container{
+				ID: containers.ContainerID{
 					Namespace: "default",
 					Pod:       "test-pod",
-					Container: "nginx",
+					Name: "nginx",
 				},
 				Image: containers.ImageID{
 					Reference: "nginx:1.21",
@@ -246,7 +246,7 @@ func TestAddInstanceValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.AddInstance(tt.instance)
+			_, err := db.AddContainer(tt.container)
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -257,8 +257,8 @@ func TestAddInstanceValidation(t *testing.T) {
 	}
 }
 
-func TestRemoveInstance(t *testing.T) {
-	dbPath := "/tmp/test_instances_remove_" + time.Now().Format("20060102150405") + ".db"
+func TestRemoveContainer(t *testing.T) {
+	dbPath := "/tmp/test_containers_remove_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -267,12 +267,12 @@ func TestRemoveInstance(t *testing.T) {
 	}
 	defer func() { _ = Close(db) }()
 
-	// Add instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -282,31 +282,31 @@ func TestRemoveInstance(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 
-	// Remove instance
-	err = db.RemoveInstance(instance.ID)
+	// Remove container
+	err = db.RemoveContainer(container.ID)
 	if err != nil {
-		t.Fatalf("Failed to remove instance: %v", err)
+		t.Fatalf("Failed to remove container: %v", err)
 	}
 
 	// Verify it's gone
-	allInstances, err := db.GetAllInstances()
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get all instances: %v", err)
+		t.Fatalf("Failed to get all containers: %v", err)
 	}
 
-	instanceRows := allInstances.([]ContainerInstanceRow)
-	if len(instanceRows) != 0 {
-		t.Errorf("Expected 0 instances after removal, got %d", len(instanceRows))
+	containerRows := allContainers.([]ContainerRow)
+	if len(containerRows) != 0 {
+		t.Errorf("Expected 0 containers after removal, got %d", len(containerRows))
 	}
 }
 
-func TestSetInstances(t *testing.T) {
-	dbPath := "/tmp/test_instances_set_" + time.Now().Format("20060102150405") + ".db"
+func TestSetContainers(t *testing.T) {
+	dbPath := "/tmp/test_containers_set_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -315,12 +315,12 @@ func TestSetInstances(t *testing.T) {
 	}
 	defer func() { _ = Close(db) }()
 
-	// Add some initial instances
-	instance1 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add some initial containers
+	container1 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "old-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.20",
@@ -330,18 +330,18 @@ func TestSetInstances(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance1)
+	_, err = db.AddContainer(container1)
 	if err != nil {
-		t.Fatalf("Failed to add initial instance: %v", err)
+		t.Fatalf("Failed to add initial container: %v", err)
 	}
 
-	// Set new instances (should replace old ones)
-	newInstances := []containers.ContainerInstance{
+	// Set new containers (should replace old ones)
+	newContainers := []containers.Container{
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "new-pod-1",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -351,10 +351,10 @@ func TestSetInstances(t *testing.T) {
 			ContainerRuntime: "docker",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "kube-system",
 				Pod:       "new-pod-2",
-				Container: "envoy",
+				Name: "envoy",
 			},
 			Image: containers.ImageID{
 				Reference: "envoy:v1.20",
@@ -365,31 +365,31 @@ func TestSetInstances(t *testing.T) {
 		},
 	}
 
-	stats, err := db.SetInstances(newInstances)
+	stats, err := db.SetContainers(newContainers)
 	if err != nil {
-		t.Fatalf("Failed to set instances: %v", err)
+		t.Fatalf("Failed to set containers: %v", err)
 	}
 	if stats == nil {
 		t.Fatal("Expected stats, got nil")
 	}
 
-	// Verify new instances
-	allInstances, err := db.GetAllInstances()
+	// Verify new containers
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get all instances: %v", err)
+		t.Fatalf("Failed to get all containers: %v", err)
 	}
 
-	instanceRows := allInstances.([]ContainerInstanceRow)
-	if len(instanceRows) != 2 {
-		t.Errorf("Expected 2 instances after SetInstances, got %d", len(instanceRows))
+	containerRows := allContainers.([]ContainerRow)
+	if len(containerRows) != 2 {
+		t.Errorf("Expected 2 containers after SetContainers, got %d", len(containerRows))
 	}
 
-	// Verify old instance is gone and new instances exist
+	// Verify old container is gone and new containers exist
 	foundNewPod1 := false
 	foundNewPod2 := false
 	foundOldPod := false
 
-	for _, row := range instanceRows {
+	for _, row := range containerRows {
 		if row.Pod == "old-pod" {
 			foundOldPod = true
 		}
@@ -402,15 +402,15 @@ func TestSetInstances(t *testing.T) {
 	}
 
 	if foundOldPod {
-		t.Error("Old instance still exists after SetInstances")
+		t.Error("Old container still exists after SetContainers")
 	}
 	if !foundNewPod1 || !foundNewPod2 {
-		t.Error("New instances not found after SetInstances")
+		t.Error("New containers not found after SetContainers")
 	}
 }
 
-func TestSetInstancesValidation(t *testing.T) {
-	dbPath := "/tmp/test_instances_set_validation_" + time.Now().Format("20060102150405") + ".db"
+func TestSetContainersValidation(t *testing.T) {
+	dbPath := "/tmp/test_containers_set_validation_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
 	db, err := New(dbPath)
@@ -419,13 +419,13 @@ func TestSetInstancesValidation(t *testing.T) {
 	}
 	defer func() { _ = Close(db) }()
 
-	// Try to set instances with one invalid instance
-	instances := []containers.ContainerInstance{
+	// Try to set containers with one invalid container
+	containers := []containers.Container{
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "valid-pod",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -433,10 +433,10 @@ func TestSetInstancesValidation(t *testing.T) {
 			},
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "invalid-pod",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -445,19 +445,19 @@ func TestSetInstancesValidation(t *testing.T) {
 		},
 	}
 
-	_, err = db.SetInstances(instances)
+	_, err = db.SetContainers(containers)
 	if err == nil {
-		t.Error("Expected error when setting instances with invalid data")
+		t.Error("Expected error when setting containers with invalid data")
 	}
 
-	// Verify no instances were added (transaction should have rolled back)
-	allInstances, err := db.GetAllInstances()
+	// Verify no containers were added (transaction should have rolled back)
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get all instances: %v", err)
+		t.Fatalf("Failed to get all containers: %v", err)
 	}
 
-	instanceRows := allInstances.([]ContainerInstanceRow)
-	if len(instanceRows) != 0 {
-		t.Errorf("Expected 0 instances after failed SetInstances, got %d", len(instanceRows))
+	containerRows := allContainers.([]ContainerRow)
+	if len(containerRows) != 0 {
+		t.Errorf("Expected 0 containers after failed SetContainers, got %d", len(containerRows))
 	}
 }

@@ -56,25 +56,25 @@ func SBOMDownloadWithRoutingHandler(db *database.DB, clientset kubernetes.Interf
 		log.Printf("SBOM not in database, routing to pod-scanner for %s", digest)
 
 		// Find which node has this image
-		instance, err := db.GetFirstInstanceForImage(digest)
+		container, err := db.GetFirstContainerForImage(digest)
 		if err != nil {
-			log.Printf("Failed to find instance for image %s: %v", digest, err)
+			log.Printf("Failed to find container for image %s: %v", digest, err)
 			http.Error(w, "Image not found in cluster", http.StatusNotFound)
 			return
 		}
 
-		if instance.NodeName == "" {
+		if container.NodeName == "" {
 			log.Printf("Image %s has no node name (might be from agent)", digest)
 			http.Error(w, "Image not available on any cluster node", http.StatusNotFound)
 			return
 		}
 
-		log.Printf("Routing SBOM request to node: %s (runtime=%s)", instance.NodeName, instance.ContainerRuntime)
+		log.Printf("Routing SBOM request to node: %s (runtime=%s)", container.NodeName, container.ContainerRuntime)
 
 		// Request SBOM from pod-scanner on that node
-		sbomData, err = podScannerClient.GetSBOMFromNode(r.Context(), clientset, instance.NodeName, digest)
+		sbomData, err = podScannerClient.GetSBOMFromNode(r.Context(), clientset, container.NodeName, digest)
 		if err != nil {
-			log.Printf("Failed to get SBOM from pod-scanner on node %s: %v", instance.NodeName, err)
+			log.Printf("Failed to get SBOM from pod-scanner on node %s: %v", container.NodeName, err)
 
 			// Check if it's a context timeout
 			if r.Context().Err() == context.DeadlineExceeded {
@@ -94,7 +94,7 @@ func SBOMDownloadWithRoutingHandler(db *database.DB, clientset kubernetes.Interf
 			log.Printf("Cached SBOM for %s (%d bytes)", digest, len(sbomData))
 		}
 
-		log.Printf("Successfully retrieved SBOM from pod-scanner (node=%s, size=%d bytes)", instance.NodeName, len(sbomData))
+		log.Printf("Successfully retrieved SBOM from pod-scanner (node=%s, size=%d bytes)", container.NodeName, len(sbomData))
 		writeSBOMResponse(w, sbomData, digest)
 	}
 }

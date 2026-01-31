@@ -256,7 +256,7 @@ func TestParseSBOMData_MultiplePackageInstances(t *testing.T) {
 
 	// Create test image
 	imageID := int64(1)
-	_, err = db.conn.Exec(`INSERT INTO container_images (id, digest) VALUES (?, ?)`,
+	_, err = db.conn.Exec(`INSERT INTO images (id, digest) VALUES (?, ?)`,
 		imageID, "sha256:test123")
 	if err != nil {
 		t.Fatalf("Failed to insert test image: %v", err)
@@ -344,7 +344,7 @@ func TestParseVulnerabilityData_MultipleMatches(t *testing.T) {
 
 	// Create test image
 	imageID := int64(1)
-	_, err = db.conn.Exec(`INSERT INTO container_images (id, digest) VALUES (?, ?)`,
+	_, err = db.conn.Exec(`INSERT INTO images (id, digest) VALUES (?, ?)`,
 		imageID, "sha256:test123")
 	if err != nil {
 		t.Fatalf("Failed to insert test image: %v", err)
@@ -484,7 +484,7 @@ func TestParseVulnerabilityData_ExtractsDistro(t *testing.T) {
 
 	// Create test image
 	imageID := int64(1)
-	_, err = db.conn.Exec(`INSERT INTO container_images (id, digest) VALUES (?, ?)`,
+	_, err = db.conn.Exec(`INSERT INTO images (id, digest) VALUES (?, ?)`,
 		imageID, "sha256:test123")
 	if err != nil {
 		t.Fatalf("Failed to insert test image: %v", err)
@@ -507,7 +507,7 @@ func TestParseVulnerabilityData_ExtractsDistro(t *testing.T) {
 	var osName, osVersion string
 	err = db.conn.QueryRow(`
 		SELECT os_name, os_version
-		FROM container_images
+		FROM images
 		WHERE id = ?`, imageID).Scan(&osName, &osVersion)
 	if err != nil {
 		t.Fatalf("Failed to query image: %v", err)
@@ -535,7 +535,7 @@ func TestParseVulnerabilityData_KnownExploits(t *testing.T) {
 
 	// Create test image
 	imageID := int64(1)
-	_, err = db.conn.Exec(`INSERT INTO container_images (id, digest) VALUES (?, ?)`,
+	_, err = db.conn.Exec(`INSERT INTO images (id, digest) VALUES (?, ?)`,
 		imageID, "sha256:test123")
 	if err != nil {
 		t.Fatalf("Failed to insert test image: %v", err)

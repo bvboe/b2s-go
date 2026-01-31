@@ -40,7 +40,7 @@ func TestGetOrCreateImage_CreatesNew(t *testing.T) {
 
 	// Verify image exists in database
 	var digest string
-	err = db.conn.QueryRow("SELECT digest FROM container_images WHERE id = ?", id).Scan(&digest)
+	err = db.conn.QueryRow("SELECT digest FROM images WHERE id = ?", id).Scan(&digest)
 	if err != nil {
 		t.Fatalf("Failed to query image: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestGetOrCreateImage_Concurrent(t *testing.T) {
 
 	// Verify only one image was created (despite concurrent attempts)
 	var count int
-	err = db.conn.QueryRow("SELECT COUNT(*) FROM container_images WHERE digest = ?",
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM images WHERE digest = ?",
 		image.Digest).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count images: %v", err)
@@ -336,7 +336,7 @@ func TestGetOrCreateImage_TransactionBehavior(t *testing.T) {
 
 	// Verify image was NOT created (rollback worked)
 	var count int
-	err = db.conn.QueryRow("SELECT COUNT(*) FROM container_images WHERE id = ?", id).Scan(&count)
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM images WHERE id = ?", id).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count images: %v", err)
 	}

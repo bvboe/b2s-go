@@ -9,7 +9,7 @@ import (
 
 // DatabaseProvider defines the interface for querying database contents
 type DatabaseProvider interface {
-	GetAllInstances() (interface{}, error)
+	GetAllContainers() (interface{}, error)
 	GetAllImages() (interface{}, error)
 	GetAllImageDetails() (interface{}, error)
 	GetImageDetails(digest string) (interface{}, error)
@@ -23,7 +23,7 @@ type DatabaseProvider interface {
 // DatabaseProviderWithNodeLookup extends DatabaseProvider with node lookup capability
 type DatabaseProviderWithNodeLookup interface {
 	DatabaseProvider
-	GetFirstInstanceForImage(digest string) (NodeInfo, error)
+	GetFirstContainerForImage(digest string) (NodeInfo, error)
 }
 
 // NodeInfo contains information about which node has an image
@@ -32,24 +32,24 @@ type NodeInfo struct {
 	ContainerRuntime string
 }
 
-// DatabaseInstancesHandler creates an HTTP handler for /containers/instances endpoint
-func DatabaseInstancesHandler(provider DatabaseProvider) http.HandlerFunc {
+// DatabaseContainersHandler creates an HTTP handler for /containers endpoint
+func DatabaseContainersHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		instances, err := provider.GetAllInstances()
+		containers, err := provider.GetAllContainers()
 		if err != nil {
-			log.Printf("Error querying instances: %v", err)
+			log.Printf("Error querying containers: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		// Wrap response in an object with "instances" key
+		// Wrap response in an object with "containers" key
 		response := map[string]interface{}{
-			"instances": instances,
+			"containers": containers,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding instances response: %v", err)
+			log.Printf("Error encoding containers response: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -315,7 +315,7 @@ type HandlerOverrides struct {
 // Pass nil for overrides to use all default handlers
 func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, overrides *HandlerOverrides) {
 	// Register legacy endpoints under /api/
-	mux.HandleFunc("/api/containers/instances", DatabaseInstancesHandler(provider))
+	mux.HandleFunc("/api/containers", DatabaseContainersHandler(provider))
 	mux.HandleFunc("/api/containers/images", ImageDetailsHandler(provider))
 
 	// Register download endpoints under /api/ with optional overrides
@@ -394,7 +394,7 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 					ImageVulnerabilitiesDetailHandler(queryProvider)(w, r)
 					return
 				}
-				// Single image detail with full info (repositories and instances)
+				// Single image detail with full info (references and containers)
 				log.Printf("Routing to ImageDetailFullHandler")
 				ImageDetailFullHandler(queryProvider)(w, r)
 			} else {

@@ -66,7 +66,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 
 	// Create a test image to associate vulnerabilities with
 	_, err = db.conn.Exec(`
-		INSERT INTO container_images (digest, created_at, updated_at)
+		INSERT INTO images (digest, created_at, updated_at)
 		VALUES ('sha256:test123', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	}
 
 	var imageID int64
-	err = db.conn.QueryRow(`SELECT id FROM container_images WHERE digest = 'sha256:test123'`).Scan(&imageID)
+	err = db.conn.QueryRow(`SELECT id FROM images WHERE digest = 'sha256:test123'`).Scan(&imageID)
 	if err != nil {
 		t.Fatalf("Failed to get image ID: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	var osName, osVersion string
 	err = db.conn.QueryRow(`
 		SELECT os_name, os_version
-		FROM container_images
+		FROM images
 		WHERE id = ?
 	`, imageID).Scan(&osName, &osVersion)
 

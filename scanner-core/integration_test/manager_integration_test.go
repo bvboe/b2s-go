@@ -53,12 +53,12 @@ func TestManagerWithDatabase(t *testing.T) {
 	manager := containers.NewManager()
 	manager.SetDatabase(db)
 
-	// Add instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -68,26 +68,26 @@ func TestManagerWithDatabase(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 
-	// Verify instance is in manager
-	if manager.GetInstanceCount() != 1 {
-		t.Errorf("Expected 1 instance in manager, got %d", manager.GetInstanceCount())
+	// Verify container is in manager
+	if manager.GetContainerCount() != 1 {
+		t.Errorf("Expected 1 container in manager, got %d", manager.GetContainerCount())
 	}
 
-	// Verify instance is in database
-	allInstances, err := db.GetAllInstances()
+	// Verify container is in database
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get instances from database: %v", err)
+		t.Fatalf("Failed to get containers from database: %v", err)
 	}
 
-	instanceRows := allInstances.([]database.ContainerInstanceRow)
-	if len(instanceRows) != 1 {
-		t.Errorf("Expected 1 instance in database, got %d", len(instanceRows))
+	containerRows := allContainers.([]database.ContainerRow)
+	if len(containerRows) != 1 {
+		t.Errorf("Expected 1 container in database, got %d", len(containerRows))
 	}
 
-	if instanceRows[0].Namespace != "default" || instanceRows[0].Pod != "test-pod" {
-		t.Errorf("Instance in database has wrong values: %+v", instanceRows[0])
+	if containerRows[0].Namespace != "default" || containerRows[0].Pod != "test-pod" {
+		t.Errorf("Container in database has wrong values: %+v", containerRows[0])
 	}
 }
 
@@ -111,12 +111,12 @@ func TestManagerWithScanQueue(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Add instance with new image
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container with new image
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -126,7 +126,7 @@ func TestManagerWithScanQueue(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 
 	// Give it a moment to process
 	time.Sleep(100 * time.Millisecond)
@@ -168,12 +168,12 @@ func TestManagerDoesNotEnqueueDuplicateScans(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Add first instance
-	instance1 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add first container
+	c1 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod-1",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -183,11 +183,11 @@ func TestManagerDoesNotEnqueueDuplicateScans(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance1)
+	manager.AddContainer(c1)
 	time.Sleep(100 * time.Millisecond)
 
 	if len(mockQueue.enqueuedScans) != 1 {
-		t.Fatalf("Expected 1 scan after first instance, got %d", len(mockQueue.enqueuedScans))
+		t.Fatalf("Expected 1 scan after first container, got %d", len(mockQueue.enqueuedScans))
 	}
 
 	// Mark the scan as completed
@@ -197,12 +197,12 @@ func TestManagerDoesNotEnqueueDuplicateScans(t *testing.T) {
 		t.Fatalf("Failed to store SBOM: %v", err)
 	}
 
-	// Add second instance with same image (should not trigger new scan)
-	instance2 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add second container with same image (should not trigger new scan)
+	c2 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod-2",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -212,7 +212,7 @@ func TestManagerDoesNotEnqueueDuplicateScans(t *testing.T) {
 		ContainerRuntime: "docker",
 	}
 
-	manager.AddContainerInstance(instance2)
+	manager.AddContainer(c2)
 	time.Sleep(100 * time.Millisecond)
 
 	// Should still be only 1 enqueued scan
@@ -221,7 +221,7 @@ func TestManagerDoesNotEnqueueDuplicateScans(t *testing.T) {
 	}
 }
 
-func TestManagerSetInstancesEnqueuesMultipleScans(t *testing.T) {
+func TestManagerSetContainersEnqueuesMultipleScans(t *testing.T) {
 	// Create temporary database
 	dbPath := "/tmp/test_manager_set_multi_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -241,13 +241,13 @@ func TestManagerSetInstancesEnqueuesMultipleScans(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Set multiple instances with different images
-	instances := []containers.ContainerInstance{
+	// Set multiple containers with different images
+	containers := []containers.Container{
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-1",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -257,10 +257,10 @@ func TestManagerSetInstancesEnqueuesMultipleScans(t *testing.T) {
 			ContainerRuntime: "containerd",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-2",
-				Container: "envoy",
+				Name: "envoy",
 			},
 			Image: containers.ImageID{
 				Reference: "envoy:v1.20",
@@ -270,10 +270,10 @@ func TestManagerSetInstancesEnqueuesMultipleScans(t *testing.T) {
 			ContainerRuntime: "docker",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "kube-system",
 				Pod:       "pod-3",
-				Container: "coredns",
+				Name: "coredns",
 			},
 			Image: containers.ImageID{
 				Reference: "coredns:v1.9",
@@ -284,7 +284,7 @@ func TestManagerSetInstancesEnqueuesMultipleScans(t *testing.T) {
 		},
 	}
 
-	manager.SetContainerInstances(instances)
+	manager.SetContainers(containers)
 	time.Sleep(100 * time.Millisecond)
 
 	// Should have enqueued 3 scans
@@ -303,7 +303,7 @@ func TestManagerSetInstancesEnqueuesMultipleScans(t *testing.T) {
 	}
 }
 
-func TestManagerSetInstancesDeduplicatesScans(t *testing.T) {
+func TestManagerSetContainersDeduplicatesScans(t *testing.T) {
 	// Create temporary database
 	dbPath := "/tmp/test_manager_set_dedup_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -323,13 +323,13 @@ func TestManagerSetInstancesDeduplicatesScans(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Set multiple instances with same image (should only enqueue once)
-	instances := []containers.ContainerInstance{
+	// Set multiple containers with same image (should only enqueue once)
+	containers := []containers.Container{
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-1",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -339,10 +339,10 @@ func TestManagerSetInstancesDeduplicatesScans(t *testing.T) {
 			ContainerRuntime: "containerd",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-2",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -352,10 +352,10 @@ func TestManagerSetInstancesDeduplicatesScans(t *testing.T) {
 			ContainerRuntime: "docker",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "kube-system",
 				Pod:       "pod-3",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -366,7 +366,7 @@ func TestManagerSetInstancesDeduplicatesScans(t *testing.T) {
 		},
 	}
 
-	manager.SetContainerInstances(instances)
+	manager.SetContainers(containers)
 	time.Sleep(100 * time.Millisecond)
 
 	// Should only enqueue 1 scan (deduplicated)
@@ -379,7 +379,7 @@ func TestManagerSetInstancesDeduplicatesScans(t *testing.T) {
 	}
 }
 
-func TestManagerRemoveInstance(t *testing.T) {
+func TestManagerRemoveContainer(t *testing.T) {
 	// Create temporary database
 	dbPath := "/tmp/test_manager_remove_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -394,12 +394,12 @@ func TestManagerRemoveInstance(t *testing.T) {
 	manager := containers.NewManager()
 	manager.SetDatabase(db)
 
-	// Add instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -409,30 +409,30 @@ func TestManagerRemoveInstance(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 
-	// Verify instance exists
-	if manager.GetInstanceCount() != 1 {
-		t.Fatalf("Expected 1 instance, got %d", manager.GetInstanceCount())
+	// Verify container exists
+	if manager.GetContainerCount() != 1 {
+		t.Fatalf("Expected 1 container, got %d", manager.GetContainerCount())
 	}
 
-	// Remove instance
-	manager.RemoveContainerInstance(instance.ID)
+	// Remove container
+	manager.RemoveContainer(c.ID)
 
-	// Verify instance is removed from manager
-	if manager.GetInstanceCount() != 0 {
-		t.Errorf("Expected 0 instances in manager after removal, got %d", manager.GetInstanceCount())
+	// Verify container is removed from manager
+	if manager.GetContainerCount() != 0 {
+		t.Errorf("Expected 0 containers in manager after removal, got %d", manager.GetContainerCount())
 	}
 
-	// Verify instance is removed from database
-	allInstances, err := db.GetAllInstances()
+	// Verify container is removed from database
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get instances from database: %v", err)
+		t.Fatalf("Failed to get containers from database: %v", err)
 	}
 
-	instanceRows := allInstances.([]database.ContainerInstanceRow)
-	if len(instanceRows) != 0 {
-		t.Errorf("Expected 0 instances in database after removal, got %d", len(instanceRows))
+	containerRows := allContainers.([]database.ContainerRow)
+	if len(containerRows) != 0 {
+		t.Errorf("Expected 0 containers in database after removal, got %d", len(containerRows))
 	}
 }
 
@@ -440,12 +440,12 @@ func TestManagerWithoutDatabase(t *testing.T) {
 	// Create manager without database
 	manager := containers.NewManager()
 
-	// Add instance (should work without database)
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container (should work without database)
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -455,20 +455,20 @@ func TestManagerWithoutDatabase(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 
-	// Verify instance is in manager
-	if manager.GetInstanceCount() != 1 {
-		t.Errorf("Expected 1 instance in manager, got %d", manager.GetInstanceCount())
+	// Verify container is in manager
+	if manager.GetContainerCount() != 1 {
+		t.Errorf("Expected 1 container in manager, got %d", manager.GetContainerCount())
 	}
 
 	// This should work fine without database
-	retrieved, exists := manager.GetInstance("default", "test-pod", "nginx")
+	retrieved, exists := manager.GetContainer("default", "test-pod", "nginx")
 	if !exists {
-		t.Error("Instance not found in manager")
+		t.Error("Container not found in manager")
 	}
 	if retrieved.Image.Digest != "sha256:abc123" {
-		t.Errorf("Retrieved instance has wrong digest: %s", retrieved.Image.Digest)
+		t.Errorf("Retrieved container has wrong digest: %s", retrieved.Image.Digest)
 	}
 }
 
@@ -487,12 +487,12 @@ func TestManagerWithoutScanQueue(t *testing.T) {
 	manager := containers.NewManager()
 	manager.SetDatabase(db)
 
-	// Add instance (should work without scan queue)
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add container (should work without scan queue)
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -502,22 +502,22 @@ func TestManagerWithoutScanQueue(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 
-	// Verify instance is in manager
-	if manager.GetInstanceCount() != 1 {
-		t.Errorf("Expected 1 instance in manager, got %d", manager.GetInstanceCount())
+	// Verify container is in manager
+	if manager.GetContainerCount() != 1 {
+		t.Errorf("Expected 1 container in manager, got %d", manager.GetContainerCount())
 	}
 
-	// Verify instance is in database
-	allInstances, err := db.GetAllInstances()
+	// Verify container is in database
+	allContainers, err := db.GetAllContainers()
 	if err != nil {
-		t.Fatalf("Failed to get instances from database: %v", err)
+		t.Fatalf("Failed to get containers from database: %v", err)
 	}
 
-	instanceRows := allInstances.([]database.ContainerInstanceRow)
-	if len(instanceRows) != 1 {
-		t.Errorf("Expected 1 instance in database, got %d", len(instanceRows))
+	containerRows := allContainers.([]database.ContainerRow)
+	if len(containerRows) != 1 {
+		t.Errorf("Expected 1 container in database, got %d", len(containerRows))
 	}
 }
 
@@ -542,12 +542,12 @@ func TestManagerRetryFailedScan(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Add first instance (should enqueue normal scan)
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add first container (should enqueue normal scan)
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -557,7 +557,7 @@ func TestManagerRetryFailedScan(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify normal scan was enqueued
@@ -571,8 +571,8 @@ func TestManagerRetryFailedScan(t *testing.T) {
 		t.Fatalf("Failed to update scan status: %v", err)
 	}
 
-	// Add same instance again (should enqueue force scan)
-	manager.AddContainerInstance(instance)
+	// Add same container again (should enqueue force scan)
+	manager.AddContainer(c)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify force scan was enqueued
@@ -605,12 +605,12 @@ func TestManagerRetryIncompleteData(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Add first instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add first container
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -620,7 +620,7 @@ func TestManagerRetryIncompleteData(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify normal scan was enqueued
@@ -644,8 +644,8 @@ func TestManagerRetryIncompleteData(t *testing.T) {
 		t.Fatal("Expected data to be incomplete (missing vulnerabilities)")
 	}
 
-	// Add same instance again (should enqueue force scan because data is incomplete)
-	manager.AddContainerInstance(instance)
+	// Add same container again (should enqueue force scan because data is incomplete)
+	manager.AddContainer(c)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify force scan was enqueued
@@ -678,12 +678,12 @@ func TestManagerNoRetryForCompleteData(t *testing.T) {
 	}
 	manager.SetScanQueue(mockQueue)
 
-	// Add first instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Add first container
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -693,7 +693,7 @@ func TestManagerNoRetryForCompleteData(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	manager.AddContainerInstance(instance)
+	manager.AddContainer(c)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify normal scan was enqueued
@@ -723,8 +723,8 @@ func TestManagerNoRetryForCompleteData(t *testing.T) {
 		t.Fatal("Expected data to be complete")
 	}
 
-	// Add same instance again (should NOT enqueue any scan - data is complete)
-	manager.AddContainerInstance(instance)
+	// Add same container again (should NOT enqueue any scan - data is complete)
+	manager.AddContainer(c)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify no additional scans were enqueued

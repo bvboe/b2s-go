@@ -68,7 +68,7 @@ func ScanStatusCountsHandler(provider ImageQueryProvider) http.HandlerFunc {
 }
 
 // buildScanStatusQuery constructs the SQL query for scan status counts
-// Only counts images that have at least one running container instance
+// Only counts images that have at least one running container
 func buildScanStatusQuery(namespaces, vulnStatuses, packageTypes, osNames []string) string {
 	query := `
 SELECT
@@ -76,9 +76,9 @@ SELECT
     status.description,
     status.sort_order,
     COUNT(DISTINCT images.id) as count
-FROM container_images images
+FROM images images
 JOIN scan_status status ON images.status = status.status
-JOIN container_instances instances ON images.id = instances.image_id`
+JOIN containers instances ON images.id = instances.image_id`
 
 	// Build WHERE conditions
 	var conditions []string
@@ -120,7 +120,7 @@ ORDER BY status.sort_order`
 }
 
 // NamespaceSummaryHandler creates an HTTP handler for /api/summary/by-namespace endpoint
-// Returns namespace-level vulnerability aggregations (averages per container instance)
+// Returns namespace-level vulnerability aggregations (averages per container)
 func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse query parameters
@@ -190,7 +190,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		for _, row := range result.Rows {
 			namespaceData = append(namespaceData, map[string]interface{}{
 				"namespace":        getStringValue(row, "namespace"),
-				"instance_count":   getIntValue(row, "instance_count"),
+				"container_count":   getIntValue(row, "container_count"),
 				"avg_critical":     roundToOne(getFloatValue(row, "avg_critical")),
 				"avg_high":         roundToOne(getFloatValue(row, "avg_high")),
 				"avg_medium":       roundToOne(getFloatValue(row, "avg_medium")),
@@ -213,7 +213,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 			// Write header
 			if err := writer.Write([]string{
-				"Namespace", "Instances", "Avg Critical", "Avg High", "Avg Medium",
+				"Namespace", "Containers", "Avg Critical", "Avg High", "Avg Medium",
 				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
 			}); err != nil {
 				log.Printf("Error writing CSV header: %v", err)
@@ -225,7 +225,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			for _, item := range namespaceData {
 				if err := writer.Write([]string{
 					fmt.Sprintf("%v", item["namespace"]),
-					fmt.Sprintf("%v", item["instance_count"]),
+					fmt.Sprintf("%v", item["container_count"]),
 					fmt.Sprintf("%.1f", item["avg_critical"]),
 					fmt.Sprintf("%.1f", item["avg_high"]),
 					fmt.Sprintf("%.1f", item["avg_medium"]),
@@ -296,8 +296,8 @@ func buildNamespaceSummaryQuery(namespaces, vulnStatuses, packageTypes, osNames 
 
 	// Base query with subqueries
 	baseQuery := fmt.Sprintf(`
-FROM container_instances instances
-JOIN container_images images ON instances.image_id = images.id
+FROM containers instances
+JOIN images images ON instances.image_id = images.id
 JOIN scan_status status ON images.status = status.status
 LEFT JOIN (
     SELECT image_id, COUNT(*) as package_count
@@ -362,7 +362,7 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 	// Build main query with sorting
 	selectClause := `SELECT
     instances.namespace,
-    COUNT(DISTINCT instances.id) as instance_count,
+    COUNT(DISTINCT instances.id) as container_count,
     AVG(COALESCE(vuln_counts.critical_count, 0)) as avg_critical,
     AVG(COALESCE(vuln_counts.high_count, 0)) as avg_high,
     AVG(COALESCE(vuln_counts.medium_count, 0)) as avg_medium,
@@ -377,7 +377,7 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 
 	// Add sorting with namespace as secondary sort
 	validSortColumns := map[string]bool{
-		"namespace": true, "instance_count": true, "avg_critical": true,
+		"namespace": true, "container_count": true, "avg_critical": true,
 		"avg_high": true, "avg_medium": true, "avg_low": true,
 		"avg_negligible": true, "avg_unknown": true, "avg_risk": true,
 		"avg_exploits": true, "avg_packages": true,
@@ -402,7 +402,7 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 }
 
 // DistributionSummaryHandler creates an HTTP handler for /api/summary/by-distribution endpoint
-// Returns OS distribution-level vulnerability aggregations (averages per container instance)
+// Returns OS distribution-level vulnerability aggregations (averages per container)
 func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse query parameters
@@ -472,7 +472,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		for _, row := range result.Rows {
 			distributionData = append(distributionData, map[string]interface{}{
 				"os_name":          getStringValue(row, "os_name"),
-				"instance_count":   getIntValue(row, "instance_count"),
+				"container_count":   getIntValue(row, "container_count"),
 				"avg_critical":     roundToOne(getFloatValue(row, "avg_critical")),
 				"avg_high":         roundToOne(getFloatValue(row, "avg_high")),
 				"avg_medium":       roundToOne(getFloatValue(row, "avg_medium")),
@@ -495,7 +495,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 			// Write header
 			if err := writer.Write([]string{
-				"OS Distribution", "Instances", "Avg Critical", "Avg High", "Avg Medium",
+				"OS Distribution", "Containers", "Avg Critical", "Avg High", "Avg Medium",
 				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
 			}); err != nil {
 				log.Printf("Error writing CSV header: %v", err)
@@ -507,7 +507,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			for _, item := range distributionData {
 				if err := writer.Write([]string{
 					fmt.Sprintf("%v", item["os_name"]),
-					fmt.Sprintf("%v", item["instance_count"]),
+					fmt.Sprintf("%v", item["container_count"]),
 					fmt.Sprintf("%.1f", item["avg_critical"]),
 					fmt.Sprintf("%.1f", item["avg_high"]),
 					fmt.Sprintf("%.1f", item["avg_medium"]),
@@ -578,8 +578,8 @@ func buildDistributionSummaryQuery(namespaces, vulnStatuses, packageTypes, osNam
 
 	// Base query with subqueries
 	baseQuery := fmt.Sprintf(`
-FROM container_instances instances
-JOIN container_images images ON instances.image_id = images.id
+FROM containers instances
+JOIN images images ON instances.image_id = images.id
 JOIN scan_status status ON images.status = status.status
 LEFT JOIN (
     SELECT image_id, COUNT(*) as package_count
@@ -646,7 +646,7 @@ WHERE status.status = 'completed'
 	// Build main query with sorting
 	selectClause := `SELECT
     images.os_name,
-    COUNT(DISTINCT instances.id) as instance_count,
+    COUNT(DISTINCT instances.id) as container_count,
     AVG(COALESCE(vuln_counts.critical_count, 0)) as avg_critical,
     AVG(COALESCE(vuln_counts.high_count, 0)) as avg_high,
     AVG(COALESCE(vuln_counts.medium_count, 0)) as avg_medium,
@@ -661,7 +661,7 @@ WHERE status.status = 'completed'
 
 	// Add sorting with os_name as secondary sort
 	validSortColumns := map[string]bool{
-		"os_name": true, "instance_count": true, "avg_critical": true,
+		"os_name": true, "container_count": true, "avg_critical": true,
 		"avg_high": true, "avg_medium": true, "avg_low": true,
 		"avg_negligible": true, "avg_unknown": true, "avg_risk": true,
 		"avg_exploits": true, "avg_packages": true,

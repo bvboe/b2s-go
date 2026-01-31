@@ -35,33 +35,33 @@ func TestCleanupOrphanedImages(t *testing.T) {
 	}
 
 	// Add instances - only image2 has an active instance
-	instance1 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance1 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "pod1",
-			Container: "container1",
+			Name: "container1",
 		},
 		Image:            image1,
 		NodeName:         "node1",
 		ContainerRuntime: "containerd",
 	}
 
-	instance2 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance2 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "pod2",
-			Container: "container2",
+			Name: "container2",
 		},
 		Image:            image2,
 		NodeName:         "node1",
 		ContainerRuntime: "containerd",
 	}
 
-	instance3 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance3 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "pod3",
-			Container: "container3",
+			Name: "container3",
 		},
 		Image:            image3,
 		NodeName:         "node1",
@@ -69,22 +69,22 @@ func TestCleanupOrphanedImages(t *testing.T) {
 	}
 
 	// Add all instances
-	_, err = db.AddInstance(instance1)
+	_, err = db.AddContainer(instance1)
 	if err != nil {
 		t.Fatalf("Failed to add instance1: %v", err)
 	}
-	_, err = db.AddInstance(instance2)
+	_, err = db.AddContainer(instance2)
 	if err != nil {
 		t.Fatalf("Failed to add instance2: %v", err)
 	}
-	_, err = db.AddInstance(instance3)
+	_, err = db.AddContainer(instance3)
 	if err != nil {
 		t.Fatalf("Failed to add instance3: %v", err)
 	}
 
 	// Verify all images exist
 	var imageCount int
-	err = db.conn.QueryRow("SELECT COUNT(*) FROM container_images").Scan(&imageCount)
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM images").Scan(&imageCount)
 	if err != nil {
 		t.Fatalf("Failed to count images: %v", err)
 	}
@@ -93,18 +93,18 @@ func TestCleanupOrphanedImages(t *testing.T) {
 	}
 
 	// Remove instance1 and instance3 to make their images orphaned
-	err = db.RemoveInstance(instance1.ID)
+	err = db.RemoveContainer(instance1.ID)
 	if err != nil {
 		t.Fatalf("Failed to remove instance1: %v", err)
 	}
-	err = db.RemoveInstance(instance3.ID)
+	err = db.RemoveContainer(instance3.ID)
 	if err != nil {
 		t.Fatalf("Failed to remove instance3: %v", err)
 	}
 
 	// Verify only 1 instance remains
 	var instanceCount int
-	err = db.conn.QueryRow("SELECT COUNT(*) FROM container_instances").Scan(&instanceCount)
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM containers").Scan(&instanceCount)
 	if err != nil {
 		t.Fatalf("Failed to count instances: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestCleanupOrphanedImages(t *testing.T) {
 	}
 
 	// Verify only 1 image remains (the one with an active instance)
-	err = db.conn.QueryRow("SELECT COUNT(*) FROM container_images").Scan(&imageCount)
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM images").Scan(&imageCount)
 	if err != nil {
 		t.Fatalf("Failed to count images after cleanup: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestCleanupOrphanedImages(t *testing.T) {
 
 	// Verify the remaining image is image2 (redis)
 	var digest string
-	err = db.conn.QueryRow("SELECT digest FROM container_images LIMIT 1").Scan(&digest)
+	err = db.conn.QueryRow("SELECT digest FROM images LIMIT 1").Scan(&digest)
 	if err != nil {
 		t.Fatalf("Failed to get remaining image: %v", err)
 	}
@@ -160,18 +160,18 @@ func TestCleanupOrphanedImages_NoOrphans(t *testing.T) {
 		Digest:    "sha256:active1",
 	}
 
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "pod1",
-			Container: "container1",
+			Name: "container1",
 		},
 		Image:            image,
 		NodeName:         "node1",
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}

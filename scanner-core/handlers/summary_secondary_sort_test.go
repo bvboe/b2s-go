@@ -15,10 +15,10 @@ func TestNamespaceSecondarySorting(t *testing.T) {
 		shouldNotContain  string
 	}{
 		{
-			name:             "Sort by instance_count includes namespace secondary",
-			sortBy:           "instance_count",
+			name:             "Sort by container_count includes namespace secondary",
+			sortBy:           "container_count",
 			sortOrder:        "DESC",
-			expectedOrderBy:  "ORDER BY instance_count DESC, namespace ASC",
+			expectedOrderBy:  "ORDER BY container_count DESC, namespace ASC",
 			shouldNotContain: "",
 		},
 		{
@@ -72,10 +72,10 @@ func TestDistributionSecondarySorting(t *testing.T) {
 		shouldNotContain  string
 	}{
 		{
-			name:             "Sort by instance_count includes os_name secondary",
-			sortBy:           "instance_count",
+			name:             "Sort by container_count includes os_name secondary",
+			sortBy:           "container_count",
 			sortOrder:        "DESC",
-			expectedOrderBy:  "ORDER BY instance_count DESC, os_name ASC",
+			expectedOrderBy:  "ORDER BY container_count DESC, os_name ASC",
 			shouldNotContain: "",
 		},
 		{

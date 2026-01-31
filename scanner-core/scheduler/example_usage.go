@@ -37,7 +37,7 @@ func setupScheduler(config Config, refreshTrigger containers.RefreshTrigger) *sc
 	}
 
 	// Job 3: Cleanup orphaned images daily
-	// Removes container_images with no associated container_instances
+	// Removes images with no associated containers
 	// Also cleans up related packages and vulnerabilities
 	if config.Jobs.Cleanup.Enabled {
 		cleanupJob := jobs.NewCleanupOrphanedImagesJob(db)

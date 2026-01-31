@@ -22,7 +22,7 @@ type DatabaseUpdateChecker interface {
 // DatabaseInterface defines the interface for database operations needed by RescanDatabaseJob
 type DatabaseInterface interface {
 	GetImagesByStatus(status database.Status) ([]database.ContainerImage, error)
-	GetFirstInstanceForImage(digest string) (*database.ContainerInstanceRow, error)
+	GetFirstContainerForImage(digest string) (*database.ContainerRow, error)
 	GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]database.ContainerImage, error)
 }
 
@@ -117,8 +117,8 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	// Enqueue force scan for each image
 	rescanned := 0
 	for _, img := range images {
-		// Get the first instance to determine node and runtime
-		instance, err := j.db.GetFirstInstanceForImage(img.Digest)
+		// Get the first container to determine node and runtime
+		instance, err := j.db.GetFirstContainerForImage(img.Digest)
 		if err != nil {
 			log.Printf("[rescan-database] Warning: could not find instance for image %s: %v", img.Digest, err)
 			continue

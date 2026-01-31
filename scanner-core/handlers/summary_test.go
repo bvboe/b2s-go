@@ -67,8 +67,8 @@ func TestScanStatusCountsHandler(t *testing.T) {
 				if !strings.Contains(query, "instances.namespace IN ('default','kube-system')") {
 					t.Error("Expected namespace filter in query")
 				}
-				if !strings.Contains(query, "JOIN container_instances instances") {
-					t.Error("Expected JOIN for instances")
+				if !strings.Contains(query, "JOIN containers instances") {
+					t.Error("Expected JOIN for containers")
 				}
 				return &database.QueryResult{
 					Columns: []string{"status", "description", "sort_order", "count"},
@@ -145,11 +145,11 @@ func TestNamespaceSummaryHandler(t *testing.T) {
 				}
 				// Otherwise return data query result
 				return &database.QueryResult{
-					Columns: []string{"namespace", "instance_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
+					Columns: []string{"namespace", "container_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
 					Rows: []map[string]interface{}{
 						{
 							"namespace":      "default",
-							"instance_count": int64(10),
+							"container_count": int64(10),
 							"avg_critical":   float64(5.5),
 							"avg_high":       float64(10.2),
 							"avg_medium":     float64(20.8),
@@ -162,7 +162,7 @@ func TestNamespaceSummaryHandler(t *testing.T) {
 						},
 						{
 							"namespace":      "kube-system",
-							"instance_count": int64(5),
+							"container_count": int64(5),
 							"avg_critical":   float64(0.0),
 							"avg_high":       float64(2.1),
 							"avg_medium":     float64(5.5),
@@ -210,11 +210,11 @@ func TestNamespaceSummaryHandler(t *testing.T) {
 					}, nil
 				}
 				return &database.QueryResult{
-					Columns: []string{"namespace", "instance_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
+					Columns: []string{"namespace", "container_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
 					Rows: []map[string]interface{}{
 						{
 							"namespace":       "default",
-							"instance_count":  int64(10),
+							"container_count":  int64(10),
 							"avg_critical":    float64(5.5),
 							"avg_high":        float64(10.2),
 							"avg_medium":      float64(20.8),
@@ -268,11 +268,11 @@ func TestNamespaceSummaryHandler(t *testing.T) {
 					}, nil
 				}
 				return &database.QueryResult{
-					Columns: []string{"namespace", "instance_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
+					Columns: []string{"namespace", "container_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
 					Rows: []map[string]interface{}{
 						{
 							"namespace":      "default",
-							"instance_count": int64(5),
+							"container_count": int64(5),
 							"avg_critical":   float64(2.0),
 							"avg_high":       float64(5.0),
 							"avg_medium":     float64(10.0),
@@ -306,7 +306,7 @@ func TestNamespaceSummaryHandler(t *testing.T) {
 					}, nil
 				}
 				return &database.QueryResult{
-					Columns: []string{"namespace", "instance_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
+					Columns: []string{"namespace", "container_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
 					Rows:    []map[string]interface{}{},
 				}, nil
 			},
@@ -357,11 +357,11 @@ func TestDistributionSummaryHandler(t *testing.T) {
 					}, nil
 				}
 				return &database.QueryResult{
-					Columns: []string{"os_name", "instance_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
+					Columns: []string{"os_name", "container_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
 					Rows: []map[string]interface{}{
 						{
 							"os_name":        "alpine:3.18",
-							"instance_count": int64(15),
+							"container_count": int64(15),
 							"avg_critical":   float64(3.2),
 							"avg_high":       float64(8.5),
 							"avg_medium":     float64(12.0),
@@ -374,7 +374,7 @@ func TestDistributionSummaryHandler(t *testing.T) {
 						},
 						{
 							"os_name":        "ubuntu:22.04",
-							"instance_count": int64(10),
+							"container_count": int64(10),
 							"avg_critical":   float64(1.0),
 							"avg_high":       float64(5.0),
 							"avg_medium":     float64(8.0),
@@ -415,11 +415,11 @@ func TestDistributionSummaryHandler(t *testing.T) {
 					}, nil
 				}
 				return &database.QueryResult{
-					Columns: []string{"os_name", "instance_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
+					Columns: []string{"os_name", "container_count", "avg_critical", "avg_high", "avg_medium", "avg_low", "avg_negligible", "avg_unknown", "avg_risk", "avg_exploits", "avg_packages"},
 					Rows: []map[string]interface{}{
 						{
 							"os_name":        "alpine:3.18",
-							"instance_count": int64(15),
+							"container_count": int64(15),
 							"avg_critical":   float64(3.2),
 							"avg_high":       float64(8.5),
 							"avg_medium":     float64(15.0),
@@ -510,7 +510,7 @@ func TestBuildScanStatusQuery(t *testing.T) {
 				"SELECT",
 				"status.status",
 				"COUNT(DISTINCT images.id)",
-				"JOIN container_instances instances",
+				"JOIN containers instances",
 				"GROUP BY status.status",
 				"HAVING count > 0",
 				"ORDER BY status.sort_order",
@@ -520,7 +520,7 @@ func TestBuildScanStatusQuery(t *testing.T) {
 			name:       "with namespace filter",
 			namespaces: []string{"default"},
 			expectedInQuery: []string{
-				"JOIN container_instances instances",
+				"JOIN containers instances",
 				"instances.namespace IN ('default')",
 			},
 		},

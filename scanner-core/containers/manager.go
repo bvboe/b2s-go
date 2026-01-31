@@ -7,16 +7,16 @@ import (
 
 // ReconciliationStats holds statistics about a reconciliation operation
 type ReconciliationStats struct {
-	InstancesAdded   int // Number of new container instances added
-	InstancesRemoved int // Number of container instances removed
-	ImagesAdded      int // Number of new container images discovered
+	ContainersAdded   int // Number of new containers added
+	ContainersRemoved int // Number of containers removed
+	ImagesAdded       int // Number of new images discovered
 }
 
 // DatabaseInterface defines the interface for database operations
 type DatabaseInterface interface {
-	AddInstance(instance ContainerInstance) (bool, error)
-	RemoveInstance(id ContainerInstanceID) error
-	SetInstances(instances []ContainerInstance) (*ReconciliationStats, error)
+	AddContainer(c Container) (bool, error)
+	RemoveContainer(id ContainerID) error
+	SetContainers(containers []Container) (*ReconciliationStats, error)
 	GetImageScanStatus(digest string) (string, error)
 	IsScanDataComplete(digest string) (bool, error)
 }
@@ -27,26 +27,26 @@ type ScanQueueInterface interface {
 	EnqueueForceScan(image ImageID, nodeName string, containerRuntime string)
 }
 
-// RefreshTrigger defines the interface for triggering container instance refreshes
+// RefreshTrigger defines the interface for triggering container refreshes
 // This is implemented by the agent or k8s-scan-server to provide running container data
 type RefreshTrigger interface {
-	// TriggerRefresh signals that scanner-core wants updated container instance data
-	// The implementation should gather current container data and call SetContainerInstances
+	// TriggerRefresh signals that scanner-core wants updated container data
+	// The implementation should gather current container data and call SetContainers
 	TriggerRefresh() error
 }
 
-// Manager handles container instance lifecycle management
+// Manager handles container lifecycle management
 type Manager struct {
-	mu        sync.RWMutex
-	instances map[string]ContainerInstance // key: namespace/pod/container
-	db        DatabaseInterface            // optional database persistence
-	scanQueue ScanQueueInterface           // optional scan queue for SBOM generation
+	mu         sync.RWMutex
+	containers map[string]Container // key: namespace/pod/name
+	db         DatabaseInterface    // optional database persistence
+	scanQueue  ScanQueueInterface   // optional scan queue for SBOM generation
 }
 
-// NewManager creates a new container instance manager
+// NewManager creates a new container manager
 func NewManager() *Manager {
 	return &Manager{
-		instances: make(map[string]ContainerInstance),
+		containers: make(map[string]Container),
 	}
 }
 
@@ -68,26 +68,26 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 
 	// Catch-up: enqueue scans for images discovered before queue was connected
 	// This handles images from initial sync that couldn't be enqueued
-	if m.db != nil && len(m.instances) > 0 {
-		log.Printf("Checking %d instances for pending scans...", len(m.instances))
+	if m.db != nil && len(m.containers) > 0 {
+		log.Printf("Checking %d containers for pending scans...", len(m.containers))
 
 		// Track unique images to avoid duplicate scan jobs
 		seenDigests := make(map[string]bool)
 		pendingCount := 0
 
-		for _, instance := range m.instances {
-			if instance.Image.Digest == "" {
+		for _, c := range m.containers {
+			if c.Image.Digest == "" {
 				continue
 			}
-			if seenDigests[instance.Image.Digest] {
+			if seenDigests[c.Image.Digest] {
 				continue
 			}
-			seenDigests[instance.Image.Digest] = true
+			seenDigests[c.Image.Digest] = true
 
 			// Check and enqueue scan with retry logic
 			// Note: checkAndEnqueueScan needs the lock released
 			m.mu.Unlock()
-			m.checkAndEnqueueScan(instance)
+			m.checkAndEnqueueScan(c)
 			m.mu.Lock()
 			pendingCount++
 		}
@@ -97,115 +97,115 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 	m.mu.Unlock()
 }
 
-// makeKey creates a unique key for a container instance
-func makeKey(namespace, pod, container string) string {
-	return namespace + "/" + pod + "/" + container
+// makeKey creates a unique key for a container
+func makeKey(namespace, pod, name string) string {
+	return namespace + "/" + pod + "/" + name
 }
 
-// AddContainerInstance adds a single container instance to the manager
-func (m *Manager) AddContainerInstance(instance ContainerInstance) {
+// AddContainer adds a single container to the manager
+func (m *Manager) AddContainer(c Container) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := makeKey(instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
-	m.instances[key] = instance
+	key := makeKey(c.ID.Namespace, c.ID.Pod, c.ID.Name)
+	m.containers[key] = c
 
-	log.Printf("Add container instance: namespace=%s, pod=%s, container=%s, image=%s (digest=%s)",
-		instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-		instance.Image.Reference, instance.Image.Digest)
+	log.Printf("Add container: namespace=%s, pod=%s, name=%s, image=%s (digest=%s)",
+		c.ID.Namespace, c.ID.Pod, c.ID.Name,
+		c.Image.Reference, c.Image.Digest)
 
 	// Persist to database if configured
 	if m.db != nil {
-		if _, err := m.db.AddInstance(instance); err != nil {
-			log.Printf("Error adding instance to database: %v", err)
+		if _, err := m.db.AddContainer(c); err != nil {
+			log.Printf("Error adding container to database: %v", err)
 			return
 		}
 
 		// Check if this image needs scanning or retrying
-		if m.scanQueue != nil && instance.Image.Digest != "" {
-			m.checkAndEnqueueScan(instance)
+		if m.scanQueue != nil && c.Image.Digest != "" {
+			m.checkAndEnqueueScan(c)
 		}
 	}
 }
 
-// RemoveContainerInstance removes a single container instance from the manager
-func (m *Manager) RemoveContainerInstance(id ContainerInstanceID) {
+// RemoveContainer removes a single container from the manager
+func (m *Manager) RemoveContainer(id ContainerID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := makeKey(id.Namespace, id.Pod, id.Container)
-	delete(m.instances, key)
+	key := makeKey(id.Namespace, id.Pod, id.Name)
+	delete(m.containers, key)
 
-	log.Printf("Remove container instance: namespace=%s, pod=%s, container=%s",
-		id.Namespace, id.Pod, id.Container)
+	log.Printf("Remove container: namespace=%s, pod=%s, name=%s",
+		id.Namespace, id.Pod, id.Name)
 
 	// Remove from database if configured
 	if m.db != nil {
-		if err := m.db.RemoveInstance(id); err != nil {
-			log.Printf("Error removing instance from database: %v", err)
+		if err := m.db.RemoveContainer(id); err != nil {
+			log.Printf("Error removing container from database: %v", err)
 		}
 	}
 }
 
-// SetContainerInstances replaces the entire collection of container instances
-func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
+// SetContainers replaces the entire collection of containers
+func (m *Manager) SetContainers(containers []Container) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Clear existing instances
-	m.instances = make(map[string]ContainerInstance)
+	// Clear existing containers
+	m.containers = make(map[string]Container)
 
-	// Add all new instances
-	for _, instance := range instances {
-		key := makeKey(instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
-		m.instances[key] = instance
+	// Add all new containers
+	for _, c := range containers {
+		key := makeKey(c.ID.Namespace, c.ID.Pod, c.ID.Name)
+		m.containers[key] = c
 	}
 
-	// Log summary instead of every instance (to reduce noise in large clusters)
+	// Log summary instead of every container (to reduce noise in large clusters)
 	uniqueImages := make(map[string]bool)
 	uniqueNodes := make(map[string]bool)
-	for _, instance := range instances {
-		if instance.Image.Digest != "" {
-			uniqueImages[instance.Image.Digest] = true
+	for _, c := range containers {
+		if c.Image.Digest != "" {
+			uniqueImages[c.Image.Digest] = true
 		}
-		if instance.NodeName != "" {
-			uniqueNodes[instance.NodeName] = true
+		if c.NodeName != "" {
+			uniqueNodes[c.NodeName] = true
 		}
 	}
 
-	log.Printf("Set container instances: %d instances, %d unique images, %d nodes",
-		len(instances), len(uniqueImages), len(uniqueNodes))
+	log.Printf("Set containers: %d containers, %d unique images, %d nodes",
+		len(containers), len(uniqueImages), len(uniqueNodes))
 
-	// Log first 3 instances as samples for debugging (only if we have instances)
-	if len(instances) > 0 {
+	// Log first 3 containers as samples for debugging (only if we have containers)
+	if len(containers) > 0 {
 		sampleCount := 3
-		if len(instances) < sampleCount {
-			sampleCount = len(instances)
+		if len(containers) < sampleCount {
+			sampleCount = len(containers)
 		}
-		log.Printf("Sample instances:")
+		log.Printf("Sample containers:")
 		for i := 0; i < sampleCount; i++ {
-			instance := instances[i]
-			log.Printf("  [%d] ns=%s, pod=%s, container=%s, image=%s, node=%s",
-				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-				instance.Image.Reference, instance.NodeName)
+			c := containers[i]
+			log.Printf("  [%d] ns=%s, pod=%s, name=%s, image=%s, node=%s",
+				i, c.ID.Namespace, c.ID.Pod, c.ID.Name,
+				c.Image.Reference, c.NodeName)
 		}
-		if len(instances) > sampleCount {
-			log.Printf("  ... and %d more instances", len(instances)-sampleCount)
+		if len(containers) > sampleCount {
+			log.Printf("  ... and %d more containers", len(containers)-sampleCount)
 		}
 	}
 
 	// Update database if configured
 	if m.db != nil {
-		stats, err := m.db.SetInstances(instances)
+		stats, err := m.db.SetContainers(containers)
 		if err != nil {
-			log.Printf("Error setting instances in database: %v", err)
+			log.Printf("Error setting containers in database: %v", err)
 			return
 		}
 
 		// Log reconciliation summary
 		if stats != nil {
-			log.Printf("Reconciliation summary: %d instances added, %d instances removed, %d new images discovered",
-				stats.InstancesAdded, stats.InstancesRemoved, stats.ImagesAdded)
+			log.Printf("Reconciliation summary: %d containers added, %d containers removed, %d new images discovered",
+				stats.ContainersAdded, stats.ContainersRemoved, stats.ImagesAdded)
 		}
 
 		// Enqueue scan jobs for images that need scanning or retrying
@@ -213,59 +213,59 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 			// Track unique images to avoid duplicate scan jobs
 			seenDigests := make(map[string]bool)
 
-			for _, instance := range instances {
-				if instance.Image.Digest == "" {
-					continue // Skip instances without digest
+			for _, c := range containers {
+				if c.Image.Digest == "" {
+					continue // Skip containers without digest
 				}
 
 				// Skip if we've already processed this digest
-				if seenDigests[instance.Image.Digest] {
+				if seenDigests[c.Image.Digest] {
 					continue
 				}
-				seenDigests[instance.Image.Digest] = true
+				seenDigests[c.Image.Digest] = true
 
 				// Check and enqueue scan with retry logic
-				m.checkAndEnqueueScan(instance)
+				m.checkAndEnqueueScan(c)
 			}
 		}
 	}
 }
 
-// GetAllInstances returns all container instances (thread-safe copy)
-func (m *Manager) GetAllInstances() []ContainerInstance {
+// GetAllContainers returns all containers (thread-safe copy)
+func (m *Manager) GetAllContainers() []Container {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	instances := make([]ContainerInstance, 0, len(m.instances))
-	for _, instance := range m.instances {
-		instances = append(instances, instance)
+	result := make([]Container, 0, len(m.containers))
+	for _, c := range m.containers {
+		result = append(result, c)
 	}
-	return instances
+	return result
 }
 
-// GetInstanceCount returns the number of container instances
-func (m *Manager) GetInstanceCount() int {
+// GetContainerCount returns the number of containers
+func (m *Manager) GetContainerCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return len(m.instances)
+	return len(m.containers)
 }
 
-// GetInstance retrieves a specific container instance
-func (m *Manager) GetInstance(namespace, pod, container string) (ContainerInstance, bool) {
+// GetContainer retrieves a specific container
+func (m *Manager) GetContainer(namespace, pod, name string) (Container, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	key := makeKey(namespace, pod, container)
-	instance, exists := m.instances[key]
-	return instance, exists
+	key := makeKey(namespace, pod, name)
+	c, exists := m.containers[key]
+	return c, exists
 }
 
 // checkAndEnqueueScan checks if an image needs scanning and enqueues it with appropriate flags
 // This method handles retrying failed or incomplete scans
-func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
-	scanStatus, err := m.db.GetImageScanStatus(instance.Image.Digest)
+func (m *Manager) checkAndEnqueueScan(c Container) {
+	scanStatus, err := m.db.GetImageScanStatus(c.Image.Digest)
 	if err != nil {
-		log.Printf("Error checking scan status for %s: %v", instance.Image.Digest, err)
+		log.Printf("Error checking scan status for %s: %v", c.Image.Digest, err)
 		return
 	}
 
@@ -274,27 +274,27 @@ func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
 	case "pending":
 		// New image, enqueue normal scan
 		log.Printf("Enqueuing scan for new image: %s (digest=%s)",
-			instance.Image.Reference, instance.Image.Digest)
-		m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+			c.Image.Reference, c.Image.Digest)
+		m.scanQueue.EnqueueScan(c.Image, c.NodeName, c.ContainerRuntime)
 
 	case "failed":
 		// Previous scan failed, retry with force scan
 		log.Printf("Retrying failed scan for image: %s (digest=%s)",
-			instance.Image.Reference, instance.Image.Digest)
-		m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+			c.Image.Reference, c.Image.Digest)
+		m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 
 	case "scanned":
 		// Check if data is actually complete
-		isComplete, err := m.db.IsScanDataComplete(instance.Image.Digest)
+		isComplete, err := m.db.IsScanDataComplete(c.Image.Digest)
 		if err != nil {
-			log.Printf("Error checking scan data completeness for %s: %v", instance.Image.Digest, err)
+			log.Printf("Error checking scan data completeness for %s: %v", c.Image.Digest, err)
 			return
 		}
 		if !isComplete {
 			// Data is incomplete, retry with force scan
 			log.Printf("Retrying scan for image with incomplete data: %s (digest=%s)",
-				instance.Image.Reference, instance.Image.Digest)
-			m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+				c.Image.Reference, c.Image.Digest)
+			m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 		}
 		// If complete, no action needed
 
@@ -303,7 +303,7 @@ func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
 		// This typically means a previous scan was interrupted (e.g., pod restart).
 		// Re-enqueue with force scan to resume/restart the scan.
 		log.Printf("Retrying interrupted scan for image: %s (digest=%s)",
-			instance.Image.Reference, instance.Image.Digest)
-		m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
+			c.Image.Reference, c.Image.Digest)
+		m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 	}
 }

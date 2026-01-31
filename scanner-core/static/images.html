@@ -68,7 +68,7 @@
                     <thead>
                         <tr>
                             <th rowspan="2" class="sortable" data-sort-field="image" onclick="sortByColumn('image')"><b>Container Image</b></th>
-                            <th rowspan="2" class="sortable" data-sort-field="instance_count" onclick="sortByColumn('instance_count')"><b># Instances</b></th>
+                            <th rowspan="2" class="sortable" data-sort-field="container_count" onclick="sortByColumn('container_count')"><b># Containers</b></th>
                             <th colspan="6"><b>Vulnerabilities</b></th>
                             <th rowspan="2" class="sortable" data-sort-field="total_risk" onclick="sortByColumn('total_risk')"><b>Risk Score</b></th>
                             <th rowspan="2" class="sortable" data-sort-field="exploit_count" onclick="sortByColumn('exploit_count')"><b>Known Exploits</b></th>
@@ -116,7 +116,7 @@
                 addCellToRow(row, 'left', item.image || '');
 
                 // Add instance count
-                addCellToRow(row, 'right', formatNumber(item.instance_count));
+                addCellToRow(row, 'right', formatNumber(item.container_count));
 
                 // Check if scan is complete
                 if (isScanComplete(item.status_description)) {

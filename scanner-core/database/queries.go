@@ -72,7 +72,7 @@ func (db *DB) GetPackagesByImage(digest string) (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT p.id, p.image_id, p.name, p.version, p.type, p.number_of_instances, p.created_at
 		FROM packages p
-		JOIN container_images img ON p.image_id = img.id
+		JOIN images img ON p.image_id = img.id
 		WHERE img.digest = ?
 		ORDER BY p.name, p.version
 	`, digest)
@@ -105,7 +105,7 @@ func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
 		SELECT v.id, v.image_id, v.cve_id, v.package_name, v.package_version, v.package_type,
 		       v.severity, v.fix_status, v.fixed_version, v.count, v.created_at
 		FROM vulnerabilities v
-		JOIN container_images img ON v.image_id = img.id
+		JOIN images img ON v.image_id = img.id
 		WHERE img.digest = ?
 		ORDER BY
 			CASE v.severity
@@ -153,7 +153,7 @@ func (db *DB) GetImageSummary(digest string) (interface{}, error) {
 			img.os_name,
 			img.os_version,
 			img.updated_at
-		FROM container_images img
+		FROM images img
 		WHERE img.digest = ?
 	`, digest).Scan(&summary.ImageID, &summary.PackageCount, &summary.OSName,
 		&summary.OSVersion, &summary.UpdatedAt)
@@ -183,7 +183,7 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 			(SELECT COUNT(*) FROM packages WHERE image_id = img.id),
 			COALESCE(img.os_name, ''),
 			COALESCE(img.os_version, '')
-		FROM container_images img
+		FROM images img
 		WHERE img.digest = ?
 	`, digest).Scan(&details.ID, &details.Digest, &details.Status,
 		&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
@@ -259,7 +259,7 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 			(SELECT COUNT(*) FROM packages WHERE image_id = img.id),
 			COALESCE(img.os_name, ''),
 			COALESCE(img.os_version, '')
-		FROM container_images img
+		FROM images img
 		ORDER BY img.created_at DESC
 	`)
 	if err != nil {
@@ -340,8 +340,8 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 // Returns a signature in format: "timestamp|count" (e.g., "2025-12-24T18:00:00Z|42")
 //
 // This signature changes when:
-// - container_images.updated_at changes (scans complete, data updated)
-// - container_instances count changes (pods added/deleted)
+// - images.updated_at changes (scans complete, data updated)
+// - containers count changes (pods added/deleted)
 //
 // Using row count is necessary to detect deletions, since deleted rows have no
 // timestamp to update.
@@ -355,9 +355,9 @@ func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
 		SELECT
 			CASE
 				WHEN COUNT(*) = 0 THEN NULL
-				ELSE MAX(updated_at) || '|' || (SELECT COUNT(*) FROM container_instances)
+				ELSE MAX(updated_at) || '|' || (SELECT COUNT(*) FROM containers)
 			END
-		FROM container_images
+		FROM images
 	`
 
 	err := db.conn.QueryRow(query).Scan(&signature)
@@ -372,11 +372,11 @@ func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
 	return signature.String, nil
 }
 
-// ScannedContainerInstance represents a container instance for metrics
-type ScannedContainerInstance struct {
+// ScannedContainer represents a container for metrics
+type ScannedContainer struct {
 	Namespace    string `json:"namespace"`
 	Pod          string `json:"pod"`
-	Container    string `json:"container"`
+	Name         string `json:"name"`
 	NodeName     string `json:"node_name"`
 	Reference    string `json:"reference"`
 	Digest       string `json:"digest"`
@@ -384,25 +384,25 @@ type ScannedContainerInstance struct {
 	Architecture string `json:"architecture"`
 }
 
-// GetScannedContainerInstances returns all container instances where scan is completed
-func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error) {
+// GetScannedContainers returns all containers where scan is completed
+func (db *DB) GetScannedContainers() ([]ScannedContainer, error) {
 	rows, err := db.conn.Query(`
 		SELECT
-			ci.namespace,
-			ci.pod,
-			ci.container,
-			ci.node_name,
-			ci.reference,
+			c.namespace,
+			c.pod,
+			c.name,
+			c.node_name,
+			c.reference,
 			img.digest,
 			COALESCE(img.os_name, '') as os_name,
 			COALESCE(img.architecture, '') as architecture
-		FROM container_instances ci
-		JOIN container_images img ON ci.image_id = img.id
+		FROM containers c
+		JOIN images img ON c.image_id = img.id
 		WHERE img.status = 'completed'
-		ORDER BY ci.namespace, ci.pod, ci.container
+		ORDER BY c.namespace, c.pod, c.name
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query scanned container instances: %w", err)
+		return nil, fmt.Errorf("failed to query scanned containers: %w", err)
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
@@ -410,26 +410,26 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 		}
 	}()
 
-	var instances []ScannedContainerInstance
+	var result []ScannedContainer
 	for rows.Next() {
-		var instance ScannedContainerInstance
+		var sc ScannedContainer
 		err := rows.Scan(
-			&instance.Namespace,
-			&instance.Pod,
-			&instance.Container,
-			&instance.NodeName,
-			&instance.Reference,
-			&instance.Digest,
-			&instance.OSName,
-			&instance.Architecture,
+			&sc.Namespace,
+			&sc.Pod,
+			&sc.Name,
+			&sc.NodeName,
+			&sc.Reference,
+			&sc.Digest,
+			&sc.OSName,
+			&sc.Architecture,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan container instance row: %w", err)
+			return nil, fmt.Errorf("failed to scan container row: %w", err)
 		}
-		instances = append(instances, instance)
+		result = append(result, sc)
 	}
 
-	return instances, nil
+	return result, nil
 }
 
 // ImageScanStatusCount represents the count of images by scan status
@@ -439,7 +439,7 @@ type ImageScanStatusCount struct {
 }
 
 // GetImageScanStatusCounts returns the count of running images grouped by scan status
-// Only counts images that have at least one running container instance
+// Only counts images that have at least one running container
 func (db *DB) GetImageScanStatusCounts() ([]ImageScanStatusCount, error) {
 	// Get all possible statuses from scan_status table
 	statusRows, err := db.conn.Query(`
@@ -462,13 +462,13 @@ func (db *DB) GetImageScanStatusCounts() ([]ImageScanStatusCount, error) {
 		log.Printf("Warning: Failed to close status rows: %v", err)
 	}
 
-	// Get counts for running images (images with at least one container instance)
+	// Get counts for running images (images with at least one container)
 	rows, err := db.conn.Query(`
 		SELECT
 			img.status,
 			COUNT(DISTINCT img.id) as count
-		FROM container_images img
-		INNER JOIN container_instances ci ON ci.image_id = img.id
+		FROM images img
+		INNER JOIN containers c ON c.image_id = img.id
 		GROUP BY img.status
 	`)
 	if err != nil {
@@ -499,12 +499,12 @@ func (db *DB) GetImageScanStatusCounts() ([]ImageScanStatusCount, error) {
 	return result, nil
 }
 
-// VulnerabilityInstance represents a vulnerability found in a running container instance
-type VulnerabilityInstance struct {
+// ContainerVulnerability represents a vulnerability found in a running container
+type ContainerVulnerability struct {
 	VulnID         int64   `json:"vuln_id"`
 	Namespace      string  `json:"namespace"`
 	Pod            string  `json:"pod"`
-	Container      string  `json:"container"`
+	Name           string  `json:"name"`
 	NodeName       string  `json:"node_name"`
 	Reference      string  `json:"reference"`
 	Digest         string  `json:"digest"`
@@ -520,16 +520,16 @@ type VulnerabilityInstance struct {
 	Risk           float64 `json:"risk"`
 }
 
-// GetVulnerabilityInstances returns all vulnerabilities for all running container instances
-func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
+// GetContainerVulnerabilities returns all vulnerabilities for all running containers
+func (db *DB) GetContainerVulnerabilities() ([]ContainerVulnerability, error) {
 	rows, err := db.conn.Query(`
 		SELECT
 			v.id,
-			ci.namespace,
-			ci.pod,
-			ci.container,
-			ci.node_name,
-			ci.reference,
+			c.namespace,
+			c.pod,
+			c.name,
+			c.node_name,
+			c.reference,
 			img.digest,
 			COALESCE(img.os_name, '') as os_name,
 			v.cve_id,
@@ -541,14 +541,14 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 			v.count,
 			v.known_exploited,
 			v.risk
-		FROM container_instances ci
-		JOIN container_images img ON ci.image_id = img.id
+		FROM containers c
+		JOIN images img ON c.image_id = img.id
 		JOIN vulnerabilities v ON img.id = v.image_id
 		WHERE img.status = 'completed'
-		ORDER BY ci.namespace, ci.pod, ci.container, v.severity, v.cve_id
+		ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query vulnerability instances: %w", err)
+		return nil, fmt.Errorf("failed to query container vulnerabilities: %w", err)
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
@@ -556,35 +556,35 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 		}
 	}()
 
-	var instances []VulnerabilityInstance
+	var result []ContainerVulnerability
 	for rows.Next() {
-		var instance VulnerabilityInstance
+		var cv ContainerVulnerability
 		err := rows.Scan(
-			&instance.VulnID,
-			&instance.Namespace,
-			&instance.Pod,
-			&instance.Container,
-			&instance.NodeName,
-			&instance.Reference,
-			&instance.Digest,
-			&instance.OSName,
-			&instance.CVEID,
-			&instance.PackageName,
-			&instance.PackageVersion,
-			&instance.Severity,
-			&instance.FixStatus,
-			&instance.FixedVersion,
-			&instance.Count,
-			&instance.KnownExploited,
-			&instance.Risk,
+			&cv.VulnID,
+			&cv.Namespace,
+			&cv.Pod,
+			&cv.Name,
+			&cv.NodeName,
+			&cv.Reference,
+			&cv.Digest,
+			&cv.OSName,
+			&cv.CVEID,
+			&cv.PackageName,
+			&cv.PackageVersion,
+			&cv.Severity,
+			&cv.FixStatus,
+			&cv.FixedVersion,
+			&cv.Count,
+			&cv.KnownExploited,
+			&cv.Risk,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan vulnerability instance row: %w", err)
+			return nil, fmt.Errorf("failed to scan container vulnerability row: %w", err)
 		}
-		instances = append(instances, instance)
+		result = append(result, cv)
 	}
 
-	return instances, nil
+	return result, nil
 }
 
 // LoadMetricStaleness loads the metric staleness data from the database
@@ -662,7 +662,7 @@ func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]Container
 
 	rows, err := db.conn.Query(`
 		SELECT id, digest, created_at, updated_at
-		FROM container_images
+		FROM images
 		WHERE status = ?
 		  AND sbom IS NOT NULL
 		  AND sbom != ''

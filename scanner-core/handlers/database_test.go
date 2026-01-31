@@ -24,7 +24,7 @@ type mockDatabaseProvider struct {
 	getVulnerabilitiesFunc        func(digest string) ([]byte, error)
 }
 
-func (m *mockDatabaseProvider) GetAllInstances() (interface{}, error) {
+func (m *mockDatabaseProvider) GetAllContainers() (interface{}, error) {
 	if m.getAllInstancesFunc != nil {
 		return m.getAllInstancesFunc()
 	}
@@ -87,7 +87,7 @@ func (m *mockDatabaseProvider) GetVulnerabilities(digest string) ([]byte, error)
 	return []byte("{}"), nil
 }
 
-func TestDatabaseInstancesHandler(t *testing.T) {
+func TestDatabaseContainersHandler(t *testing.T) {
 	tests := []struct {
 		name           string
 		mockFunc       func() (interface{}, error)
@@ -118,7 +118,7 @@ func TestDatabaseInstancesHandler(t *testing.T) {
 				if err := json.Unmarshal([]byte(body), &response); err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
-				instances := response["instances"].([]interface{})
+				instances := response["containers"].([]interface{})
 				if len(instances) != 2 {
 					t.Errorf("Expected 2 instances, got %d", len(instances))
 				}
@@ -135,7 +135,7 @@ func TestDatabaseInstancesHandler(t *testing.T) {
 				if err := json.Unmarshal([]byte(body), &response); err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
-				instances := response["instances"].([]interface{})
+				instances := response["containers"].([]interface{})
 				if len(instances) != 0 {
 					t.Errorf("Expected 0 instances, got %d", len(instances))
 				}
@@ -156,8 +156,8 @@ func TestDatabaseInstancesHandler(t *testing.T) {
 				getAllInstancesFunc: tt.mockFunc,
 			}
 
-			handler := DatabaseInstancesHandler(provider)
-			req := httptest.NewRequest(http.MethodGet, "/api/containers/instances", nil)
+			handler := DatabaseContainersHandler(provider)
+			req := httptest.NewRequest(http.MethodGet, "/api/containers", nil)
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -673,7 +673,7 @@ func TestRegisterDatabaseHandlers(t *testing.T) {
 			path           string
 			expectedStatus int
 		}{
-			{"/api/containers/instances", http.StatusOK},
+			{"/api/containers", http.StatusOK},
 			{"/api/containers/images", http.StatusOK},
 			{"/api/sbom/sha256:test", http.StatusNotFound}, // Will fail to find but handler exists
 		}

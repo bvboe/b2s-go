@@ -67,13 +67,13 @@ func TestSBOMHandler_DigestNormalization(t *testing.T) {
 	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
-	// Add test instance with image (use proper 64-char hex digest)
+	// Add test container with image (use proper 64-char hex digest)
 	testDigest := "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -83,9 +83,9 @@ func TestSBOMHandler_DigestNormalization(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err := db.AddInstance(instance)
+	_, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add test instance: %v", err)
+		t.Fatalf("Failed to add test container: %v", err)
 	}
 
 	// Store test SBOM
@@ -121,13 +121,13 @@ func TestSBOMHandler_DatabaseCacheHit(t *testing.T) {
 	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
-	// Add test instance with image (use proper 64-char hex digest)
+	// Add test container with image (use proper 64-char hex digest)
 	testDigest := "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -137,9 +137,9 @@ func TestSBOMHandler_DatabaseCacheHit(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err := db.AddInstance(instance)
+	_, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add test instance: %v", err)
+		t.Fatalf("Failed to add test container: %v", err)
 	}
 
 	// Store test SBOM in database (simulates scan queue cached SBOM)
@@ -218,13 +218,13 @@ func TestSBOMHandler_ImageWithoutNodeName(t *testing.T) {
 	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
-	// Add instance without node name (simulates agent-scanned image)
+	// Add container without node name (simulates agent-scanned image)
 	testDigest := "sha256:nonode123"
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -234,9 +234,9 @@ func TestSBOMHandler_ImageWithoutNodeName(t *testing.T) {
 		ContainerRuntime: "docker",
 	}
 
-	_, err := db.AddInstance(instance)
+	_, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add test instance: %v", err)
+		t.Fatalf("Failed to add test container: %v", err)
 	}
 
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)
@@ -265,13 +265,13 @@ func TestSBOMHandler_ContextTimeout(t *testing.T) {
 	clientset := fake.NewClientset()
 	podScannerClient := podscanner.NewClient()
 
-	// Add instance with node name (so it tries to route to pod-scanner)
+	// Add container with node name (so it tries to route to pod-scanner)
 	testDigest := "sha256:timeout123"
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	container := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -281,9 +281,9 @@ func TestSBOMHandler_ContextTimeout(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err := db.AddInstance(instance)
+	_, err := db.AddContainer(container)
 	if err != nil {
-		t.Fatalf("Failed to add test instance: %v", err)
+		t.Fatalf("Failed to add test container: %v", err)
 	}
 
 	handler := SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient)

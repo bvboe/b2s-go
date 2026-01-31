@@ -238,7 +238,7 @@ func TestWatchPodsInformerIntegration(t *testing.T) {
 	// Create fake clientset
 	clientset := fake.NewClientset()
 
-	// Create a manager to track container instances
+	// Create a manager to track containers
 	manager := containers.NewManager()
 
 	// Create a test pod with running status
@@ -284,28 +284,28 @@ func TestWatchPodsInformerIntegration(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify pod was added to manager
-	count := manager.GetInstanceCount()
+	count := manager.GetContainerCount()
 	if count != 1 {
-		t.Errorf("Expected 1 container instance, got %d", count)
+		t.Errorf("Expected 1 container, got %d", count)
 	}
 
-	// Verify instance details
-	instance, exists := manager.GetInstance("default", "test-pod", "nginx")
+	// Verify container details
+	c, exists := manager.GetContainer("default", "test-pod", "nginx")
 	if !exists {
-		t.Fatal("Container instance not found in manager")
+		t.Fatal("Container not found in manager")
 	}
 
-	if instance.Image.Reference != "nginx:1.21" {
-		t.Errorf("Expected reference 'nginx:1.21', got '%s'", instance.Image.Reference)
+	if c.Image.Reference != "nginx:1.21" {
+		t.Errorf("Expected reference 'nginx:1.21', got '%s'", c.Image.Reference)
 	}
-	if instance.Image.Digest != "sha256:abc123" {
-		t.Errorf("Expected digest 'sha256:abc123', got '%s'", instance.Image.Digest)
+	if c.Image.Digest != "sha256:abc123" {
+		t.Errorf("Expected digest 'sha256:abc123', got '%s'", c.Image.Digest)
 	}
-	if instance.NodeName != "node-1" {
-		t.Errorf("Expected node 'node-1', got '%s'", instance.NodeName)
+	if c.NodeName != "node-1" {
+		t.Errorf("Expected node 'node-1', got '%s'", c.NodeName)
 	}
-	if instance.ContainerRuntime != "containerd" {
-		t.Errorf("Expected runtime 'containerd', got '%s'", instance.ContainerRuntime)
+	if c.ContainerRuntime != "containerd" {
+		t.Errorf("Expected runtime 'containerd', got '%s'", c.ContainerRuntime)
 	}
 }
 
@@ -351,8 +351,8 @@ func TestWatchPodsInformerDeletion(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify pod was added
-	if manager.GetInstanceCount() != 1 {
-		t.Fatalf("Expected 1 container instance after add, got %d", manager.GetInstanceCount())
+	if manager.GetContainerCount() != 1 {
+		t.Fatalf("Expected 1 container after add, got %d", manager.GetContainerCount())
 	}
 
 	// Delete the pod
@@ -365,15 +365,15 @@ func TestWatchPodsInformerDeletion(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify pod was removed from manager
-	count := manager.GetInstanceCount()
+	count := manager.GetContainerCount()
 	if count != 0 {
-		t.Errorf("Expected 0 container instances after deletion, got %d", count)
+		t.Errorf("Expected 0 containers after deletion, got %d", count)
 	}
 
-	// Verify instance no longer exists
-	_, exists := manager.GetInstance("default", "test-pod", "nginx")
+	// Verify container no longer exists
+	_, exists := manager.GetContainer("default", "test-pod", "nginx")
 	if exists {
-		t.Error("Container instance still exists in manager after pod deletion")
+		t.Error("Container still exists in manager after pod deletion")
 	}
 }
 
@@ -419,8 +419,8 @@ func TestWatchPodsInformerUpdate(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify pod was added
-	if manager.GetInstanceCount() != 1 {
-		t.Fatalf("Expected 1 container instance after add, got %d", manager.GetInstanceCount())
+	if manager.GetContainerCount() != 1 {
+		t.Fatalf("Expected 1 container after add, got %d", manager.GetContainerCount())
 	}
 
 	// Update pod status to Failed (not running)
@@ -434,15 +434,15 @@ func TestWatchPodsInformerUpdate(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify pod was removed from manager (since it's no longer running)
-	count := manager.GetInstanceCount()
+	count := manager.GetContainerCount()
 	if count != 0 {
-		t.Errorf("Expected 0 container instances after pod failed, got %d", count)
+		t.Errorf("Expected 0 containers after pod failed, got %d", count)
 	}
 
-	// Verify instance no longer exists
-	_, exists := manager.GetInstance("default", "test-pod", "nginx")
+	// Verify container no longer exists
+	_, exists := manager.GetContainer("default", "test-pod", "nginx")
 	if exists {
-		t.Error("Container instance still exists in manager after pod failed")
+		t.Error("Container still exists in manager after pod failed")
 	}
 }
 
@@ -499,8 +499,8 @@ func TestWatchPodsInformerMultiplePods(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify all pods were added
-	count := manager.GetInstanceCount()
+	count := manager.GetContainerCount()
 	if count != 3 {
-		t.Errorf("Expected 3 container instances, got %d", count)
+		t.Errorf("Expected 3 containers, got %d", count)
 	}
 }

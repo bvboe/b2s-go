@@ -64,7 +64,7 @@ type Config struct {
 
 	// Individual metric toggles
 	MetricsDeploymentEnabled             bool // Enable bjorn2scan_deployment metric
-	MetricsScannedInstancesEnabled       bool // Enable bjorn2scan_scanned_instance metric
+	MetricsScannedContainersEnabled      bool // Enable bjorn2scan_scanned_container metric
 	MetricsVulnerabilitiesEnabled        bool // Enable bjorn2scan_vulnerability metric
 	MetricsVulnerabilityExploitedEnabled bool // Enable bjorn2scan_vulnerability_exploited metric
 	MetricsVulnerabilityRiskEnabled      bool // Enable bjorn2scan_vulnerability_risk metric
@@ -128,7 +128,7 @@ func defaultConfig() *Config {
 
 		// Individual metrics - enabled by default
 		MetricsDeploymentEnabled:             true,
-		MetricsScannedInstancesEnabled:       true,
+		MetricsScannedContainersEnabled:      true,
 		MetricsVulnerabilitiesEnabled:        true,
 		MetricsVulnerabilityExploitedEnabled: true,
 		MetricsVulnerabilityRiskEnabled:      true,
@@ -324,9 +324,9 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("metrics_deployment_enabled").String())
 				cfg.MetricsDeploymentEnabled = val == "true" || val == "1" || val == "yes"
 			}
-			if section.HasKey("metrics_scanned_instances_enabled") {
-				val := strings.ToLower(section.Key("metrics_scanned_instances_enabled").String())
-				cfg.MetricsScannedInstancesEnabled = val == "true" || val == "1" || val == "yes"
+			if section.HasKey("metrics_scanned_containers_enabled") {
+				val := strings.ToLower(section.Key("metrics_scanned_containers_enabled").String())
+				cfg.MetricsScannedContainersEnabled = val == "true" || val == "1" || val == "yes"
 			}
 			if section.HasKey("metrics_vulnerabilities_enabled") {
 				val := strings.ToLower(section.Key("metrics_vulnerabilities_enabled").String())
@@ -460,9 +460,9 @@ func LoadConfig(path string) (*Config, error) {
 		val := strings.ToLower(deploymentEnabledEnv)
 		cfg.MetricsDeploymentEnabled = val == "true" || val == "1" || val == "yes"
 	}
-	if scannedInstancesEnabledEnv := os.Getenv("METRICS_SCANNED_INSTANCES_ENABLED"); scannedInstancesEnabledEnv != "" {
-		val := strings.ToLower(scannedInstancesEnabledEnv)
-		cfg.MetricsScannedInstancesEnabled = val == "true" || val == "1" || val == "yes"
+	if scannedContainersEnabledEnv := os.Getenv("METRICS_SCANNED_CONTAINERS_ENABLED"); scannedContainersEnabledEnv != "" {
+		val := strings.ToLower(scannedContainersEnabledEnv)
+		cfg.MetricsScannedContainersEnabled = val == "true" || val == "1" || val == "yes"
 	}
 	if vulnerabilitiesEnabledEnv := os.Getenv("METRICS_VULNERABILITIES_ENABLED"); vulnerabilitiesEnabledEnv != "" {
 		val := strings.ToLower(vulnerabilitiesEnabledEnv)

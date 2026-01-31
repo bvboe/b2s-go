@@ -17,17 +17,17 @@ type InfoProvider interface {
 	GetGrypeDBBuilt() string   // grype vulnerability database build timestamp (RFC3339 format, empty if unavailable)
 }
 
-// DatabaseProvider provides access to container instance data
+// DatabaseProvider provides access to container data
 type DatabaseProvider interface {
-	GetScannedContainerInstances() ([]database.ScannedContainerInstance, error)
-	GetVulnerabilityInstances() ([]database.VulnerabilityInstance, error)
+	GetScannedContainers() ([]database.ScannedContainer, error)
+	GetContainerVulnerabilities() ([]database.ContainerVulnerability, error)
 	GetImageScanStatusCounts() ([]database.ImageScanStatusCount, error)
 }
 
 // CollectorConfig holds configuration for which metrics to collect
 type CollectorConfig struct {
 	DeploymentEnabled             bool
-	ScannedInstancesEnabled       bool
+	ScannedContainersEnabled      bool
 	VulnerabilitiesEnabled        bool
 	VulnerabilityExploitedEnabled bool
 	VulnerabilityRiskEnabled      bool
@@ -80,44 +80,44 @@ func (c *Collector) Collect() (*MetricsData, error) {
 		data.Families = append(data.Families, family)
 	}
 
-	// Collect scanned instance metrics if enabled
-	if c.config.ScannedInstancesEnabled && c.database != nil {
-		family, err := c.collectScannedInstanceMetrics()
+	// Collect scanned container metrics if enabled
+	if c.config.ScannedContainersEnabled && c.database != nil {
+		family, err := c.collectScannedContainerMetrics()
 		if err != nil {
-			return nil, fmt.Errorf("failed to collect scanned instance metrics: %w", err)
+			return nil, fmt.Errorf("failed to collect scanned container metrics: %w", err)
 		}
 		data.Families = append(data.Families, family)
 	}
 
 	// Fetch vulnerability data once for all vulnerability metrics (performance optimization)
-	var vulnInstances []database.VulnerabilityInstance
+	var vulnData []database.ContainerVulnerability
 	needsVulnData := c.database != nil && (c.config.VulnerabilitiesEnabled ||
 		c.config.VulnerabilityExploitedEnabled ||
 		c.config.VulnerabilityRiskEnabled)
 
 	if needsVulnData {
 		var err error
-		vulnInstances, err = c.database.GetVulnerabilityInstances()
+		vulnData, err = c.database.GetContainerVulnerabilities()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability instances: %w", err)
+			return nil, fmt.Errorf("failed to get container vulnerabilities: %w", err)
 		}
 	}
 
 	// Collect vulnerability metrics if enabled
 	if c.config.VulnerabilitiesEnabled && c.database != nil {
-		family := c.collectVulnerabilityMetrics(vulnInstances)
+		family := c.collectVulnerabilityMetrics(vulnData)
 		data.Families = append(data.Families, family)
 	}
 
 	// Collect vulnerability exploited metrics if enabled
 	if c.config.VulnerabilityExploitedEnabled && c.database != nil {
-		family := c.collectVulnerabilityExploitedMetrics(vulnInstances)
+		family := c.collectVulnerabilityExploitedMetrics(vulnData)
 		data.Families = append(data.Families, family)
 	}
 
 	// Collect vulnerability risk metrics if enabled
 	if c.config.VulnerabilityRiskEnabled && c.database != nil {
-		family := c.collectVulnerabilityRiskMetrics(vulnInstances)
+		family := c.collectVulnerabilityRiskMetrics(vulnData)
 		data.Families = append(data.Families, family)
 	}
 
@@ -182,27 +182,27 @@ func (c *Collector) collectDeploymentMetric() (MetricFamily, error) {
 	}, nil
 }
 
-// collectScannedInstanceMetrics generates bjorn2scan_scanned_instance metrics for all scanned containers
-func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
-	instances, err := c.database.GetScannedContainerInstances()
+// collectScannedContainerMetrics generates bjorn2scan_scanned_container metrics for all scanned containers
+func (c *Collector) collectScannedContainerMetrics() (MetricFamily, error) {
+	containers, err := c.database.GetScannedContainers()
 	if err != nil {
-		return MetricFamily{}, fmt.Errorf("failed to get scanned container instances: %w", err)
+		return MetricFamily{}, fmt.Errorf("failed to get scanned containers: %w", err)
 	}
 
-	metrics := make([]MetricPoint, 0, len(instances))
+	metrics := make([]MetricPoint, 0, len(containers))
 
-	for _, instance := range instances {
+	for _, ctr := range containers {
 		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
+		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, ctr.NodeName)
+		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, ctr.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Reference)
+			c.deploymentUUID, ctr.Namespace, ctr.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Digest)
+			c.deploymentUUID, ctr.Namespace, ctr.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod)
+			c.deploymentUUID, ctr.Namespace, ctr.Pod)
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
+			c.deploymentUUID, ctr.Namespace, ctr.Pod, ctr.Name)
 
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
@@ -214,14 +214,14 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               instance.NodeName,
-				"namespace":                               instance.Namespace,
-				"pod":                                     instance.Pod,
-				"container":                               instance.Container,
-				"distro":                                  instance.OSName,
-				"architecture":                            instance.Architecture,
-				"image_reference":                         instance.Reference,
-				"image_digest":                            instance.Digest,
+				"host_name":                               ctr.NodeName,
+				"namespace":                               ctr.Namespace,
+				"pod":                                     ctr.Pod,
+				"container":                               ctr.Name,
+				"distro":                                  ctr.OSName,
+				"architecture":                            ctr.Architecture,
+				"image_reference":                         ctr.Reference,
+				"image_digest":                            ctr.Digest,
 				"instance_type":                           "CONTAINER",
 			},
 			Value: 1,
@@ -229,30 +229,30 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 	}
 
 	return MetricFamily{
-		Name:    "bjorn2scan_scanned_instance",
-		Help:    "Bjorn2scan scanned container instance information",
+		Name:    "bjorn2scan_scanned_container",
+		Help:    "Bjorn2scan scanned container information",
 		Type:    "gauge",
 		Metrics: metrics,
 	}, nil
 }
 
 // collectVulnerabilityMetrics generates bjorn2scan_vulnerability metrics for all vulnerabilities in running containers
-func (c *Collector) collectVulnerabilityMetrics(instances []database.VulnerabilityInstance) MetricFamily {
-	metrics := make([]MetricPoint, 0, len(instances))
+func (c *Collector) collectVulnerabilityMetrics(vulns []database.ContainerVulnerability) MetricFamily {
+	metrics := make([]MetricPoint, 0, len(vulns))
 
-	for _, instance := range instances {
+	for _, v := range vulns {
 		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
+		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, v.NodeName)
+		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, v.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Reference)
+			c.deploymentUUID, v.Namespace, v.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Digest)
+			c.deploymentUUID, v.Namespace, v.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod)
+			c.deploymentUUID, v.Namespace, v.Pod)
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
-		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, instance.VulnID)
+			c.deploymentUUID, v.Namespace, v.Pod, v.Name)
+		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
 
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
@@ -264,29 +264,29 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               instance.NodeName,
-				"namespace":                               instance.Namespace,
-				"pod":                                     instance.Pod,
-				"container":                               instance.Container,
-				"distro":                                  instance.OSName,
-				"image_reference":                         instance.Reference,
-				"image_digest":                            instance.Digest,
+				"host_name":                               v.NodeName,
+				"namespace":                               v.Namespace,
+				"pod":                                     v.Pod,
+				"container":                               v.Name,
+				"distro":                                  v.OSName,
+				"image_reference":                         v.Reference,
+				"image_digest":                            v.Digest,
 				"instance_type":                           "CONTAINER",
-				"severity":                                instance.Severity,
-				"vulnerability":                           instance.CVEID,
+				"severity":                                v.Severity,
+				"vulnerability":                           v.CVEID,
 				"vulnerability_id":                        vulnerabilityID,
-				"package_name":                            instance.PackageName,
-				"package_version":                         instance.PackageVersion,
-				"fix_status":                              instance.FixStatus,
-				"fixed_version":                           instance.FixedVersion,
+				"package_name":                            v.PackageName,
+				"package_version":                         v.PackageVersion,
+				"fix_status":                              v.FixStatus,
+				"fixed_version":                           v.FixedVersion,
 			},
-			Value: float64(instance.Count),
+			Value: float64(v.Count),
 		})
 	}
 
 	return MetricFamily{
 		Name:    "bjorn2scan_vulnerability",
-		Help:    "Bjorn2scan vulnerability information for running container instances",
+		Help:    "Bjorn2scan vulnerability information for running containers",
 		Type:    "gauge",
 		Metrics: metrics,
 	}
@@ -294,27 +294,27 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 
 // collectVulnerabilityExploitedMetrics generates bjorn2scan_vulnerability_exploited metrics for vulnerabilities with known exploits
 // Only includes vulnerabilities where known_exploited > 0 (CISA KEV catalog entries)
-func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.VulnerabilityInstance) MetricFamily {
-	metrics := make([]MetricPoint, 0, len(instances))
+func (c *Collector) collectVulnerabilityExploitedMetrics(vulns []database.ContainerVulnerability) MetricFamily {
+	metrics := make([]MetricPoint, 0, len(vulns))
 
-	for _, instance := range instances {
+	for _, v := range vulns {
 		// Only include vulnerabilities with known exploits
-		if instance.KnownExploited == 0 {
+		if v.KnownExploited == 0 {
 			continue
 		}
 
 		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
+		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, v.NodeName)
+		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, v.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Reference)
+			c.deploymentUUID, v.Namespace, v.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Digest)
+			c.deploymentUUID, v.Namespace, v.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod)
+			c.deploymentUUID, v.Namespace, v.Pod)
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
-		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, instance.VulnID)
+			c.deploymentUUID, v.Namespace, v.Pod, v.Name)
+		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
 
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
@@ -326,29 +326,29 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               instance.NodeName,
-				"namespace":                               instance.Namespace,
-				"pod":                                     instance.Pod,
-				"container":                               instance.Container,
-				"distro":                                  instance.OSName,
-				"image_reference":                         instance.Reference,
-				"image_digest":                            instance.Digest,
+				"host_name":                               v.NodeName,
+				"namespace":                               v.Namespace,
+				"pod":                                     v.Pod,
+				"container":                               v.Name,
+				"distro":                                  v.OSName,
+				"image_reference":                         v.Reference,
+				"image_digest":                            v.Digest,
 				"instance_type":                           "CONTAINER",
-				"severity":                                instance.Severity,
-				"vulnerability":                           instance.CVEID,
+				"severity":                                v.Severity,
+				"vulnerability":                           v.CVEID,
 				"vulnerability_id":                        vulnerabilityID,
-				"package_name":                            instance.PackageName,
-				"package_version":                         instance.PackageVersion,
-				"fix_status":                              instance.FixStatus,
-				"fixed_version":                           instance.FixedVersion,
+				"package_name":                            v.PackageName,
+				"package_version":                         v.PackageVersion,
+				"fix_status":                              v.FixStatus,
+				"fixed_version":                           v.FixedVersion,
 			},
-			Value: float64(instance.KnownExploited * instance.Count),
+			Value: float64(v.KnownExploited * v.Count),
 		})
 	}
 
 	return MetricFamily{
 		Name:    "bjorn2scan_vulnerability_exploited",
-		Help:    "Bjorn2scan known exploited vulnerabilities (CISA KEV) in running container instances",
+		Help:    "Bjorn2scan known exploited vulnerabilities (CISA KEV) in running containers",
 		Type:    "gauge",
 		Metrics: metrics,
 	}
@@ -356,22 +356,22 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 
 // collectVulnerabilityRiskMetrics generates bjorn2scan_vulnerability_risk metrics for all vulnerabilities in running containers
 // Uses risk field (float) to provide risk scores for each vulnerability
-func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.VulnerabilityInstance) MetricFamily {
-	metrics := make([]MetricPoint, 0, len(instances))
+func (c *Collector) collectVulnerabilityRiskMetrics(vulns []database.ContainerVulnerability) MetricFamily {
+	metrics := make([]MetricPoint, 0, len(vulns))
 
-	for _, instance := range instances {
+	for _, v := range vulns {
 		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
+		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, v.NodeName)
+		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, v.Namespace)
 		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Reference)
+			c.deploymentUUID, v.Namespace, v.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Digest)
+			c.deploymentUUID, v.Namespace, v.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod)
+			c.deploymentUUID, v.Namespace, v.Pod)
 		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, instance.Namespace, instance.Pod, instance.Container)
-		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, instance.VulnID)
+			c.deploymentUUID, v.Namespace, v.Pod, v.Name)
+		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
 
 		metrics = append(metrics, MetricPoint{
 			Labels: map[string]string{
@@ -383,29 +383,29 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
 				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
 				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               instance.NodeName,
-				"namespace":                               instance.Namespace,
-				"pod":                                     instance.Pod,
-				"container":                               instance.Container,
-				"distro":                                  instance.OSName,
-				"image_reference":                         instance.Reference,
-				"image_digest":                            instance.Digest,
+				"host_name":                               v.NodeName,
+				"namespace":                               v.Namespace,
+				"pod":                                     v.Pod,
+				"container":                               v.Name,
+				"distro":                                  v.OSName,
+				"image_reference":                         v.Reference,
+				"image_digest":                            v.Digest,
 				"instance_type":                           "CONTAINER",
-				"severity":                                instance.Severity,
-				"vulnerability":                           instance.CVEID,
+				"severity":                                v.Severity,
+				"vulnerability":                           v.CVEID,
 				"vulnerability_id":                        vulnerabilityID,
-				"package_name":                            instance.PackageName,
-				"package_version":                         instance.PackageVersion,
-				"fix_status":                              instance.FixStatus,
-				"fixed_version":                           instance.FixedVersion,
+				"package_name":                            v.PackageName,
+				"package_version":                         v.PackageVersion,
+				"fix_status":                              v.FixStatus,
+				"fixed_version":                           v.FixedVersion,
 			},
-			Value: instance.Risk * float64(instance.Count),
+			Value: v.Risk * float64(v.Count),
 		})
 	}
 
 	return MetricFamily{
 		Name:    "bjorn2scan_vulnerability_risk",
-		Help:    "Bjorn2scan vulnerability risk scores for running container instances",
+		Help:    "Bjorn2scan vulnerability risk scores for running containers",
 		Type:    "gauge",
 		Metrics: metrics,
 	}

@@ -145,12 +145,12 @@ func TestImagesHandler(t *testing.T) {
 			},
 			mockDataFunc: func(query string) (*database.QueryResult, error) {
 				return &database.QueryResult{
-					Columns: []string{"image", "digest", "instance_count"},
+					Columns: []string{"image", "digest", "container_count"},
 					Rows: []map[string]interface{}{
 						{
 							"image":          "nginx:latest",
 							"digest":         "sha256:abc123",
-							"instance_count": int64(3),
+							"container_count": int64(3),
 						},
 					},
 				}, nil
@@ -384,7 +384,7 @@ func TestImageDetailFullHandler(t *testing.T) {
 			name: "successful image detail retrieval",
 			path: "/api/images/sha256:abc123",
 			mockFunc: func(query string) (*database.QueryResult, error) {
-				if strings.Contains(query, "container_images") {
+				if strings.Contains(query, "FROM images") {
 					// Image query
 					return &database.QueryResult{
 						Columns: []string{"id", "image_id", "scan_status", "distro_display_name", "status_description"},
@@ -401,18 +401,18 @@ func TestImageDetailFullHandler(t *testing.T) {
 				} else if strings.Contains(query, "reference") {
 					// References query
 					return &database.QueryResult{
-						Columns: []string{"repo"},
+						Columns: []string{"ref"},
 						Rows: []map[string]interface{}{
-							{"repo": "nginx:latest"},
-							{"repo": "nginx:1.21"},
+							{"ref": "nginx:latest"},
+							{"ref": "nginx:1.21"},
 						},
 					}, nil
 				} else {
-					// Instances query
+					// Containers query
 					return &database.QueryResult{
-						Columns: []string{"instance"},
+						Columns: []string{"container"},
 						Rows: []map[string]interface{}{
-							{"instance": "default.nginx-pod.nginx"},
+							{"container": "default.nginx-pod.nginx"},
 						},
 					}, nil
 				}
@@ -426,9 +426,9 @@ func TestImageDetailFullHandler(t *testing.T) {
 				if response["image_id"] != "sha256:abc123" {
 					t.Errorf("Expected image_id 'sha256:abc123', got %v", response["image_id"])
 				}
-				repositories := response["repositories"].([]interface{})
-				if len(repositories) != 2 {
-					t.Errorf("Expected 2 repositories, got %d", len(repositories))
+				references := response["references"].([]interface{})
+				if len(references) != 2 {
+					t.Errorf("Expected 2 references, got %d", len(references))
 				}
 			},
 		},
@@ -950,11 +950,11 @@ func TestBuildPodsQuery(t *testing.T) {
 		{
 			name:            "with pod search",
 			search:          "nginx-pod",
-			expectedInQuery: []string{"nginx-pod", "instances.namespace LIKE", "instances.pod LIKE", "instances.container LIKE"},
+			expectedInQuery: []string{"nginx-pod", "instances.namespace LIKE", "instances.pod LIKE", "instances.name LIKE"},
 		},
 		{
 			name:            "basic query",
-			expectedInQuery: []string{"container_instances instances", "container_images images"},
+			expectedInQuery: []string{"containers instances", "images images"},
 		},
 	}
 

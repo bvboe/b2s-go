@@ -507,7 +507,7 @@ func main() {
 	// Create collector config for metrics
 	collectorConfig := metrics.CollectorConfig{
 		DeploymentEnabled:             cfg.MetricsDeploymentEnabled,
-		ScannedInstancesEnabled:       cfg.MetricsScannedInstancesEnabled,
+		ScannedContainersEnabled:      cfg.MetricsScannedContainersEnabled,
 		VulnerabilitiesEnabled:        cfg.MetricsVulnerabilitiesEnabled,
 		VulnerabilityExploitedEnabled: cfg.MetricsVulnerabilityExploitedEnabled,
 		VulnerabilityRiskEnabled:      cfg.MetricsVulnerabilityRiskEnabled,

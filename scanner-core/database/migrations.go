@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 28
+const currentSchemaVersion = 29
 
 type migration struct {
 	version int
@@ -155,6 +155,11 @@ var migrations = []migration{
 		version: 28,
 		name:    "drop_repository_tag_columns",
 		up:      migrateToV28,
+	},
+	{
+		version: 29,
+		name:    "rename_tables_to_match_docker_k8s_terminology",
+		up:      migrateToV29,
 	},
 }
 
@@ -1933,6 +1938,83 @@ func migrateToV28(conn *sql.DB) error {
 	}
 
 	log.Println("Migration v28: Successfully dropped repository and tag columns")
+	return nil
+}
+
+// migrateToV29 renames tables and columns to match Docker/Kubernetes terminology
+// container_images → images, container_instances → containers, containers.container → containers.name
+func migrateToV29(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v29: Renaming tables to match Docker/Kubernetes terminology...")
+
+	// Step 1: Rename container_images to images
+	log.Println("Migration v29: Renaming container_images → images...")
+	_, err = tx.Exec(`ALTER TABLE container_images RENAME TO images`)
+	if err != nil {
+		return fmt.Errorf("failed to rename container_images to images: %w", err)
+	}
+
+	// Step 2: Create new containers table with 'name' column instead of 'container'
+	log.Println("Migration v29: Creating containers table with renamed column...")
+	_, err = tx.Exec(`
+		CREATE TABLE containers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			namespace TEXT NOT NULL,
+			pod TEXT NOT NULL,
+			name TEXT NOT NULL,
+			reference TEXT NOT NULL,
+			image_id INTEGER NOT NULL,
+			node_name TEXT,
+			container_runtime TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(namespace, pod, name),
+			FOREIGN KEY (image_id) REFERENCES images(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create containers table: %w", err)
+	}
+
+	// Step 3: Copy data from container_instances to containers
+	log.Println("Migration v29: Copying data to containers table...")
+	_, err = tx.Exec(`
+		INSERT INTO containers (id, namespace, pod, name, reference, image_id, node_name, container_runtime, created_at)
+		SELECT id, namespace, pod, container, reference, image_id, node_name, container_runtime, created_at
+		FROM container_instances
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy data to containers table: %w", err)
+	}
+
+	// Step 4: Drop old container_instances table
+	_, err = tx.Exec(`DROP TABLE container_instances`)
+	if err != nil {
+		return fmt.Errorf("failed to drop container_instances table: %w", err)
+	}
+
+	// Step 5: Create indexes on new containers table
+	_, err = tx.Exec(`
+		CREATE INDEX idx_containers_namespace ON containers(namespace);
+		CREATE INDEX idx_containers_image ON containers(image_id);
+		CREATE INDEX idx_containers_created_at ON containers(created_at);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create containers indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v29: Successfully renamed tables and columns")
+	log.Println("  - container_images → images")
+	log.Println("  - container_instances → containers")
+	log.Println("  - containers.container → containers.name")
 	return nil
 }
 

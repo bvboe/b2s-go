@@ -55,9 +55,9 @@ func extractDigestFromImageID(imageID string) string {
 	return ""
 }
 
-// extractContainerInstances extracts all container instances from a pod
-func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
-	var instances []containers.ContainerInstance
+// extractContainers extracts all containers from a pod
+func extractContainers(pod *corev1.Pod) []containers.Container {
+	var result []containers.Container
 
 	// Get node name from pod spec
 	nodeName := pod.Spec.NodeName
@@ -104,26 +104,26 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 		// Extract just the digest part (e.g., "sha256:abc123...")
 		digest := extractDigestFromImageID(status.imageID)
 
-		// Validate that we have complete data before including this instance
+		// Validate that we have complete data before including this container
 		if digest == "" {
 			// Skip containers without digest - they're not fully initialized yet
 			// The watcher will pick them up again when status becomes available
-			log.Printf("Skipping container without digest: namespace=%s, pod=%s, container=%s, image=%s",
+			log.Printf("Skipping container without digest: namespace=%s, pod=%s, name=%s, image=%s",
 				pod.Namespace, pod.Name, container.Name, container.Image)
 			continue
 		}
 
 		if reference == "" {
-			log.Printf("Warning: container has empty reference: namespace=%s, pod=%s, container=%s",
+			log.Printf("Warning: container has empty reference: namespace=%s, pod=%s, name=%s",
 				pod.Namespace, pod.Name, container.Name)
 			continue
 		}
 
-		instance := containers.ContainerInstance{
-			ID: containers.ContainerInstanceID{
+		c := containers.Container{
+			ID: containers.ContainerID{
 				Namespace: pod.Namespace,
 				Pod:       pod.Name,
-				Container: container.Name,
+				Name:      container.Name,
 			},
 			Image: containers.ImageID{
 				Reference: reference,
@@ -132,10 +132,10 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 			NodeName:         nodeName,
 			ContainerRuntime: status.runtime,
 		}
-		instances = append(instances, instance)
+		result = append(result, c)
 	}
 
-	return instances
+	return result
 }
 
 // WatchPods watches for pod changes using a SharedIndexInformer and updates the container manager.
@@ -218,15 +218,15 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 func handlePodAddOrUpdate(pod *corev1.Pod, manager *containers.Manager) {
 	// Only process running pods
 	if pod.Status.Phase == corev1.PodRunning {
-		instances := extractContainerInstances(pod)
-		for _, instance := range instances {
-			manager.AddContainerInstance(instance)
+		podContainers := extractContainers(pod)
+		for _, c := range podContainers {
+			manager.AddContainer(c)
 		}
 	} else {
 		// If pod is no longer running, remove its containers
-		instances := extractContainerInstances(pod)
-		for _, instance := range instances {
-			manager.RemoveContainerInstance(instance.ID)
+		podContainers := extractContainers(pod)
+		for _, c := range podContainers {
+			manager.RemoveContainer(c.ID)
 		}
 	}
 }
@@ -234,9 +234,9 @@ func handlePodAddOrUpdate(pod *corev1.Pod, manager *containers.Manager) {
 // handlePodDelete processes pod deletions
 func handlePodDelete(pod *corev1.Pod, manager *containers.Manager) {
 	// Remove all containers from this deleted pod
-	instances := extractContainerInstances(pod)
-	for _, instance := range instances {
-		manager.RemoveContainerInstance(instance.ID)
+	podContainers := extractContainers(pod)
+	for _, c := range podContainers {
+		manager.RemoveContainer(c.ID)
 	}
 	log.Printf("Removed containers from deleted pod: namespace=%s, pod=%s", pod.Namespace, pod.Name)
 }
@@ -253,17 +253,17 @@ func SyncInitialPods(ctx context.Context, clientset kubernetes.Interface, manage
 		return err
 	}
 
-	var allInstances []containers.ContainerInstance
+	var allContainers []containers.Container
 	for _, pod := range podList.Items {
 		// Only track containers from running pods
 		if pod.Status.Phase == corev1.PodRunning {
-			instances := extractContainerInstances(&pod)
-			allInstances = append(allInstances, instances...)
+			podContainers := extractContainers(&pod)
+			allContainers = append(allContainers, podContainers...)
 		}
 	}
 
-	manager.SetContainerInstances(allInstances)
-	log.Printf("Initial sync complete: %d container instances", manager.GetInstanceCount())
+	manager.SetContainers(allContainers)
+	log.Printf("Initial sync complete: %d containers", manager.GetContainerCount())
 
 	return nil
 }

@@ -8,12 +8,12 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 )
 
-// ContainerInstanceRow represents a container instance in the database
-type ContainerInstanceRow struct {
+// ContainerRow represents a container in the database
+type ContainerRow struct {
 	ID               int64  `json:"id"`
 	Namespace        string `json:"namespace"`
 	Pod              string `json:"pod"`
-	Container        string `json:"container"`
+	Name             string `json:"name"`
 	ImageID          int64  `json:"image_id"`
 	Reference        string `json:"reference"`
 	Digest           string `json:"digest"`
@@ -22,21 +22,21 @@ type ContainerInstanceRow struct {
 	ContainerRuntime string `json:"container_runtime"`
 }
 
-// AddInstance adds a container instance to the database
-// Returns whether the instance was newly created
-func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
+// AddContainer adds a container to the database
+// Returns whether the container was newly created
+func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	// Validate required fields
-	if instance.Image.Digest == "" {
-		return false, fmt.Errorf("cannot add instance without digest: namespace=%s, pod=%s, container=%s",
-			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+	if c.Image.Digest == "" {
+		return false, fmt.Errorf("cannot add container without digest: namespace=%s, pod=%s, name=%s",
+			c.ID.Namespace, c.ID.Pod, c.ID.Name)
 	}
-	if instance.Image.Reference == "" {
-		return false, fmt.Errorf("cannot add instance without reference: namespace=%s, pod=%s, container=%s",
-			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+	if c.Image.Reference == "" {
+		return false, fmt.Errorf("cannot add container without reference: namespace=%s, pod=%s, name=%s",
+			c.ID.Namespace, c.ID.Pod, c.ID.Name)
 	}
-	if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
-		return false, fmt.Errorf("cannot add instance with empty identifier: namespace=%s, pod=%s, container=%s",
-			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+	if c.ID.Namespace == "" || c.ID.Pod == "" || c.ID.Name == "" {
+		return false, fmt.Errorf("cannot add container with empty identifier: namespace=%s, pod=%s, name=%s",
+			c.ID.Namespace, c.ID.Pod, c.ID.Name)
 	}
 
 	// Start a transaction to ensure atomic operation across both tables
@@ -47,31 +47,31 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	// First, get or create the image (using transaction-aware helper)
-	imageID, _, err := db.getOrCreateImageTx(tx, instance.Image)
+	imageID, _, err := db.getOrCreateImageTx(tx, c.Image)
 	if err != nil {
 		return false, fmt.Errorf("failed to get/create image: %w", err)
 	}
 
-	// Check if instance already exists and get its current image_id
+	// Check if container already exists and get its current image_id
 	var existingID int64
 	var existingImageID int64
 	err = tx.QueryRow(`
-		SELECT id, image_id FROM container_instances
-		WHERE namespace = ? AND pod = ? AND container = ?
-	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container).Scan(&existingID, &existingImageID)
+		SELECT id, image_id FROM containers
+		WHERE namespace = ? AND pod = ? AND name = ?
+	`, c.ID.Namespace, c.ID.Pod, c.ID.Name).Scan(&existingID, &existingImageID)
 
 	if err == nil {
-		// Instance already exists, check if image has changed
+		// Container already exists, check if image has changed
 		if existingImageID != imageID {
 			// Image has changed (or digest was empty before), update it
 			_, err = tx.Exec(`
-				UPDATE container_instances
+				UPDATE containers
 				SET image_id = ?, reference = ?, node_name = ?, container_runtime = ?
 				WHERE id = ?
-			`, imageID, instance.Image.Reference, instance.NodeName, instance.ContainerRuntime, existingID)
+			`, imageID, c.Image.Reference, c.NodeName, c.ContainerRuntime, existingID)
 
 			if err != nil {
-				return false, fmt.Errorf("failed to update instance: %w", err)
+				return false, fmt.Errorf("failed to update container: %w", err)
 			}
 
 			// Commit the transaction
@@ -79,8 +79,8 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 				return false, fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			log.Printf("Updated container instance in database: namespace=%s, pod=%s, container=%s (image_id=%d)",
-				instance.ID.Namespace, instance.ID.Pod, instance.ID.Container, imageID)
+			log.Printf("Updated container in database: namespace=%s, pod=%s, name=%s (image_id=%d)",
+				c.ID.Namespace, c.ID.Pod, c.ID.Name, imageID)
 			return true, nil
 		}
 
@@ -92,18 +92,18 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 	}
 
 	if err != sql.ErrNoRows {
-		return false, fmt.Errorf("failed to query instance: %w", err)
+		return false, fmt.Errorf("failed to query container: %w", err)
 	}
 
-	// Instance doesn't exist, create it
+	// Container doesn't exist, create it
 	_, err = tx.Exec(`
-		INSERT INTO container_instances (namespace, pod, container, reference, image_id, node_name, container_runtime)
+		INSERT INTO containers (namespace, pod, name, reference, image_id, node_name, container_runtime)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-		instance.Image.Reference, imageID, instance.NodeName, instance.ContainerRuntime)
+	`, c.ID.Namespace, c.ID.Pod, c.ID.Name,
+		c.Image.Reference, imageID, c.NodeName, c.ContainerRuntime)
 
 	if err != nil {
-		return false, fmt.Errorf("failed to insert instance: %w", err)
+		return false, fmt.Errorf("failed to insert container: %w", err)
 	}
 
 	// Commit the transaction
@@ -111,21 +111,21 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("New container instance added to database: namespace=%s, pod=%s, container=%s (image_id=%d)",
-		instance.ID.Namespace, instance.ID.Pod, instance.ID.Container, imageID)
+	log.Printf("New container added to database: namespace=%s, pod=%s, name=%s (image_id=%d)",
+		c.ID.Namespace, c.ID.Pod, c.ID.Name, imageID)
 
 	return true, nil
 }
 
-// RemoveInstance removes a container instance from the database
-func (db *DB) RemoveInstance(id containers.ContainerInstanceID) error {
+// RemoveContainer removes a container from the database
+func (db *DB) RemoveContainer(id containers.ContainerID) error {
 	result, err := db.conn.Exec(`
-		DELETE FROM container_instances
-		WHERE namespace = ? AND pod = ? AND container = ?
-	`, id.Namespace, id.Pod, id.Container)
+		DELETE FROM containers
+		WHERE namespace = ? AND pod = ? AND name = ?
+	`, id.Namespace, id.Pod, id.Name)
 
 	if err != nil {
-		return fmt.Errorf("failed to delete instance: %w", err)
+		return fmt.Errorf("failed to delete container: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -134,28 +134,28 @@ func (db *DB) RemoveInstance(id containers.ContainerInstanceID) error {
 	}
 
 	if rowsAffected > 0 {
-		log.Printf("Container instance removed from database: namespace=%s, pod=%s, container=%s",
-			id.Namespace, id.Pod, id.Container)
+		log.Printf("Container removed from database: namespace=%s, pod=%s, name=%s",
+			id.Namespace, id.Pod, id.Name)
 	}
 
 	return nil
 }
 
-// SetInstances replaces all instances with the given set and returns reconciliation statistics
-func (db *DB) SetInstances(instances []containers.ContainerInstance) (*containers.ReconciliationStats, error) {
-	// Validate all instances before starting transaction
-	for i, instance := range instances {
-		if instance.Image.Digest == "" {
-			return nil, fmt.Errorf("instance %d has empty digest: namespace=%s, pod=%s, container=%s",
-				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+// SetContainers replaces all containers with the given set and returns reconciliation statistics
+func (db *DB) SetContainers(containerList []containers.Container) (*containers.ReconciliationStats, error) {
+	// Validate all containers before starting transaction
+	for i, c := range containerList {
+		if c.Image.Digest == "" {
+			return nil, fmt.Errorf("container %d has empty digest: namespace=%s, pod=%s, name=%s",
+				i, c.ID.Namespace, c.ID.Pod, c.ID.Name)
 		}
-		if instance.Image.Reference == "" {
-			return nil, fmt.Errorf("instance %d has empty reference: namespace=%s, pod=%s, container=%s",
-				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+		if c.Image.Reference == "" {
+			return nil, fmt.Errorf("container %d has empty reference: namespace=%s, pod=%s, name=%s",
+				i, c.ID.Namespace, c.ID.Pod, c.ID.Name)
 		}
-		if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
-			return nil, fmt.Errorf("instance %d has empty identifier: namespace=%s, pod=%s, container=%s",
-				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
+		if c.ID.Namespace == "" || c.ID.Pod == "" || c.ID.Name == "" {
+			return nil, fmt.Errorf("container %d has empty identifier: namespace=%s, pod=%s, name=%s",
+				i, c.ID.Namespace, c.ID.Pod, c.ID.Name)
 		}
 	}
 
@@ -166,30 +166,30 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) (*container
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Count existing instances before deletion
-	var instancesRemoved int
-	err = tx.QueryRow("SELECT COUNT(*) FROM container_instances").Scan(&instancesRemoved)
+	// Count existing containers before deletion
+	var containersRemoved int
+	err = tx.QueryRow("SELECT COUNT(*) FROM containers").Scan(&containersRemoved)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count existing instances: %w", err)
+		return nil, fmt.Errorf("failed to count existing containers: %w", err)
 	}
 
-	// Delete all existing instances
-	_, err = tx.Exec("DELETE FROM container_instances")
+	// Delete all existing containers
+	_, err = tx.Exec("DELETE FROM containers")
 	if err != nil {
-		return nil, fmt.Errorf("failed to delete instances: %w", err)
+		return nil, fmt.Errorf("failed to delete containers: %w", err)
 	}
 
 	// Track statistics
 	stats := &containers.ReconciliationStats{
-		InstancesAdded:   len(instances),
-		InstancesRemoved: instancesRemoved,
-		ImagesAdded:      0,
+		ContainersAdded:   len(containerList),
+		ContainersRemoved: containersRemoved,
+		ImagesAdded:       0,
 	}
 
-	// Add new instances
-	for _, instance := range instances {
+	// Add new containers
+	for _, c := range containerList {
 		// Get or create image (using transaction-aware helper)
-		imageID, newImage, err := db.getOrCreateImageTx(tx, instance.Image)
+		imageID, newImage, err := db.getOrCreateImageTx(tx, c.Image)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get/create image: %w", err)
 		}
@@ -198,15 +198,15 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) (*container
 			stats.ImagesAdded++
 		}
 
-		// Insert instance
+		// Insert container
 		_, err = tx.Exec(`
-			INSERT INTO container_instances (namespace, pod, container, reference, image_id, node_name, container_runtime)
+			INSERT INTO containers (namespace, pod, name, reference, image_id, node_name, container_runtime)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-			instance.Image.Reference, imageID, instance.NodeName, instance.ContainerRuntime)
+		`, c.ID.Namespace, c.ID.Pod, c.ID.Name,
+			c.Image.Reference, imageID, c.NodeName, c.ContainerRuntime)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to insert instance: %w", err)
+			return nil, fmt.Errorf("failed to insert container: %w", err)
 		}
 	}
 
@@ -216,46 +216,46 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) (*container
 	}
 
 	log.Printf("Reconciliation complete: added=%d, removed=%d, new_images=%d",
-		stats.InstancesAdded, stats.InstancesRemoved, stats.ImagesAdded)
+		stats.ContainersAdded, stats.ContainersRemoved, stats.ImagesAdded)
 	return stats, nil
 }
 
-// GetAllInstances returns all container instances with their image information
-func (db *DB) GetAllInstances() (interface{}, error) {
+// GetAllContainers returns all containers with their image information
+func (db *DB) GetAllContainers() (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT
-			ci.id, ci.namespace, ci.pod, ci.container,
-			ci.reference, ci.image_id, img.digest,
-			ci.created_at, ci.node_name, ci.container_runtime
-		FROM container_instances ci
-		JOIN container_images img ON ci.image_id = img.id
-		ORDER BY ci.created_at DESC
+			c.id, c.namespace, c.pod, c.name,
+			c.reference, c.image_id, img.digest,
+			c.created_at, c.node_name, c.container_runtime
+		FROM containers c
+		JOIN images img ON c.image_id = img.id
+		ORDER BY c.created_at DESC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query instances: %w", err)
+		return nil, fmt.Errorf("failed to query containers: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var instances []ContainerInstanceRow
+	var result []ContainerRow
 	for rows.Next() {
-		var inst ContainerInstanceRow
+		var row ContainerRow
 		var nodeName, containerRuntime sql.NullString
-		err := rows.Scan(&inst.ID, &inst.Namespace, &inst.Pod, &inst.Container,
-			&inst.Reference, &inst.ImageID, &inst.Digest, &inst.CreatedAt,
+		err := rows.Scan(&row.ID, &row.Namespace, &row.Pod, &row.Name,
+			&row.Reference, &row.ImageID, &row.Digest, &row.CreatedAt,
 			&nodeName, &containerRuntime)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan instance: %w", err)
+			return nil, fmt.Errorf("failed to scan container: %w", err)
 		}
 		if nodeName.Valid {
-			inst.NodeName = nodeName.String
+			row.NodeName = nodeName.String
 		}
 		if containerRuntime.Valid {
-			inst.ContainerRuntime = containerRuntime.String
+			row.ContainerRuntime = containerRuntime.String
 		}
-		instances = append(instances, inst)
+		result = append(result, row)
 	}
 
-	return instances, nil
+	return result, nil
 }
 
 // CleanupStats holds statistics about a cleanup operation
@@ -267,7 +267,7 @@ type CleanupStats struct {
 	VulnerabilityDetailsRemoved int // Number of vulnerability_details entries deleted
 }
 
-// CleanupOrphanedImages removes container_images that have no associated container_instances
+// CleanupOrphanedImages removes images that have no associated containers
 // This also cascades to delete related packages and vulnerabilities
 func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	// Start a transaction
@@ -281,11 +281,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	var orphanedCount int
 	err = tx.QueryRow(`
 		SELECT COUNT(*)
-		FROM container_images img
+		FROM images img
 		WHERE NOT EXISTS (
 			SELECT 1
-			FROM container_instances ci
-			WHERE ci.image_id = img.id
+			FROM containers c
+			WHERE c.image_id = img.id
 		)
 	`).Scan(&orphanedCount)
 	if err != nil {
@@ -306,11 +306,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		FROM packages p
 		WHERE p.image_id IN (
 			SELECT img.id
-			FROM container_images img
+			FROM images img
 			WHERE NOT EXISTS (
 				SELECT 1
-				FROM container_instances ci
-				WHERE ci.image_id = img.id
+				FROM containers c
+				WHERE c.image_id = img.id
 			)
 		)
 	`).Scan(&packagesCount)
@@ -323,11 +323,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		FROM vulnerabilities v
 		WHERE v.image_id IN (
 			SELECT img.id
-			FROM container_images img
+			FROM images img
 			WHERE NOT EXISTS (
 				SELECT 1
-				FROM container_instances ci
-				WHERE ci.image_id = img.id
+				FROM containers c
+				WHERE c.image_id = img.id
 			)
 		)
 	`).Scan(&vulnerabilitiesCount)
@@ -345,11 +345,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 			FROM vulnerabilities v
 			WHERE v.image_id IN (
 				SELECT img.id
-				FROM container_images img
+				FROM images img
 				WHERE NOT EXISTS (
 					SELECT 1
-					FROM container_instances ci
-					WHERE ci.image_id = img.id
+					FROM containers c
+					WHERE c.image_id = img.id
 				)
 			)
 		)
@@ -365,11 +365,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 			FROM vulnerabilities v
 			WHERE v.image_id IN (
 				SELECT img.id
-				FROM container_images img
+				FROM images img
 				WHERE NOT EXISTS (
 					SELECT 1
-					FROM container_instances ci
-					WHERE ci.image_id = img.id
+					FROM containers c
+					WHERE c.image_id = img.id
 				)
 			)
 		)
@@ -383,11 +383,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		DELETE FROM vulnerabilities
 		WHERE image_id IN (
 			SELECT img.id
-			FROM container_images img
+			FROM images img
 			WHERE NOT EXISTS (
 				SELECT 1
-				FROM container_instances ci
-				WHERE ci.image_id = img.id
+				FROM containers c
+				WHERE c.image_id = img.id
 			)
 		)
 	`)
@@ -405,11 +405,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 			FROM packages p
 			WHERE p.image_id IN (
 				SELECT img.id
-				FROM container_images img
+				FROM images img
 				WHERE NOT EXISTS (
 					SELECT 1
-					FROM container_instances ci
-					WHERE ci.image_id = img.id
+					FROM containers c
+					WHERE c.image_id = img.id
 				)
 			)
 		)
@@ -425,11 +425,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 			FROM packages p
 			WHERE p.image_id IN (
 				SELECT img.id
-				FROM container_images img
+				FROM images img
 				WHERE NOT EXISTS (
 					SELECT 1
-					FROM container_instances ci
-					WHERE ci.image_id = img.id
+					FROM containers c
+					WHERE c.image_id = img.id
 				)
 			)
 		)
@@ -443,11 +443,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		DELETE FROM packages
 		WHERE image_id IN (
 			SELECT img.id
-			FROM container_images img
+			FROM images img
 			WHERE NOT EXISTS (
 				SELECT 1
-				FROM container_instances ci
-				WHERE ci.image_id = img.id
+				FROM containers c
+				WHERE c.image_id = img.id
 			)
 		)
 	`)
@@ -457,11 +457,11 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 
 	// Delete orphaned images
 	_, err = tx.Exec(`
-		DELETE FROM container_images
+		DELETE FROM images
 		WHERE NOT EXISTS (
 			SELECT 1
-			FROM container_instances ci
-			WHERE ci.image_id = container_images.id
+			FROM containers c
+			WHERE c.image_id = images.id
 		)
 	`)
 	if err != nil {

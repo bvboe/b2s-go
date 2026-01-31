@@ -43,20 +43,20 @@ func (m *MockInfoProvider) GetGrypeDBBuilt() string {
 
 // MockDatabaseProvider implements DatabaseProvider for testing
 type MockDatabaseProvider struct {
-	instances         []database.ScannedContainerInstance
-	vulnerabilities   []database.VulnerabilityInstance
+	instances         []database.ScannedContainer
+	vulnerabilities   []database.ContainerVulnerability
 	scanStatusCounts  []database.ImageScanStatusCount
 	err               error
 }
 
-func (m *MockDatabaseProvider) GetScannedContainerInstances() ([]database.ScannedContainerInstance, error) {
+func (m *MockDatabaseProvider) GetScannedContainers() ([]database.ScannedContainer, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.instances, nil
 }
 
-func (m *MockDatabaseProvider) GetVulnerabilityInstances() ([]database.VulnerabilityInstance, error) {
+func (m *MockDatabaseProvider) GetContainerVulnerabilities() ([]database.ContainerVulnerability, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -79,7 +79,7 @@ func TestCollector_Collect(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 	config := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
@@ -127,7 +127,7 @@ func TestCollector_KubernetesType(t *testing.T) {
 	deploymentUUID := "abc-123-def-456"
 	config := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
@@ -231,7 +231,7 @@ func TestCollector_EscapesSpecialCharacters(t *testing.T) {
 	deploymentUUID := "test-uuid"
 	config := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, nil, config)
@@ -249,7 +249,7 @@ func TestCollector_EscapesSpecialCharacters(t *testing.T) {
 	}
 }
 
-func TestCollector_CollectScannedInstances(t *testing.T) {
+func TestCollector_CollectScannedContainers(t *testing.T) {
 	infoProvider := &MockInfoProvider{
 		deploymentName: "test-cluster",
 		deploymentType: "kubernetes",
@@ -258,11 +258,11 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "default",
 				Pod:        "test-pod-1",
-				Container:  "nginx",
+				Name:  "nginx",
 				NodeName:   "node-1",
 				Reference: "nginx:1.21",
 				Digest:     "sha256:abc123",
@@ -271,7 +271,7 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 			{
 				Namespace:  "kube-system",
 				Pod:        "coredns-abc",
-				Container:  "coredns",
+				Name:  "coredns",
 				NodeName:   "node-2",
 				Reference: "coredns/coredns:1.8.0",
 				Digest:     "sha256:def456",
@@ -282,7 +282,7 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: true,
+		ScannedContainersEnabled: true,
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
@@ -299,9 +299,9 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 		t.Error("Expected bjorn2scan_deployment metric")
 	}
 
-	// Verify scanned instance metric is present
-	if !strings.Contains(metrics, "bjorn2scan_scanned_instance{") {
-		t.Error("Expected bjorn2scan_scanned_instance metric")
+	// Verify scanned container metric is present
+	if !strings.Contains(metrics, "bjorn2scan_scanned_container{") {
+		t.Error("Expected bjorn2scan_scanned_container metric")
 	}
 
 	// Verify first instance
@@ -337,14 +337,14 @@ func TestCollector_CollectScannedInstances(t *testing.T) {
 		t.Error("Expected instance_type=CONTAINER")
 	}
 
-	// Count the number of scanned instance metrics (should be 2)
-	count := strings.Count(metrics, "bjorn2scan_scanned_instance{")
+	// Count the number of scanned container metrics (should be 2)
+	count := strings.Count(metrics, "bjorn2scan_scanned_container{")
 	if count != 2 {
-		t.Errorf("Expected 2 scanned instance metrics, got %d", count)
+		t.Errorf("Expected 2 scanned container metrics, got %d", count)
 	}
 }
 
-func TestCollector_ScannedInstanceLabels(t *testing.T) {
+func TestCollector_ScannedContainerLabels(t *testing.T) {
 	infoProvider := &MockInfoProvider{
 		deploymentName: "prod-cluster",
 		deploymentType: "kubernetes",
@@ -353,11 +353,11 @@ func TestCollector_ScannedInstanceLabels(t *testing.T) {
 	deploymentUUID := "abc-123-def-456"
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "production",
 				Pod:        "app-pod",
-				Container:  "app-container",
+				Name:  "app-container",
 				NodeName:   "prod-node-1",
 				Reference: "myapp:v1.2.3",
 				Digest:     "sha256:xyz789",
@@ -368,7 +368,7 @@ func TestCollector_ScannedInstanceLabels(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       false,
-		ScannedInstancesEnabled: true,
+		ScannedContainersEnabled: true,
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
@@ -420,11 +420,11 @@ func TestCollector_ConfigToggles(t *testing.T) {
 	deploymentUUID := "test-uuid"
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "default",
 				Pod:        "test-pod",
-				Container:  "test-container",
+				Name:  "test-container",
 				NodeName:   "node-1",
 				Reference: "test:latest",
 				Digest:     "sha256:abc",
@@ -436,37 +436,37 @@ func TestCollector_ConfigToggles(t *testing.T) {
 	testCases := []struct {
 		name                    string
 		deploymentEnabled       bool
-		scannedInstancesEnabled bool
+		scannedContainersEnabled bool
 		expectDeployment        bool
-		expectScannedInstance   bool
+		expectScannedContainer   bool
 	}{
 		{
 			name:                    "Both enabled",
 			deploymentEnabled:       true,
-			scannedInstancesEnabled: true,
+			scannedContainersEnabled: true,
 			expectDeployment:        true,
-			expectScannedInstance:   true,
+			expectScannedContainer:   true,
 		},
 		{
 			name:                    "Only deployment enabled",
 			deploymentEnabled:       true,
-			scannedInstancesEnabled: false,
+			scannedContainersEnabled: false,
 			expectDeployment:        true,
-			expectScannedInstance:   false,
+			expectScannedContainer:   false,
 		},
 		{
-			name:                    "Only scanned instances enabled",
+			name:                    "Only scanned containers enabled",
 			deploymentEnabled:       false,
-			scannedInstancesEnabled: true,
+			scannedContainersEnabled: true,
 			expectDeployment:        false,
-			expectScannedInstance:   true,
+			expectScannedContainer:   true,
 		},
 		{
 			name:                    "Both disabled",
 			deploymentEnabled:       false,
-			scannedInstancesEnabled: false,
+			scannedContainersEnabled: false,
 			expectDeployment:        false,
-			expectScannedInstance:   false,
+			expectScannedContainer:   false,
 		},
 	}
 
@@ -474,7 +474,7 @@ func TestCollector_ConfigToggles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config := CollectorConfig{
 				DeploymentEnabled:       tc.deploymentEnabled,
-				ScannedInstancesEnabled: tc.scannedInstancesEnabled,
+				ScannedContainersEnabled: tc.scannedContainersEnabled,
 			}
 
 			collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
@@ -487,19 +487,19 @@ func TestCollector_ConfigToggles(t *testing.T) {
 			metrics := FormatPrometheus(data)
 
 			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
-			hasScannedInstance := strings.Contains(metrics, "bjorn2scan_scanned_instance{")
+			hasScannedContainer := strings.Contains(metrics, "bjorn2scan_scanned_container{")
 
 			if hasDeployment != tc.expectDeployment {
 				t.Errorf("Expected deployment metric present=%v, got=%v", tc.expectDeployment, hasDeployment)
 			}
-			if hasScannedInstance != tc.expectScannedInstance {
-				t.Errorf("Expected scanned instance metric present=%v, got=%v", tc.expectScannedInstance, hasScannedInstance)
+			if hasScannedContainer != tc.expectScannedContainer {
+				t.Errorf("Expected scanned container metric present=%v, got=%v", tc.expectScannedContainer, hasScannedContainer)
 			}
 		})
 	}
 }
 
-func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
+func TestCollector_EscapesScannedContainerLabels(t *testing.T) {
 	infoProvider := &MockInfoProvider{
 		deploymentName: "test",
 		deploymentType: "agent",
@@ -508,11 +508,11 @@ func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
 	deploymentUUID := "test-uuid"
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "default",
 				Pod:        `pod-with"quotes`,
-				Container:  `container\with\backslash`,
+				Name:  `container\with\backslash`,
 				NodeName:   "node-1",
 				Reference: "test/repo:v1.0",
 				Digest:     "sha256:abc",
@@ -523,7 +523,7 @@ func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       false,
-		ScannedInstancesEnabled: true,
+		ScannedContainersEnabled: true,
 	}
 
 	collector := NewCollector(infoProvider, deploymentUUID, mockDB, config)
@@ -551,7 +551,7 @@ func TestCollector_EscapesScannedInstanceLabels(t *testing.T) {
 	}
 }
 
-func TestCollector_ScannedInstancesWithNilDatabase(t *testing.T) {
+func TestCollector_ScannedContainersWithNilDatabase(t *testing.T) {
 	infoProvider := &MockInfoProvider{
 		deploymentName: "test",
 		deploymentType: "agent",
@@ -561,7 +561,7 @@ func TestCollector_ScannedInstancesWithNilDatabase(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: true,
+		ScannedContainersEnabled: true,
 	}
 
 	// Nil database should be handled gracefully
@@ -574,12 +574,12 @@ func TestCollector_ScannedInstancesWithNilDatabase(t *testing.T) {
 	// Format as Prometheus text
 	metrics := FormatPrometheus(data)
 
-	// Should have deployment metric but not scanned instance metrics
+	// Should have deployment metric but not scanned container metrics
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
 		t.Error("Expected bjorn2scan_deployment metric")
 	}
-	if strings.Contains(metrics, "bjorn2scan_scanned_instance{") {
-		t.Error("Expected no bjorn2scan_scanned_instance metric with nil database")
+	if strings.Contains(metrics, "bjorn2scan_scanned_container{") {
+		t.Error("Expected no bjorn2scan_scanned_container metric with nil database")
 	}
 }
 
@@ -592,11 +592,11 @@ func TestCollector_CollectVulnerabilities(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				Namespace:      "default",
 				Pod:            "test-pod-1",
-				Container:      "nginx",
+				Name:      "nginx",
 				NodeName:       "node-1",
 				Reference: "nginx:1.21",
 				Digest:         "sha256:abc123",
@@ -612,7 +612,7 @@ func TestCollector_CollectVulnerabilities(t *testing.T) {
 			{
 				Namespace:      "default",
 				Pod:            "test-pod-1",
-				Container:      "nginx",
+				Name:      "nginx",
 				NodeName:       "node-1",
 				Reference: "nginx:1.21",
 				Digest:         "sha256:abc123",
@@ -630,7 +630,7 @@ func TestCollector_CollectVulnerabilities(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       false,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 		VulnerabilitiesEnabled:  true,
 	}
 
@@ -702,11 +702,11 @@ func TestCollector_VulnerabilityLabels(t *testing.T) {
 	deploymentUUID := "abc-123-def-456"
 
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				Namespace:      "production",
 				Pod:            "app-pod",
-				Container:      "app-container",
+				Name:      "app-container",
 				NodeName:       "prod-node-1",
 				Reference:      "myapp:v1.2.3",
 				Digest:         "sha256:xyz789",
@@ -724,7 +724,7 @@ func TestCollector_VulnerabilityLabels(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       false,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 		VulnerabilitiesEnabled:  true,
 	}
 
@@ -783,22 +783,22 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 	deploymentUUID := "test-uuid"
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "default",
 				Pod:        "test-pod",
-				Container:  "test-container",
+				Name:  "test-container",
 				NodeName:   "node-1",
 				Reference: "test:latest",
 				Digest:     "sha256:abc",
 				OSName:     "alpine",
 			},
 		},
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				Namespace:      "default",
 				Pod:            "test-pod",
-				Container:      "test-container",
+				Name:      "test-container",
 				NodeName:       "node-1",
 				Reference:      "test:latest",
 				Digest:         "sha256:abc",
@@ -817,46 +817,46 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 	testCases := []struct {
 		name                    string
 		deploymentEnabled       bool
-		scannedInstancesEnabled bool
+		scannedContainersEnabled bool
 		vulnerabilitiesEnabled  bool
 		expectDeployment        bool
-		expectScannedInstance   bool
+		expectScannedContainer   bool
 		expectVulnerability     bool
 	}{
 		{
 			name:                    "All enabled",
 			deploymentEnabled:       true,
-			scannedInstancesEnabled: true,
+			scannedContainersEnabled: true,
 			vulnerabilitiesEnabled:  true,
 			expectDeployment:        true,
-			expectScannedInstance:   true,
+			expectScannedContainer:   true,
 			expectVulnerability:     true,
 		},
 		{
 			name:                    "Only vulnerabilities enabled",
 			deploymentEnabled:       false,
-			scannedInstancesEnabled: false,
+			scannedContainersEnabled: false,
 			vulnerabilitiesEnabled:  true,
 			expectDeployment:        false,
-			expectScannedInstance:   false,
+			expectScannedContainer:   false,
 			expectVulnerability:     true,
 		},
 		{
 			name:                    "Vulnerabilities disabled",
 			deploymentEnabled:       true,
-			scannedInstancesEnabled: true,
+			scannedContainersEnabled: true,
 			vulnerabilitiesEnabled:  false,
 			expectDeployment:        true,
-			expectScannedInstance:   true,
+			expectScannedContainer:   true,
 			expectVulnerability:     false,
 		},
 		{
 			name:                    "All disabled",
 			deploymentEnabled:       false,
-			scannedInstancesEnabled: false,
+			scannedContainersEnabled: false,
 			vulnerabilitiesEnabled:  false,
 			expectDeployment:        false,
-			expectScannedInstance:   false,
+			expectScannedContainer:   false,
 			expectVulnerability:     false,
 		},
 	}
@@ -865,7 +865,7 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config := CollectorConfig{
 				DeploymentEnabled:       tc.deploymentEnabled,
-				ScannedInstancesEnabled: tc.scannedInstancesEnabled,
+				ScannedContainersEnabled: tc.scannedContainersEnabled,
 				VulnerabilitiesEnabled:  tc.vulnerabilitiesEnabled,
 			}
 
@@ -879,14 +879,14 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 			metrics := FormatPrometheus(data)
 
 			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
-			hasScannedInstance := strings.Contains(metrics, "bjorn2scan_scanned_instance{")
+			hasScannedContainer := strings.Contains(metrics, "bjorn2scan_scanned_container{")
 			hasVulnerability := strings.Contains(metrics, "bjorn2scan_vulnerability{")
 
 			if hasDeployment != tc.expectDeployment {
 				t.Errorf("Expected deployment metric present=%v, got=%v", tc.expectDeployment, hasDeployment)
 			}
-			if hasScannedInstance != tc.expectScannedInstance {
-				t.Errorf("Expected scanned instance metric present=%v, got=%v", tc.expectScannedInstance, hasScannedInstance)
+			if hasScannedContainer != tc.expectScannedContainer {
+				t.Errorf("Expected scanned container metric present=%v, got=%v", tc.expectScannedContainer, hasScannedContainer)
 			}
 			if hasVulnerability != tc.expectVulnerability {
 				t.Errorf("Expected vulnerability metric present=%v, got=%v", tc.expectVulnerability, hasVulnerability)
@@ -905,7 +905,7 @@ func TestCollector_VulnerabilitiesWithNilDatabase(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: true,
+		ScannedContainersEnabled: true,
 		VulnerabilitiesEnabled:  true,
 	}
 
@@ -937,11 +937,11 @@ func TestCollector_EscapesVulnerabilityLabels(t *testing.T) {
 	deploymentUUID := "test-uuid"
 
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				Namespace:      "default",
 				Pod:            `pod-with"quotes`,
-				Container:      `container\with\backslash`,
+				Name:      `container\with\backslash`,
 				NodeName:       "node-1",
 				Reference:      "test/repo:v1.0",
 				Digest:         "sha256:abc",
@@ -959,7 +959,7 @@ func TestCollector_EscapesVulnerabilityLabels(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:       false,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 		VulnerabilitiesEnabled:  true,
 	}
 
@@ -1012,11 +1012,11 @@ func TestCollector_CollectVulnerabilityRisk(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				Namespace:      "default",
 				Pod:            "test-pod-1",
-				Container:      "nginx",
+				Name:      "nginx",
 				NodeName:       "node-1",
 				Reference: "nginx:1.21",
 				Digest:         "sha256:abc123",
@@ -1034,7 +1034,7 @@ func TestCollector_CollectVulnerabilityRisk(t *testing.T) {
 			{
 				Namespace:      "default",
 				Pod:            "test-pod-2",
-				Container:      "redis",
+				Name:      "redis",
 				NodeName:       "node-2",
 				Reference: "redis:6.2",
 				Digest:         "sha256:def456",
@@ -1052,7 +1052,7 @@ func TestCollector_CollectVulnerabilityRisk(t *testing.T) {
 			{
 				Namespace:      "prod",
 				Pod:            "test-pod-3",
-				Container:      "postgres",
+				Name:      "postgres",
 				NodeName:       "node-3",
 				Reference: "postgres:14",
 				Digest:         "sha256:ghi789",
@@ -1072,7 +1072,7 @@ func TestCollector_CollectVulnerabilityRisk(t *testing.T) {
 
 	config := CollectorConfig{
 		DeploymentEnabled:         false,
-		ScannedInstancesEnabled:   false,
+		ScannedContainersEnabled:   false,
 		VulnerabilitiesEnabled:    false,
 		VulnerabilityRiskEnabled:  true,
 	}
@@ -1123,12 +1123,12 @@ func TestCollector_VulnerabilityRiskLabels(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				VulnID:         123,
 				Namespace:      "production",
 				Pod:            "web-app-xyz",
-				Container:      "nginx-container",
+				Name:      "nginx-container",
 				NodeName:       "worker-node-1",
 				Reference: "nginx:1.21.6",
 				Digest:         "sha256:abcdef123456",
@@ -1197,7 +1197,7 @@ func TestCollector_ConfigTogglesWithVulnerabilityRisk(t *testing.T) {
 	}
 
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				CVEID: "CVE-2022-48174",
 				Risk:  5.5,
@@ -1228,7 +1228,7 @@ func TestCollector_ConfigTogglesWithVulnerabilityRisk(t *testing.T) {
 			name: "All_metrics_enabled",
 			config: CollectorConfig{
 				DeploymentEnabled:            true,
-				ScannedInstancesEnabled:      true,
+				ScannedContainersEnabled:      true,
 				VulnerabilitiesEnabled:       true,
 				VulnerabilityExploitedEnabled: true,
 				VulnerabilityRiskEnabled:     true,
@@ -1265,12 +1265,12 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 
 	// Test various float values including edge cases
 	mockDB := &MockDatabaseProvider{
-		vulnerabilities: []database.VulnerabilityInstance{
+		vulnerabilities: []database.ContainerVulnerability{
 			{
 				CVEID:     "CVE-2022-0001",
 				Namespace: "default",
 				Pod:       "test-1",
-				Container: "app",
+				Name: "app",
 				Risk:      0.0,
 				Count:     1,
 			},
@@ -1278,7 +1278,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				CVEID:     "CVE-2022-0002",
 				Namespace: "default",
 				Pod:       "test-2",
-				Container: "app",
+				Name: "app",
 				Risk:      0.5,
 				Count:     1,
 			},
@@ -1286,7 +1286,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				CVEID:     "CVE-2022-0003",
 				Namespace: "default",
 				Pod:       "test-3",
-				Container: "app",
+				Name: "app",
 				Risk:      7.5,
 				Count:     1,
 			},
@@ -1294,7 +1294,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				CVEID:     "CVE-2022-0004",
 				Namespace: "default",
 				Pod:       "test-4",
-				Container: "app",
+				Name: "app",
 				Risk:      10.0,
 				Count:     1,
 			},
@@ -1302,7 +1302,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 				CVEID:     "CVE-2022-0005",
 				Namespace: "default",
 				Pod:       "test-5",
-				Container: "app",
+				Name: "app",
 				Risk:      3.14159,
 				Count:     1,
 			},

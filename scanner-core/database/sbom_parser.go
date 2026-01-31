@@ -276,18 +276,18 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 		totalPackages++
 	}
 
-	// Update container_images with architecture information if available
+	// Update images with architecture information if available
 	if sbom.Source.Metadata.Architecture != "" {
 		arch := sbom.Source.Metadata.Architecture
 		log.Printf("Extracted architecture info for image_id=%d: %s", imageID, arch)
 
 		_, err = tx.Exec(`
-			UPDATE container_images
+			UPDATE images
 			SET architecture = ?
 			WHERE id = ?
 		`, arch, imageID)
 		if err != nil {
-			log.Printf("Warning: Failed to update container_images with architecture info: %v", err)
+			log.Printf("Warning: Failed to update images with architecture info: %v", err)
 		}
 	}
 
@@ -458,19 +458,19 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		totalVulns++
 	}
 
-	// Update container_images with distro information if available
+	// Update images with distro information if available
 	if doc.Distro != nil {
 		osName := doc.Distro.Name
 		osVersion := doc.Distro.Version
 		log.Printf("Extracted distro info for image_id=%d: %s %s", imageID, osName, osVersion)
 
 		_, err = tx.Exec(`
-			UPDATE container_images
+			UPDATE images
 			SET os_name = ?, os_version = ?
 			WHERE id = ?
 		`, osName, osVersion, imageID)
 		if err != nil {
-			log.Printf("Warning: Failed to update container_images with distro info: %v", err)
+			log.Printf("Warning: Failed to update images with distro info: %v", err)
 		}
 	}
 
@@ -489,7 +489,7 @@ func (db *DB) ParseAndStoreImageData(imageID int64) error {
 	var sbomJSON, vulnJSON sql.NullString
 	err := db.conn.QueryRow(`
 		SELECT sbom, vulnerabilities
-		FROM container_images
+		FROM images
 		WHERE id = ?
 	`, imageID).Scan(&sbomJSON, &vulnJSON)
 	if err != nil {

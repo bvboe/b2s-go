@@ -27,8 +27,8 @@ func extractImageReference(imageName string) string {
 	return imageName
 }
 
-// extractContainerInstance creates a ContainerInstance from Docker container info
-func extractContainerInstance(ctx context.Context, cli *client.Client, containerID string) (containers.ContainerInstance, error) {
+// extractContainer creates a Container from Docker container info
+func extractContainer(ctx context.Context, cli *client.Client, containerID string) (containers.Container, error) {
 	hostname, _ := os.Hostname()
 	if hostname == "" {
 		hostname = "unknown"
@@ -37,7 +37,7 @@ func extractContainerInstance(ctx context.Context, cli *client.Client, container
 	// Get detailed container info
 	containerJSON, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return containers.ContainerInstance{}, err
+		return containers.Container{}, err
 	}
 
 	reference := extractImageReference(containerJSON.Config.Image)
@@ -55,11 +55,11 @@ func extractContainerInstance(ctx context.Context, cli *client.Client, container
 		containerName = containerID[:12] // Use short container ID as fallback
 	}
 
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	c := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: hostname,
 			Pod:       "host", // Indicate this is a host-level container
-			Container: containerName,
+			Name:      containerName,
 		},
 		Image: containers.ImageID{
 			Reference: reference,
@@ -69,7 +69,7 @@ func extractContainerInstance(ctx context.Context, cli *client.Client, container
 		ContainerRuntime: "docker",
 	}
 
-	return instance, nil
+	return c, nil
 }
 
 // IsDockerAvailable checks if Docker daemon is accessible
@@ -144,16 +144,16 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 					switch event.Action {
 					case "start":
 						// Container started
-						instance, err := extractContainerInstance(ctx, cli, event.Actor.ID)
+						c, err := extractContainer(ctx, cli, event.Actor.ID)
 						if err != nil {
-							log.Printf("Error extracting container instance for %s: %v", event.Actor.ID[:12], err)
+							log.Printf("Error extracting container for %s: %v", event.Actor.ID[:12], err)
 							continue
 						}
-						manager.AddContainerInstance(instance)
+						manager.AddContainer(c)
 
 					case "die", "kill", "stop":
 						// Container stopped - we need to get the container info before it's removed
-						instance, err := extractContainerInstance(ctx, cli, event.Actor.ID)
+						c, err := extractContainer(ctx, cli, event.Actor.ID)
 						if err != nil {
 							// Container might already be removed, use event data
 							hostname, _ := os.Hostname()
@@ -164,17 +164,17 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 							if containerName == "" {
 								containerName = event.Actor.ID[:12]
 							}
-							instance = containers.ContainerInstance{
-								ID: containers.ContainerInstanceID{
+							c = containers.Container{
+								ID: containers.ContainerID{
 									Namespace: hostname,
 									Pod:       "host",
-									Container: containerName,
+									Name:      containerName,
 								},
 								NodeName:         hostname,
 								ContainerRuntime: "docker",
 							}
 						}
-						manager.RemoveContainerInstance(instance.ID)
+						manager.RemoveContainer(c.ID)
 					}
 				}
 			}
@@ -196,18 +196,18 @@ func syncInitialContainers(ctx context.Context, cli *client.Client, manager *con
 		return err
 	}
 
-	var allInstances []containers.ContainerInstance
-	for _, container := range containerList {
-		instance, err := extractContainerInstance(ctx, cli, container.ID)
+	var allContainers []containers.Container
+	for _, dc := range containerList {
+		c, err := extractContainer(ctx, cli, dc.ID)
 		if err != nil {
-			log.Printf("Warning: failed to extract container %s: %v", container.ID[:12], err)
+			log.Printf("Warning: failed to extract container %s: %v", dc.ID[:12], err)
 			continue
 		}
-		allInstances = append(allInstances, instance)
+		allContainers = append(allContainers, c)
 	}
 
-	manager.SetContainerInstances(allInstances)
-	log.Printf("Docker watcher: initial sync complete: %d container instances", manager.GetInstanceCount())
+	manager.SetContainers(allContainers)
+	log.Printf("Docker watcher: initial sync complete: %d containers", manager.GetContainerCount())
 
 	return nil
 }

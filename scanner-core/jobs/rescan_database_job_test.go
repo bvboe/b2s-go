@@ -35,7 +35,7 @@ func (m *MockDatabaseUpdater) GetCurrentVersion() *vulndb.DatabaseStatus {
 type MockDatabase struct {
 	images             []database.ContainerImage
 	imagesNeedingRescan []database.ContainerImage
-	instances          map[string]*database.ContainerInstanceRow
+	instances          map[string]*database.ContainerRow
 	err                error
 }
 
@@ -46,7 +46,7 @@ func (m *MockDatabase) GetImagesByStatus(status database.Status) ([]database.Con
 	return m.images, nil
 }
 
-func (m *MockDatabase) GetFirstInstanceForImage(digest string) (*database.ContainerInstanceRow, error) {
+func (m *MockDatabase) GetFirstContainerForImage(digest string) (*database.ContainerRow, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -113,11 +113,11 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 				Status: "completed",
 			},
 		},
-		instances: map[string]*database.ContainerInstanceRow{
+		instances: map[string]*database.ContainerRow{
 			"sha256:abc123": {
 				Namespace:        "default",
 				Pod:              "pod1",
-				Container:        "container1",
+				Name:        "container1",
 				Reference:        "nginx:latest",
 				NodeName:         "node1",
 				ContainerRuntime: "docker",
@@ -125,7 +125,7 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 			"sha256:def456": {
 				Namespace:        "default",
 				Pod:              "pod2",
-				Container:        "container2",
+				Name:        "container2",
 				Reference:        "redis:7.0",
 				NodeName:         "node2",
 				ContainerRuntime: "containerd",
@@ -198,7 +198,7 @@ func TestRescanDatabaseJob_NoGrypeDatabase(t *testing.T) {
 		images: []database.ContainerImage{
 			{ID: 1, Digest: "sha256:abc123", Status: "completed"},
 		},
-		instances: map[string]*database.ContainerInstanceRow{
+		instances: map[string]*database.ContainerRow{
 			"sha256:abc123": {NodeName: "node1", ContainerRuntime: "docker", Reference: "nginx:latest"},
 		},
 	}
@@ -236,7 +236,7 @@ func TestRescanDatabaseJob_NoImagesNeedingRescan(t *testing.T) {
 	// Setup: mock database with no images needing rescan
 	mockDB := &MockDatabase{
 		imagesNeedingRescan: []database.ContainerImage{}, // Empty - all images up to date
-		instances:           map[string]*database.ContainerInstanceRow{},
+		instances:           map[string]*database.ContainerRow{},
 	}
 
 	// Setup: mock scan queue
@@ -276,7 +276,7 @@ func TestRescanDatabaseJob_MissingInstances(t *testing.T) {
 			{ID: 2, Digest: "sha256:def456", Status: "completed"}, // No instance
 			{ID: 3, Digest: "sha256:ghi789", Status: "completed"},
 		},
-		instances: map[string]*database.ContainerInstanceRow{
+		instances: map[string]*database.ContainerRow{
 			"sha256:abc123": {NodeName: "node1", ContainerRuntime: "docker", Reference: "nginx:latest"},
 			// sha256:def456 is missing (orphaned)
 			"sha256:ghi789": {NodeName: "node3", ContainerRuntime: "containerd", Reference: "redis:7.0"},
@@ -318,7 +318,7 @@ func TestRescanDatabaseJob_UpdaterError(t *testing.T) {
 
 	mockDB := &MockDatabase{
 		images:    []database.ContainerImage{},
-		instances: map[string]*database.ContainerInstanceRow{},
+		instances: map[string]*database.ContainerRow{},
 	}
 
 	mockQueue := &MockScanQueue{}
@@ -385,7 +385,7 @@ func TestRescanDatabaseJob_ContextCancellation(t *testing.T) {
 
 	mockDB := &MockDatabase{
 		images:    []database.ContainerImage{},
-		instances: map[string]*database.ContainerInstanceRow{},
+		instances: map[string]*database.ContainerRow{},
 	}
 
 	mockQueue := &MockScanQueue{}

@@ -345,7 +345,7 @@
                     id="queryInput"
                     class="query-input"
                     placeholder="Enter your SQL query here..."
-                >SELECT * FROM container_images LIMIT 10;</textarea>
+                >SELECT * FROM images LIMIT 10;</textarea>
 
                 <div class="button-group">
                     <button class="btn" onclick="executeQuery()">▶ Execute Query</button>
@@ -371,22 +371,22 @@
             <div class="section-body">
                 <div class="sample-queries">
                     <div class="sample-query" onclick="loadSampleQuery(0)">
-                        SELECT * FROM container_images LIMIT 10;
+                        SELECT * FROM images LIMIT 10;
                     </div>
                     <div class="sample-query" onclick="loadSampleQuery(1)">
-                        SELECT digest, repository, tag, scan_status, vulnerability_status FROM container_instances ORDER BY created_at DESC LIMIT 20;
+                        SELECT namespace, pod, name, reference FROM containers ORDER BY created_at DESC LIMIT 20;
                     </div>
                     <div class="sample-query" onclick="loadSampleQuery(2)">
-                        SELECT digest, package_count, vulnerability_count, critical_count, high_count FROM container_images WHERE vulnerability_count > 0 ORDER BY critical_count DESC;
+                        SELECT digest, package_count, vulnerability_count, critical_count, high_count FROM images WHERE vulnerability_count > 0 ORDER BY critical_count DESC;
                     </div>
                     <div class="sample-query" onclick="loadSampleQuery(3)">
                         SELECT cve_id, severity, package_name, package_version, fix_status FROM vulnerabilities WHERE severity = 'CRITICAL' LIMIT 50;
                     </div>
                     <div class="sample-query" onclick="loadSampleQuery(4)">
-                        SELECT COUNT(*) as total_images, SUM(package_count) as total_packages, SUM(vulnerability_count) as total_vulns FROM container_images;
+                        SELECT COUNT(*) as total_images, SUM(package_count) as total_packages, SUM(vulnerability_count) as total_vulns FROM images;
                     </div>
                     <div class="sample-query" onclick="loadSampleQuery(5)">
-                        PRAGMA table_info(container_images);
+                        PRAGMA table_info(images);
                     </div>
                     <div class="sample-query" onclick="loadSampleQuery(6)">
                         EXPLAIN QUERY PLAN SELECT * FROM vulnerabilities WHERE severity = 'CRITICAL';
@@ -403,12 +403,12 @@
 
     <script>
         const sampleQueries = [
-            "SELECT * FROM container_images LIMIT 10;",
-            "SELECT digest, repository, tag, scan_status, vulnerability_status\nFROM container_instances\nORDER BY created_at DESC\nLIMIT 20;",
-            "SELECT digest, package_count, vulnerability_count, critical_count, high_count\nFROM container_images\nWHERE vulnerability_count > 0\nORDER BY critical_count DESC;",
+            "SELECT * FROM images LIMIT 10;",
+            "SELECT namespace, pod, name, reference\nFROM containers\nORDER BY created_at DESC\nLIMIT 20;",
+            "SELECT digest, package_count, vulnerability_count, critical_count, high_count\nFROM images\nWHERE vulnerability_count > 0\nORDER BY critical_count DESC;",
             "SELECT cve_id, severity, package_name, package_version, fix_status\nFROM vulnerabilities\nWHERE severity = 'CRITICAL'\nLIMIT 50;",
-            "SELECT COUNT(*) as total_images,\n       SUM(package_count) as total_packages,\n       SUM(vulnerability_count) as total_vulns\nFROM container_images;",
-            "PRAGMA table_info(container_images);",
+            "SELECT COUNT(*) as total_images,\n       SUM(package_count) as total_packages,\n       SUM(vulnerability_count) as total_vulns\nFROM images;",
+            "PRAGMA table_info(images);",
             "EXPLAIN QUERY PLAN\nSELECT *\nFROM vulnerabilities\nWHERE severity = 'CRITICAL';"
         ];
 

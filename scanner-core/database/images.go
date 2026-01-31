@@ -37,7 +37,7 @@ func (db *DB) getOrCreateImageTx(exec interface {
 	// Try to get existing image by digest
 	var id int64
 	err := exec.QueryRow(`
-		SELECT id FROM container_images
+		SELECT id FROM images
 		WHERE digest = ?
 	`, image.Digest).Scan(&id)
 
@@ -52,7 +52,7 @@ func (db *DB) getOrCreateImageTx(exec interface {
 
 	// Image doesn't exist, create it
 	result, err := exec.Exec(`
-		INSERT INTO container_images (digest)
+		INSERT INTO images (digest)
 		VALUES (?)
 	`, image.Digest)
 
@@ -76,7 +76,7 @@ func (db *DB) getOrCreateImageTx(exec interface {
 func (db *DB) GetAllImages() (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT id, digest, status, created_at, updated_at
-		FROM container_images
+		FROM images
 		ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -110,7 +110,7 @@ func (db *DB) GetImageByID(id int64) (*ContainerImage, error) {
 	var status sql.NullString
 	err := db.conn.QueryRow(`
 		SELECT id, digest, status, created_at, updated_at
-		FROM container_images
+		FROM images
 		WHERE id = ?
 	`, id).Scan(&img.ID, &img.Digest,
 		&status, &img.CreatedAt, &img.UpdatedAt)

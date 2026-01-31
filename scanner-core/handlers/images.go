@@ -23,8 +23,8 @@ type ImageQueryProvider interface {
 func FilterOptionsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		queries := map[string]string{
-			"namespaces":   "SELECT DISTINCT namespace FROM container_instances WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace",
-			"osNames":      "SELECT DISTINCT os_name FROM container_images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
+			"namespaces":   "SELECT DISTINCT namespace FROM containers WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace",
+			"osNames":      "SELECT DISTINCT os_name FROM images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
 			"vulnStatuses": "SELECT DISTINCT fix_status FROM vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status",
 			"packageTypes": "SELECT DISTINCT type FROM packages WHERE type IS NOT NULL AND type != '' ORDER BY type",
 		}
@@ -168,8 +168,8 @@ func parseMultiSelect(value string) []string {
 func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osNames []string, sortBy, sortOrder string, limit, offset int) (string, string) {
 	// Base query
 	baseQuery := `
-  FROM container_instances instances
-  JOIN container_images images ON instances.image_id = images.id
+  FROM containers instances
+  JOIN images images ON instances.image_id = images.id
   JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
       SELECT image_id, COUNT(*) as package_count
@@ -280,7 +280,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	selectClause := `SELECT
       instances.reference as image,
       images.digest,
-      COUNT(*) as instance_count,
+      COUNT(*) as container_count,
       COALESCE(vuln_counts.critical_count, 0) as critical_count,
       COALESCE(vuln_counts.high_count, 0) as high_count,
       COALESCE(vuln_counts.medium_count, 0) as medium_count,
@@ -300,7 +300,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	// 2. User-selected column (if any)
 	// 3. image (always last - for consistent tie-breaking)
 	validSortColumns := map[string]bool{
-		"image": true, "instance_count": true, "critical_count": true,
+		"image": true, "container_count": true, "critical_count": true,
 		"high_count": true, "medium_count": true, "low_count": true,
 		"negligible_count": true, "unknown_count": true, "total_risk": true,
 		"exploit_count": true, "package_count": true, "os_name": true,
@@ -414,12 +414,12 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	}
 }
 
-// buildPodsQuery constructs the SQL query for container instances with filters
+// buildPodsQuery constructs the SQL query for containers with filters
 func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNames []string, sortBy, sortOrder string, limit, offset int) (string, string) {
-	// Base query - individual container instances
+	// Base query - individual containers
 	baseQuery := `
-  FROM container_instances instances
-  JOIN container_images images ON instances.image_id = images.id
+  FROM containers instances
+  JOIN images images ON instances.image_id = images.id
   JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
       SELECT image_id, COUNT(*) as package_count
@@ -486,7 +486,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 	// Search filter (pod, container, or namespace)
 	if search != "" {
 		escapedSearch := strings.ReplaceAll(search, "'", "''")
-		conditions = append(conditions, fmt.Sprintf("(instances.namespace LIKE '%%%s%%' OR instances.pod LIKE '%%%s%%' OR instances.container LIKE '%%%s%%')", escapedSearch, escapedSearch, escapedSearch))
+		conditions = append(conditions, fmt.Sprintf("(instances.namespace LIKE '%%%s%%' OR instances.pod LIKE '%%%s%%' OR instances.name LIKE '%%%s%%')", escapedSearch, escapedSearch, escapedSearch))
 	}
 
 	// Namespace filter
@@ -523,7 +523,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 	selectClause := `SELECT
       instances.namespace,
       instances.pod,
-      instances.container,
+      instances.name,
       images.digest,
       COALESCE(vuln_counts.critical_count, 0) as critical_count,
       COALESCE(vuln_counts.high_count, 0) as high_count,
@@ -544,7 +544,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 	// 2. User-selected column (if any)
 	// 3. namespace/pod/container (always last - for consistent tie-breaking, avoiding duplicates)
 	validSortColumns := map[string]bool{
-		"namespace": true, "pod": true, "container": true,
+		"namespace": true, "pod": true, "name": true,
 		"critical_count": true, "high_count": true, "medium_count": true,
 		"low_count": true, "negligible_count": true, "unknown_count": true,
 		"total_risk": true, "exploit_count": true, "package_count": true,
@@ -554,18 +554,18 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 	if sortBy != "" && validSortColumns[sortBy] {
 		mainQuery += fmt.Sprintf(" ORDER BY status.sort_order ASC, %s %s", sortBy, sortOrder)
 
-		// Add namespace/pod/container as tie-breakers, skipping any already used
+		// Add namespace/pod/name as tie-breakers, skipping any already used
 		if sortBy != "namespace" {
 			mainQuery += ", instances.namespace ASC"
 		}
 		if sortBy != "pod" {
 			mainQuery += ", instances.pod ASC"
 		}
-		if sortBy != "container" {
-			mainQuery += ", instances.container ASC"
+		if sortBy != "name" {
+			mainQuery += ", instances.name ASC"
 		}
 	} else {
-		mainQuery += " ORDER BY status.sort_order ASC, instances.namespace ASC, instances.pod ASC, instances.container ASC"
+		mainQuery += " ORDER BY status.sort_order ASC, instances.namespace ASC, instances.pod ASC, instances.name ASC"
 	}
 
 	// Add pagination (skip if limit <= 0 for full export)
@@ -631,7 +631,7 @@ func exportPodsCSV(w http.ResponseWriter, result *database.QueryResult) {
 }
 
 // ImageDetailFullHandler creates an HTTP handler for /api/images/{digest} endpoint
-// Returns detailed information for a specific image including repositories and instances
+// Returns detailed information for a specific image including references and containers
 func ImageDetailFullHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract digest from URL path
@@ -663,7 +663,7 @@ SELECT
     status.description as status_description,
     images.vulns_scanned_at,
     images.grype_db_built
-FROM container_images images
+FROM images images
 JOIN scan_status status ON images.status = status.status
 WHERE images.digest = '` + escapedDigest + `'`
 
@@ -685,56 +685,56 @@ WHERE images.digest = '` + escapedDigest + `'`
 		imageRow := imageResult.Rows[0]
 		imageID := imageRow["id"]
 
-		// Get distinct repositories for this image
-		repoQuery := `
-SELECT DISTINCT reference as repo
-FROM container_instances
+		// Get distinct references for this image
+		refQuery := `
+SELECT DISTINCT reference as ref
+FROM containers
 WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
 ORDER BY reference`
 
-		log.Printf("ImageDetailFullHandler: fetching repositories for image_id: %v", imageID)
-		repoResult, err := provider.ExecuteReadOnlyQuery(repoQuery)
+		log.Printf("ImageDetailFullHandler: fetching references for image_id: %v", imageID)
+		refResult, err := provider.ExecuteReadOnlyQuery(refQuery)
 		if err != nil {
-			log.Printf("Error querying repositories for image_id %v: %v", imageID, err)
-			http.Error(w, fmt.Sprintf("Error querying repositories: %v", err), http.StatusInternalServerError)
+			log.Printf("Error querying references for image_id %v: %v", imageID, err)
+			http.Error(w, fmt.Sprintf("Error querying references: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		repositories := []string{}
-		for _, row := range repoResult.Rows {
-			if repo, ok := row["repo"].(string); ok && repo != "" {
-				repositories = append(repositories, repo)
+		references := []string{}
+		for _, row := range refResult.Rows {
+			if ref, ok := row["ref"].(string); ok && ref != "" {
+				references = append(references, ref)
 			}
 		}
-		log.Printf("ImageDetailFullHandler: found %d repositories", len(repositories))
+		log.Printf("ImageDetailFullHandler: found %d references", len(references))
 
-		// Get distinct instances for this image
-		instanceQuery := `
-SELECT DISTINCT namespace || '.' || pod || '.' || container as instance
-FROM container_instances
+		// Get distinct containers for this image
+		containerQuery := `
+SELECT DISTINCT namespace || '.' || pod || '.' || name as container
+FROM containers
 WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
-ORDER BY namespace, pod, container`
+ORDER BY namespace, pod, name`
 
-		log.Printf("ImageDetailFullHandler: fetching instances for image_id: %v", imageID)
-		instanceResult, err := provider.ExecuteReadOnlyQuery(instanceQuery)
+		log.Printf("ImageDetailFullHandler: fetching containers for image_id: %v", imageID)
+		containerResult, err := provider.ExecuteReadOnlyQuery(containerQuery)
 		if err != nil {
-			log.Printf("Error querying instances for image_id %v: %v", imageID, err)
-			http.Error(w, fmt.Sprintf("Error querying instances: %v", err), http.StatusInternalServerError)
+			log.Printf("Error querying containers for image_id %v: %v", imageID, err)
+			http.Error(w, fmt.Sprintf("Error querying containers: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		instances := []string{}
-		for _, row := range instanceResult.Rows {
-			if inst, ok := row["instance"].(string); ok && inst != "" {
-				instances = append(instances, inst)
+		containers := []string{}
+		for _, row := range containerResult.Rows {
+			if c, ok := row["container"].(string); ok && c != "" {
+				containers = append(containers, c)
 			}
 		}
-		log.Printf("ImageDetailFullHandler: found %d instances", len(instances))
+		log.Printf("ImageDetailFullHandler: found %d containers", len(containers))
 
 		response := map[string]interface{}{
 			"image_id":            imageRow["image_id"],
-			"repositories":        repositories,
-			"instances":           instances,
+			"references":          references,
+			"containers":          containers,
 			"distro_display_name": imageRow["distro_display_name"],
 			"scan_status":         imageRow["scan_status"],
 			"status_description":  imageRow["status_description"],
@@ -898,7 +898,7 @@ func buildImageVulnerabilitiesQuery(digest string, severities, fixStatuses, pack
 	// Base query
 	baseQuery := fmt.Sprintf(`
 FROM vulnerabilities v
-JOIN container_images images ON v.image_id = images.id
+JOIN images images ON v.image_id = images.id
 WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
 	// Build count query
@@ -1030,7 +1030,7 @@ func exportVulnerabilitiesCSV(w http.ResponseWriter, result *database.QueryResul
 // exportRawVulnerabilitiesJSON exports the raw Grype vulnerability JSON for an image
 func exportRawVulnerabilitiesJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
 	escapedDigest := strings.ReplaceAll(digest, "'", "''")
-	query := `SELECT vulnerabilities FROM container_images WHERE digest = '` + escapedDigest + `'`
+	query := `SELECT vulnerabilities FROM images WHERE digest = '` + escapedDigest + `'`
 
 	result, err := provider.ExecuteReadOnlyQuery(query)
 	if err != nil || len(result.Rows) == 0 {
@@ -1180,7 +1180,7 @@ func buildImagePackagesQuery(digest string, packageTypes []string, sortBy, sortO
 	// Base query
 	baseQuery := fmt.Sprintf(`
 FROM packages p
-JOIN container_images images ON p.image_id = images.id
+JOIN images images ON p.image_id = images.id
 WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
 	// Build count query
@@ -1262,7 +1262,7 @@ func exportPackagesCSV(w http.ResponseWriter, result *database.QueryResult) {
 // exportRawSBOMJSON exports the raw Syft SBOM JSON for an image
 func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
 	escapedDigest := strings.ReplaceAll(digest, "'", "''")
-	query := `SELECT sbom FROM container_images WHERE digest = '` + escapedDigest + `'`
+	query := `SELECT sbom FROM images WHERE digest = '` + escapedDigest + `'`
 
 	result, err := provider.ExecuteReadOnlyQuery(query)
 	if err != nil || len(result.Rows) == 0 {

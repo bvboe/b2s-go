@@ -43,7 +43,7 @@
                         <thead>
                             <tr>
                                 <th rowspan="2" class="sortable" data-sort-field="namespace" onclick="sortNamespaceTable('namespace')"><b>Namespace</b></th>
-                                <th rowspan="2" class="sortable" data-sort-field="instance_count" onclick="sortNamespaceTable('instance_count')"><b># Instances</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="container_count" onclick="sortNamespaceTable('container_count')"><b># Containers</b></th>
                                 <th colspan="6"><b>Avg Vulnerabilities per Container</b></th>
                                 <th rowspan="2" class="sortable" data-sort-field="avg_risk" onclick="sortNamespaceTable('avg_risk')"><b>Avg Risk Score</b></th>
                                 <th rowspan="2" class="sortable" data-sort-field="avg_exploits" onclick="sortNamespaceTable('avg_exploits')"><b>Avg Exploits</b></th>
@@ -78,7 +78,7 @@
                         <thead>
                             <tr>
                                 <th rowspan="2" class="sortable" data-sort-field="os_name" onclick="sortDistributionTable('os_name')"><b>OS Distribution</b></th>
-                                <th rowspan="2" class="sortable" data-sort-field="instance_count" onclick="sortDistributionTable('instance_count')"><b># Instances</b></th>
+                                <th rowspan="2" class="sortable" data-sort-field="container_count" onclick="sortDistributionTable('container_count')"><b># Containers</b></th>
                                 <th colspan="6"><b>Avg Vulnerabilities per Container</b></th>
                                 <th rowspan="2" class="sortable" data-sort-field="avg_risk" onclick="sortDistributionTable('avg_risk')"><b>Avg Risk Score</b></th>
                                 <th rowspan="2" class="sortable" data-sort-field="avg_exploits" onclick="sortDistributionTable('avg_exploits')"><b>Avg Exploits</b></th>
@@ -265,7 +265,7 @@
                 };
 
                 addCellToRow(row, 'left', ns.namespace || '');
-                addCellToRow(row, 'right', formatNumber(ns.instance_count));
+                addCellToRow(row, 'right', formatNumber(ns.container_count));
                 addCellToRow(row, 'right', formatAverage(ns.avg_critical));
                 addCellToRow(row, 'right', formatAverage(ns.avg_high));
                 addCellToRow(row, 'right', formatAverage(ns.avg_medium));
@@ -407,7 +407,7 @@
                 };
 
                 addCellToRow(row, 'left', dist.os_name || '');
-                addCellToRow(row, 'right', formatNumber(dist.instance_count));
+                addCellToRow(row, 'right', formatNumber(dist.container_count));
                 addCellToRow(row, 'right', formatAverage(dist.avg_critical));
                 addCellToRow(row, 'right', formatAverage(dist.avg_high));
                 addCellToRow(row, 'right', formatAverage(dist.avg_medium));

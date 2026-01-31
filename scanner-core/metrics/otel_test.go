@@ -129,7 +129,7 @@ func TestNewOTELExporter_Success(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -178,7 +178,7 @@ func TestNewOTELExporter_WithHTTPProtocol(t *testing.T) {
 	deploymentUUID := "abc-123-def-456"
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -218,7 +218,7 @@ func TestRecordMetrics(t *testing.T) {
 	deploymentUUID := "test-uuid-123"
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -251,7 +251,7 @@ func TestShutdown_GracefulShutdown(t *testing.T) {
 	}
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -287,7 +287,7 @@ func TestShutdown_MultipleShutdowns(t *testing.T) {
 	}
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -319,7 +319,7 @@ func TestStart_StartsBackgroundPush(t *testing.T) {
 	}
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -354,7 +354,7 @@ func TestStart_StopsOnShutdown(t *testing.T) {
 	}
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false,
+		ScannedContainersEnabled: false,
 	}
 
 	config := OTELConfig{
@@ -423,7 +423,7 @@ func TestOTELConfig_AllFields(t *testing.T) {
 	}
 }
 
-func TestOTELExporter_RecordScannedInstances(t *testing.T) {
+func TestOTELExporter_RecordScannedContainers(t *testing.T) {
 	ctx := context.Background()
 	infoProvider := &MockInfoProvider{
 		deploymentName: "test-cluster",
@@ -433,11 +433,11 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "default",
 				Pod:        "test-pod-1",
-				Container:  "nginx",
+				Name:  "nginx",
 				NodeName:   "node-1",
 				Reference: "nginx:1.21",
 				Digest:     "sha256:abc123",
@@ -446,7 +446,7 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 			{
 				Namespace:  "kube-system",
 				Pod:        "coredns-abc",
-				Container:  "coredns",
+				Name:  "coredns",
 				NodeName:   "node-2",
 				Reference: "coredns/coredns:1.8.0",
 				Digest:     "sha256:def456",
@@ -457,7 +457,7 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: true,
+		ScannedContainersEnabled: true,
 	}
 
 	config := OTELConfig{
@@ -482,10 +482,10 @@ func TestOTELExporter_RecordScannedInstances(t *testing.T) {
 	exporter.recordMetrics()
 
 	// If we got here without panic, the test passes
-	// We've confirmed the code path executes successfully with scanned instances enabled
+	// We've confirmed the code path executes successfully with scanned containers enabled
 }
 
-func TestOTELExporter_ScannedInstancesDisabled(t *testing.T) {
+func TestOTELExporter_ScannedContainersDisabled(t *testing.T) {
 	ctx := context.Background()
 	infoProvider := &MockInfoProvider{
 		deploymentName: "test",
@@ -494,11 +494,11 @@ func TestOTELExporter_ScannedInstancesDisabled(t *testing.T) {
 	}
 
 	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainerInstance{
+		instances: []database.ScannedContainer{
 			{
 				Namespace:  "default",
 				Pod:        "test-pod",
-				Container:  "test",
+				Name:  "test",
 				NodeName:   "node-1",
 				Reference: "test:latest",
 				Digest:     "sha256:abc",
@@ -509,7 +509,7 @@ func TestOTELExporter_ScannedInstancesDisabled(t *testing.T) {
 
 	collectorConfig := CollectorConfig{
 		DeploymentEnabled:       true,
-		ScannedInstancesEnabled: false, // Disabled
+		ScannedContainersEnabled: false, // Disabled
 	}
 
 	config := OTELConfig{
@@ -530,7 +530,7 @@ func TestOTELExporter_ScannedInstancesDisabled(t *testing.T) {
 		t.Error("Expected non-nil gauges map")
 	}
 
-	// Call recordMetrics - should not panic even with scanned instances disabled
+	// Call recordMetrics - should not panic even with scanned containers disabled
 	exporter.recordMetrics()
 
 	// If we got here without panic, the test passes

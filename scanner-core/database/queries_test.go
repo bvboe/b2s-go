@@ -9,7 +9,7 @@ import (
 	_ "github.com/bvboe/b2s-go/scanner-core/sqlitedriver"
 )
 
-func TestGetScannedContainerInstances(t *testing.T) {
+func TestGetScannedContainers(t *testing.T) {
 	// Create temporary database
 	dbPath := "/tmp/test_get_scanned_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
@@ -21,11 +21,11 @@ func TestGetScannedContainerInstances(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add instance with completed scan
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -35,7 +35,7 @@ func TestGetScannedContainerInstances(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestGetScannedContainerInstances(t *testing.T) {
 	}
 
 	// Get scanned instances
-	instances, err := db.GetScannedContainerInstances()
+	instances, err := db.GetScannedContainers()
 	if err != nil {
 		t.Fatalf("Failed to get scanned instances: %v", err)
 	}
@@ -81,8 +81,8 @@ func TestGetScannedContainerInstances(t *testing.T) {
 		if inst.Pod != "test-pod" {
 			t.Errorf("Expected pod=test-pod, got %s", inst.Pod)
 		}
-		if inst.Container != "nginx" {
-			t.Errorf("Expected container=nginx, got %s", inst.Container)
+		if inst.Name != "nginx" {
+			t.Errorf("Expected container=nginx, got %s", inst.Name)
 		}
 		if inst.NodeName != "worker-1" {
 			t.Errorf("Expected node_name=worker-1, got %s", inst.NodeName)
@@ -96,7 +96,7 @@ func TestGetScannedContainerInstances(t *testing.T) {
 	}
 }
 
-func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
+func TestGetScannedContainers_OnlyReturnsCompleted(t *testing.T) {
 	dbPath := "/tmp/test_scanned_only_completed_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
@@ -107,11 +107,11 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add completed instance
-	completedInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	completedInstance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "completed-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -121,7 +121,7 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(completedInstance)
+	_, err = db.AddContainer(completedInstance)
 	if err != nil {
 		t.Fatalf("Failed to add completed instance: %v", err)
 	}
@@ -137,11 +137,11 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 	}
 
 	// Add pending instance (should NOT be returned)
-	pendingInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	pendingInstance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "pending-pod",
-			Container: "redis",
+			Name: "redis",
 		},
 		Image: containers.ImageID{
 			Reference: "redis:latest",
@@ -151,13 +151,13 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(pendingInstance)
+	_, err = db.AddContainer(pendingInstance)
 	if err != nil {
 		t.Fatalf("Failed to add pending instance: %v", err)
 	}
 
 	// Get scanned instances - should only return completed instances
-	instances, err := db.GetScannedContainerInstances()
+	instances, err := db.GetScannedContainers()
 	if err != nil {
 		t.Fatalf("Failed to get scanned instances: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 	}
 }
 
-func TestGetVulnerabilityInstances(t *testing.T) {
+func TestGetContainerVulnerabilities(t *testing.T) {
 	dbPath := "/tmp/test_vuln_instances_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
@@ -186,11 +186,11 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "kube-system",
 			Pod:       "nginx-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -200,7 +200,7 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 	}
 
 	// Get vulnerability instances
-	vulnInstances, err := db.GetVulnerabilityInstances()
+	vulnInstances, err := db.GetContainerVulnerabilities()
 	if err != nil {
 		t.Fatalf("Failed to get vulnerability instances: %v", err)
 	}
@@ -258,8 +258,8 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 	if vuln1.Pod != "nginx-pod" {
 		t.Errorf("Expected pod=nginx-pod, got %s", vuln1.Pod)
 	}
-	if vuln1.Container != "nginx" {
-		t.Errorf("Expected container=nginx, got %s", vuln1.Container)
+	if vuln1.Name != "nginx" {
+		t.Errorf("Expected container=nginx, got %s", vuln1.Name)
 	}
 	if vuln1.NodeName != "worker-2" {
 		t.Errorf("Expected node_name=worker-2, got %s", vuln1.NodeName)
@@ -293,7 +293,7 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 	}
 }
 
-func TestGetVulnerabilityInstances_EmptyResult(t *testing.T) {
+func TestGetContainerVulnerabilities_EmptyResult(t *testing.T) {
 	dbPath := "/tmp/test_vuln_empty_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
@@ -304,11 +304,11 @@ func TestGetVulnerabilityInstances_EmptyResult(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add instance without vulnerabilities
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "alpine-pod",
-			Container: "alpine",
+			Name: "alpine",
 		},
 		Image: containers.ImageID{
 			Reference: "alpine:3.19",
@@ -318,7 +318,7 @@ func TestGetVulnerabilityInstances_EmptyResult(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestGetVulnerabilityInstances_EmptyResult(t *testing.T) {
 	}
 
 	// Get vulnerability instances - should be empty
-	vulnInstances, err := db.GetVulnerabilityInstances()
+	vulnInstances, err := db.GetContainerVulnerabilities()
 	if err != nil {
 		t.Fatalf("Failed to get vulnerability instances: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestGetVulnerabilityInstances_EmptyResult(t *testing.T) {
 	}
 }
 
-func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
+func TestGetContainerVulnerabilities_OnlyCompletedScans(t *testing.T) {
 	dbPath := "/tmp/test_vuln_completed_" + time.Now().Format("20060102150405") + ".db"
 	defer func() { _ = os.Remove(dbPath) }()
 
@@ -355,11 +355,11 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add completed instance with vulnerability
-	completedInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	completedInstance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "completed-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -369,7 +369,7 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(completedInstance)
+	_, err = db.AddContainer(completedInstance)
 	if err != nil {
 		t.Fatalf("Failed to add completed instance: %v", err)
 	}
@@ -398,11 +398,11 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 	}
 
 	// Add failed instance with vulnerability
-	failedInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	failedInstance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "failed-pod",
-			Container: "redis",
+			Name: "redis",
 		},
 		Image: containers.ImageID{
 			Reference: "redis:latest",
@@ -412,7 +412,7 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(failedInstance)
+	_, err = db.AddContainer(failedInstance)
 	if err != nil {
 		t.Fatalf("Failed to add failed instance: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 	}
 
 	// Get vulnerability instances - should only return completed
-	vulnInstances, err := db.GetVulnerabilityInstances()
+	vulnInstances, err := db.GetContainerVulnerabilities()
 	if err != nil {
 		t.Fatalf("Failed to get vulnerability instances: %v", err)
 	}
@@ -475,11 +475,11 @@ func TestGetLastUpdatedTimestamp(t *testing.T) {
 	}
 
 	// Add an image
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -489,7 +489,7 @@ func TestGetLastUpdatedTimestamp(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -525,11 +525,11 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add a container instance
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "test-container",
+			Name: "test-container",
 		},
 		Image: containers.ImageID{
 			Reference: "test/image:v1.0",
@@ -539,7 +539,7 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -666,11 +666,11 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 	oldGrypeDBBuilt := time.Date(2026, 1, 8, 8, 0, 0, 0, time.UTC)
 
 	// Image 1: completed, scanned with OLD grype DB - SHOULD be returned
-	img1 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	img1 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "old-scan-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -679,7 +679,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
 	}
-	_, err = db.AddInstance(img1)
+	_, err = db.AddContainer(img1)
 	if err != nil {
 		t.Fatalf("Failed to add instance 1: %v", err)
 	}
@@ -692,18 +692,18 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		t.Fatalf("Failed to update status 1: %v", err)
 	}
 	// Set grype_db_built to old timestamp
-	_, err = db.conn.Exec(`UPDATE container_images SET grype_db_built = ? WHERE digest = ?`,
+	_, err = db.conn.Exec(`UPDATE images SET grype_db_built = ? WHERE digest = ?`,
 		oldGrypeDBBuilt.UTC().Format(time.RFC3339), "sha256:old-scan")
 	if err != nil {
 		t.Fatalf("Failed to set grype_db_built for image 1: %v", err)
 	}
 
 	// Image 2: completed, scanned with CURRENT grype DB - should NOT be returned
-	img2 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	img2 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "current-scan-pod",
-			Container: "redis",
+			Name: "redis",
 		},
 		Image: containers.ImageID{
 			Reference: "redis:7.0",
@@ -712,7 +712,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
 	}
-	_, err = db.AddInstance(img2)
+	_, err = db.AddContainer(img2)
 	if err != nil {
 		t.Fatalf("Failed to add instance 2: %v", err)
 	}
@@ -725,18 +725,18 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		t.Fatalf("Failed to update status 2: %v", err)
 	}
 	// Set grype_db_built to current timestamp (same as what we're checking against)
-	_, err = db.conn.Exec(`UPDATE container_images SET grype_db_built = ? WHERE digest = ?`,
+	_, err = db.conn.Exec(`UPDATE images SET grype_db_built = ? WHERE digest = ?`,
 		currentGrypeDBBuilt.UTC().Format(time.RFC3339), "sha256:current-scan")
 	if err != nil {
 		t.Fatalf("Failed to set grype_db_built for image 2: %v", err)
 	}
 
 	// Image 3: completed, NULL grype_db_built (never tracked) - SHOULD be returned
-	img3 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	img3 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "never-tracked-pod",
-			Container: "alpine",
+			Name: "alpine",
 		},
 		Image: containers.ImageID{
 			Reference: "alpine:3.19",
@@ -745,7 +745,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
 	}
-	_, err = db.AddInstance(img3)
+	_, err = db.AddContainer(img3)
 	if err != nil {
 		t.Fatalf("Failed to add instance 3: %v", err)
 	}
@@ -760,11 +760,11 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 	// grype_db_built is NULL by default - don't set it
 
 	// Image 4: pending status (not completed) - should NOT be returned
-	img4 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	img4 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "pending-pod",
-			Container: "busybox",
+			Name: "busybox",
 		},
 		Image: containers.ImageID{
 			Reference: "busybox:latest",
@@ -773,18 +773,18 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
 	}
-	_, err = db.AddInstance(img4)
+	_, err = db.AddContainer(img4)
 	if err != nil {
 		t.Fatalf("Failed to add instance 4: %v", err)
 	}
 	// Don't store SBOM or update status - leave as pending
 
 	// Image 5: completed but no SBOM - should NOT be returned
-	img5 := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	img5 := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "no-sbom-pod",
-			Container: "curl",
+			Name: "curl",
 		},
 		Image: containers.ImageID{
 			Reference: "curlimages/curl:latest",
@@ -793,7 +793,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
 	}
-	_, err = db.AddInstance(img5)
+	_, err = db.AddContainer(img5)
 	if err != nil {
 		t.Fatalf("Failed to add instance 5: %v", err)
 	}

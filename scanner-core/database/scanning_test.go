@@ -20,11 +20,11 @@ func TestGetImageScanStatus(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add an instance to create an image with pending status
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -34,7 +34,7 @@ func TestGetImageScanStatus(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -80,11 +80,11 @@ func TestUpdateScanStatus(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add an instance to create an image
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -94,7 +94,7 @@ func TestUpdateScanStatus(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -141,11 +141,11 @@ func TestStoreSBOM(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add an instance to create an image
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -155,7 +155,7 @@ func TestStoreSBOM(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -197,11 +197,11 @@ func TestGetSBOM(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add an instance to create an image
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -211,7 +211,7 @@ func TestGetSBOM(t *testing.T) {
 		ContainerRuntime: "containerd",
 	}
 
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}
@@ -267,12 +267,12 @@ func TestGetImagesByScanStatus(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add multiple instances with different images
-	instances := []containers.ContainerInstance{
+	instances := []containers.Container{
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-1",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -282,10 +282,10 @@ func TestGetImagesByScanStatus(t *testing.T) {
 			ContainerRuntime: "containerd",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-2",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.22",
@@ -295,10 +295,10 @@ func TestGetImagesByScanStatus(t *testing.T) {
 			ContainerRuntime: "containerd",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-3",
-				Container: "envoy",
+				Name: "envoy",
 			},
 			Image: containers.ImageID{
 				Reference: "envoy:v1.20",
@@ -310,7 +310,7 @@ func TestGetImagesByScanStatus(t *testing.T) {
 	}
 
 	for _, instance := range instances {
-		_, err := db.AddInstance(instance)
+		_, err := db.AddContainer(instance)
 		if err != nil {
 			t.Fatalf("Failed to add instance: %v", err)
 		}
@@ -356,12 +356,12 @@ func TestGetFirstInstanceForImage(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Add multiple instances with the same image on different nodes
-	instances := []containers.ContainerInstance{
+	instances := []containers.Container{
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-1",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -371,10 +371,10 @@ func TestGetFirstInstanceForImage(t *testing.T) {
 			ContainerRuntime: "containerd",
 		},
 		{
-			ID: containers.ContainerInstanceID{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "pod-2",
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image: containers.ImageID{
 				Reference: "nginx:1.21",
@@ -386,14 +386,14 @@ func TestGetFirstInstanceForImage(t *testing.T) {
 	}
 
 	for _, instance := range instances {
-		_, err := db.AddInstance(instance)
+		_, err := db.AddContainer(instance)
 		if err != nil {
 			t.Fatalf("Failed to add instance: %v", err)
 		}
 	}
 
 	// Get first instance for the image
-	firstInstance, err := db.GetFirstInstanceForImage("sha256:shared")
+	firstInstance, err := db.GetFirstContainerForImage("sha256:shared")
 	if err != nil {
 		t.Fatalf("Failed to get first instance: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestGetFirstInstanceForImageNonExistent(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Try to get first instance for non-existent image
-	instance, err := db.GetFirstInstanceForImage("sha256:nonexistent")
+	instance, err := db.GetFirstContainerForImage("sha256:nonexistent")
 	if err == nil {
 		t.Error("Expected error when getting first instance for non-existent image")
 	}
@@ -438,11 +438,11 @@ func TestScanWorkflow(t *testing.T) {
 	defer func() { _ = Close(db) }()
 
 	// Simulate complete scan workflow
-	instance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	instance := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image: containers.ImageID{
 			Reference: "nginx:1.21",
@@ -453,7 +453,7 @@ func TestScanWorkflow(t *testing.T) {
 	}
 
 	// 1. Add instance (image starts as pending)
-	_, err = db.AddInstance(instance)
+	_, err = db.AddContainer(instance)
 	if err != nil {
 		t.Fatalf("Failed to add instance: %v", err)
 	}

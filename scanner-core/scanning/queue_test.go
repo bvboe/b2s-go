@@ -53,22 +53,22 @@ func TestJobQueueIntegration(t *testing.T) {
 		Digest:    "sha256:abc123",
 	}
 
-	// Create a container instance to initialize the image record in the database
-	testInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Create a container to initialize the image record in the database
+	testContainer := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
 		ContainerRuntime: "containerd",
 	}
 
-	// Add the instance to the database (this creates the image record with status='pending')
-	_, err = db.AddInstance(testInstance)
+	// Add the container to the database (this creates the image record with status='pending')
+	_, err = db.AddContainer(testContainer)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 
 	// Enqueue a scan job
@@ -140,22 +140,22 @@ func TestJobQueueErrorHandling(t *testing.T) {
 		Digest:    "sha256:def456",
 	}
 
-	// Create a container instance to initialize the image record
-	testInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Create a container to initialize the image record
+	testContainer := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
 		ContainerRuntime: "containerd",
 	}
 
-	// Add the instance to the database
-	_, err = db.AddInstance(testInstance)
+	// Add the container to the database
+	_, err = db.AddContainer(testContainer)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 
 	// Enqueue a scan job
@@ -224,22 +224,22 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 		Digest:    "sha256:ghi789",
 	}
 
-	// Create a container instance to initialize the image record
-	testInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Create a container to initialize the image record
+	testContainer := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
 		ContainerRuntime: "containerd",
 	}
 
-	// Add the instance to the database
-	_, err = db.AddInstance(testInstance)
+	// Add the container to the database
+	_, err = db.AddContainer(testContainer)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 
 	// First scan
@@ -303,22 +303,22 @@ func TestJobQueueForceScan(t *testing.T) {
 		Digest:    "sha256:jkl012",
 	}
 
-	// Create a container instance to initialize the image record
-	testInstance := containers.ContainerInstance{
-		ID: containers.ContainerInstanceID{
+	// Create a container to initialize the image record
+	testContainer := containers.Container{
+		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "nginx",
+			Name: "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
 		ContainerRuntime: "containerd",
 	}
 
-	// Add the instance to the database
-	_, err = db.AddInstance(testInstance)
+	// Add the container to the database
+	_, err = db.AddContainer(testContainer)
 	if err != nil {
-		t.Fatalf("Failed to add instance: %v", err)
+		t.Fatalf("Failed to add container: %v", err)
 	}
 
 	// First scan
@@ -401,11 +401,11 @@ func TestJobQueueMaxDepthDrop(t *testing.T) {
 			Digest:    "sha256:test" + string(rune('0'+i)),
 		}
 
-		instance := containers.ContainerInstance{
-			ID: containers.ContainerInstanceID{
+		container := containers.Container{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "test-pod-" + string(rune('a'+i-1)),
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image:            image,
 			NodeName:         "test-node",
@@ -413,9 +413,9 @@ func TestJobQueueMaxDepthDrop(t *testing.T) {
 		}
 
 		// Add instance to DB first
-		_, err := db.AddInstance(instance)
+		_, err := db.AddContainer(container)
 		if err != nil {
-			t.Fatalf("Failed to add instance: %v", err)
+			t.Fatalf("Failed to add container: %v", err)
 		}
 
 		// Enqueue scan job
@@ -494,20 +494,20 @@ func TestJobQueueMaxDepthDropOldest(t *testing.T) {
 			Digest:    "sha256:job" + string(rune('0'+i)),
 		}
 
-		instance := containers.ContainerInstance{
-			ID: containers.ContainerInstanceID{
+		container := containers.Container{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "test-pod-" + string(rune('a'+i-1)),
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image:            image,
 			NodeName:         "test-node",
 			ContainerRuntime: "containerd",
 		}
 
-		_, err := db.AddInstance(instance)
+		_, err := db.AddContainer(container)
 		if err != nil {
-			t.Fatalf("Failed to add instance: %v", err)
+			t.Fatalf("Failed to add container: %v", err)
 		}
 
 		queue.Enqueue(ScanJob{
@@ -565,20 +565,20 @@ func TestJobQueueMetricsTracking(t *testing.T) {
 			Digest:    "sha256:metric" + string(rune('0'+i)),
 		}
 
-		instance := containers.ContainerInstance{
-			ID: containers.ContainerInstanceID{
+		container := containers.Container{
+			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "test-pod-" + string(rune('a'+i-1)),
-				Container: "nginx",
+				Name: "nginx",
 			},
 			Image:            image,
 			NodeName:         "test-node",
 			ContainerRuntime: "containerd",
 		}
 
-		_, err := db.AddInstance(instance)
+		_, err := db.AddContainer(container)
 		if err != nil {
-			t.Fatalf("Failed to add instance: %v", err)
+			t.Fatalf("Failed to add container: %v", err)
 		}
 
 		queue.Enqueue(ScanJob{

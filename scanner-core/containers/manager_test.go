@@ -9,19 +9,19 @@ func TestNewManager(t *testing.T) {
 	if m == nil {
 		t.Fatal("NewManager returned nil")
 	}
-	if m.GetInstanceCount() != 0 {
-		t.Errorf("Expected 0 instances, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 0 {
+		t.Errorf("Expected 0 containers, got %d", m.GetContainerCount())
 	}
 }
 
-func TestAddContainerInstance(t *testing.T) {
+func TestAddContainer(t *testing.T) {
 	m := NewManager()
 
-	instance := ContainerInstance{
-		ID: ContainerInstanceID{
+	c := Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod-123",
-			Container: "app",
+			Name:      "app",
 		},
 		Image: ImageID{
 			Reference: "nginx:1.21",
@@ -29,31 +29,31 @@ func TestAddContainerInstance(t *testing.T) {
 		},
 	}
 
-	m.AddContainerInstance(instance)
+	m.AddContainer(c)
 
-	if m.GetInstanceCount() != 1 {
-		t.Errorf("Expected 1 instance, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 1 {
+		t.Errorf("Expected 1 container, got %d", m.GetContainerCount())
 	}
 
-	retrieved, exists := m.GetInstance("default", "test-pod-123", "app")
+	retrieved, exists := m.GetContainer("default", "test-pod-123", "app")
 	if !exists {
-		t.Fatal("Instance not found after adding")
+		t.Fatal("Container not found after adding")
 	}
 
 	if retrieved.Image.Reference != "nginx:1.21" {
-		t.Errorf("Retrieved instance has wrong values: %+v", retrieved)
+		t.Errorf("Retrieved container has wrong values: %+v", retrieved)
 	}
 }
 
-func TestAddMultipleInstances(t *testing.T) {
+func TestAddMultipleContainers(t *testing.T) {
 	m := NewManager()
 
-	instances := []ContainerInstance{
+	containers := []Container{
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "default",
 				Pod:       "pod-1",
-				Container: "app",
+				Name: "app",
 			},
 			Image: ImageID{
 				Reference: "nginx:1.21",
@@ -61,10 +61,10 @@ func TestAddMultipleInstances(t *testing.T) {
 			},
 		},
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "kube-system",
 				Pod:       "pod-2",
-				Container: "proxy",
+				Name:      "proxy",
 			},
 			Image: ImageID{
 				Reference: "envoy:v1.20",
@@ -72,10 +72,10 @@ func TestAddMultipleInstances(t *testing.T) {
 			},
 		},
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "default",
 				Pod:       "pod-3",
-				Container: "sidecar",
+				Name:      "sidecar",
 			},
 			Image: ImageID{
 				Reference: "busybox:latest",
@@ -84,65 +84,65 @@ func TestAddMultipleInstances(t *testing.T) {
 		},
 	}
 
-	for _, instance := range instances {
-		m.AddContainerInstance(instance)
+	for _, c := range containers {
+		m.AddContainer(c)
 	}
 
-	if m.GetInstanceCount() != 3 {
-		t.Errorf("Expected 3 instances, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 3 {
+		t.Errorf("Expected 3 containers, got %d", m.GetContainerCount())
 	}
 }
 
-func TestRemoveContainerInstance(t *testing.T) {
+func TestRemoveContainer(t *testing.T) {
 	m := NewManager()
 
-	instance := ContainerInstance{
-		ID: ContainerInstanceID{
+	c := Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "app",
+			Name: "app",
 		},
 	}
 
-	m.AddContainerInstance(instance)
-	if m.GetInstanceCount() != 1 {
-		t.Fatalf("Expected 1 instance after add, got %d", m.GetInstanceCount())
+	m.AddContainer(c)
+	if m.GetContainerCount() != 1 {
+		t.Fatalf("Expected 1 container after add, got %d", m.GetContainerCount())
 	}
 
-	m.RemoveContainerInstance(instance.ID)
-	if m.GetInstanceCount() != 0 {
-		t.Errorf("Expected 0 instances after remove, got %d", m.GetInstanceCount())
+	m.RemoveContainer(c.ID)
+	if m.GetContainerCount() != 0 {
+		t.Errorf("Expected 0 containers after remove, got %d", m.GetContainerCount())
 	}
 
-	_, exists := m.GetInstance("default", "test-pod", "app")
+	_, exists := m.GetContainer("default", "test-pod", "app")
 	if exists {
-		t.Error("Instance still exists after removal")
+		t.Error("Container still exists after removal")
 	}
 }
 
-func TestSetContainerInstances(t *testing.T) {
+func TestSetContainers(t *testing.T) {
 	m := NewManager()
 
-	// Add some initial instances
-	m.AddContainerInstance(ContainerInstance{
-		ID: ContainerInstanceID{
+	// Add some initial containers
+	m.AddContainer(Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "old-pod",
-			Container: "old-container",
+			Name: "old-container",
 		},
 	})
 
-	if m.GetInstanceCount() != 1 {
-		t.Fatalf("Expected 1 instance initially, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 1 {
+		t.Fatalf("Expected 1 container initially, got %d", m.GetContainerCount())
 	}
 
-	// Set new instances (should replace old ones)
-	newInstances := []ContainerInstance{
+	// Set new containers (should replace old ones)
+	newContainers := []Container{
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "default",
 				Pod:       "new-pod-1",
-				Container: "app",
+				Name: "app",
 			},
 			Image: ImageID{
 				Reference: "nginx:1.21",
@@ -150,10 +150,10 @@ func TestSetContainerInstances(t *testing.T) {
 			},
 		},
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "kube-system",
 				Pod:       "new-pod-2",
-				Container: "proxy",
+				Name: "proxy",
 			},
 			Image: ImageID{
 				Reference: "envoy:v1.20",
@@ -162,88 +162,88 @@ func TestSetContainerInstances(t *testing.T) {
 		},
 	}
 
-	m.SetContainerInstances(newInstances)
+	m.SetContainers(newContainers)
 
-	if m.GetInstanceCount() != 2 {
-		t.Errorf("Expected 2 instances after set, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 2 {
+		t.Errorf("Expected 2 containers after set, got %d", m.GetContainerCount())
 	}
 
-	// Old instance should be gone
-	_, exists := m.GetInstance("default", "old-pod", "old-container")
+	// Old container should be gone
+	_, exists := m.GetContainer("default", "old-pod", "old-container")
 	if exists {
-		t.Error("Old instance still exists after SetContainerInstances")
+		t.Error("Old container still exists after SetContainers")
 	}
 
-	// New instances should exist
-	_, exists = m.GetInstance("default", "new-pod-1", "app")
+	// New containers should exist
+	_, exists = m.GetContainer("default", "new-pod-1", "app")
 	if !exists {
-		t.Error("New instance 1 not found")
+		t.Error("New container 1 not found")
 	}
 
-	_, exists = m.GetInstance("kube-system", "new-pod-2", "proxy")
+	_, exists = m.GetContainer("kube-system", "new-pod-2", "proxy")
 	if !exists {
-		t.Error("New instance 2 not found")
+		t.Error("New container 2 not found")
 	}
 }
 
-func TestSetContainerInstancesEmpty(t *testing.T) {
+func TestSetContainersEmpty(t *testing.T) {
 	m := NewManager()
 
-	// Add some instances
-	m.AddContainerInstance(ContainerInstance{
-		ID: ContainerInstanceID{
+	// Add some containers
+	m.AddContainer(Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "pod-1",
-			Container: "app",
+			Name: "app",
 		},
 	})
-	m.AddContainerInstance(ContainerInstance{
-		ID: ContainerInstanceID{
+	m.AddContainer(Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "pod-2",
-			Container: "app",
+			Name: "app",
 		},
 	})
 
-	if m.GetInstanceCount() != 2 {
-		t.Fatalf("Expected 2 instances, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 2 {
+		t.Fatalf("Expected 2 containers, got %d", m.GetContainerCount())
 	}
 
 	// Set empty collection (should clear all)
-	m.SetContainerInstances([]ContainerInstance{})
+	m.SetContainers([]Container{})
 
-	if m.GetInstanceCount() != 0 {
-		t.Errorf("Expected 0 instances after setting empty collection, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 0 {
+		t.Errorf("Expected 0 containers after setting empty collection, got %d", m.GetContainerCount())
 	}
 }
 
-func TestGetAllInstances(t *testing.T) {
+func TestGetAllContainers(t *testing.T) {
 	m := NewManager()
 
-	instances := []ContainerInstance{
+	containers := []Container{
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "default",
 				Pod:       "pod-1",
-				Container: "app",
+				Name: "app",
 			},
 		},
 		{
-			ID: ContainerInstanceID{
+			ID: ContainerID{
 				Namespace: "default",
 				Pod:       "pod-2",
-				Container: "app",
+				Name: "app",
 			},
 		},
 	}
 
-	for _, instance := range instances {
-		m.AddContainerInstance(instance)
+	for _, c := range containers {
+		m.AddContainer(c)
 	}
 
-	all := m.GetAllInstances()
+	all := m.GetAllContainers()
 	if len(all) != 2 {
-		t.Errorf("Expected 2 instances from GetAllInstances, got %d", len(all))
+		t.Errorf("Expected 2 containers from GetAllContainers, got %d", len(all))
 	}
 }
 
@@ -254,14 +254,14 @@ func TestConcurrency(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			instance := ContainerInstance{
-				ID: ContainerInstanceID{
+			c := Container{
+				ID: ContainerID{
 					Namespace: "default",
 					Pod:       "concurrent-pod",
-					Container: string(rune('a' + id)),
+					Name: string(rune('a' + id)),
 				},
 			}
-			m.AddContainerInstance(instance)
+			m.AddContainer(c)
 			done <- true
 		}(i)
 	}
@@ -271,49 +271,49 @@ func TestConcurrency(t *testing.T) {
 		<-done
 	}
 
-	if m.GetInstanceCount() != 10 {
-		t.Errorf("Expected 10 instances after concurrent adds, got %d", m.GetInstanceCount())
+	if m.GetContainerCount() != 10 {
+		t.Errorf("Expected 10 containers after concurrent adds, got %d", m.GetContainerCount())
 	}
 }
 
-func TestUpdateExistingInstance(t *testing.T) {
+func TestUpdateExistingContainer(t *testing.T) {
 	m := NewManager()
 
-	// Add initial instance
-	instance := ContainerInstance{
-		ID: ContainerInstanceID{
+	// Add initial container
+	c := Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "app",
+			Name: "app",
 		},
 		Image: ImageID{
 			Reference: "nginx:1.20",
 			Digest:    "sha256:old123",
 		},
 	}
-	m.AddContainerInstance(instance)
+	m.AddContainer(c)
 
 	// Update with new tag and image ID
-	updated := ContainerInstance{
-		ID: ContainerInstanceID{
+	updated := Container{
+		ID: ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Container: "app",
+			Name: "app",
 		},
 		Image: ImageID{
 			Reference: "nginx:1.21",
 			Digest:    "sha256:new456",
 		},
 	}
-	m.AddContainerInstance(updated)
+	m.AddContainer(updated)
 
-	// Should still have only 1 instance (updated)
-	if m.GetInstanceCount() != 1 {
-		t.Errorf("Expected 1 instance, got %d", m.GetInstanceCount())
+	// Should still have only 1 container (updated)
+	if m.GetContainerCount() != 1 {
+		t.Errorf("Expected 1 container, got %d", m.GetContainerCount())
 	}
 
-	retrieved, _ := m.GetInstance("default", "test-pod", "app")
+	retrieved, _ := m.GetContainer("default", "test-pod", "app")
 	if retrieved.Image.Reference != "nginx:1.21" || retrieved.Image.Digest != "sha256:new456" {
-		t.Errorf("Instance not updated correctly: %+v", retrieved)
+		t.Errorf("Container not updated correctly: %+v", retrieved)
 	}
 }
