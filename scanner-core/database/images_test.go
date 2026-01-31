@@ -21,8 +21,7 @@ func TestGetOrCreateImage_CreatesNew(t *testing.T) {
 	}()
 
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
+		Reference: "nginx:1.21",
 		Digest:     "sha256:abcdef1234567890",
 	}
 
@@ -64,8 +63,7 @@ func TestGetOrCreateImage_ReturnsExisting(t *testing.T) {
 	}()
 
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
+		Reference: "nginx:1.21",
 		Digest:     "sha256:abcdef1234567890",
 	}
 
@@ -79,8 +77,8 @@ func TestGetOrCreateImage_ReturnsExisting(t *testing.T) {
 		t.Error("Expected created=true for first call")
 	}
 
-	// Try to create again with same digest (different tag)
-	image.Tag = "latest"
+	// Try to create again with same digest (different reference)
+	image.Reference = "nginx:latest"
 	id2, created2, err := db.GetOrCreateImage(image)
 	if err != nil {
 		t.Fatalf("Second GetOrCreateImage failed: %v", err)
@@ -108,8 +106,7 @@ func TestGetOrCreateImage_EmptyDigestError(t *testing.T) {
 	}()
 
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
+		Reference: "nginx:1.21",
 		Digest:     "", // Empty digest
 	}
 
@@ -133,9 +130,9 @@ func TestGetAllImages(t *testing.T) {
 
 	// Create test images
 	images := []containers.ImageID{
-		{Repository: "nginx", Tag: "1.21", Digest: "sha256:digest1"},
-		{Repository: "redis", Tag: "6.2", Digest: "sha256:digest2"},
-		{Repository: "postgres", Tag: "13", Digest: "sha256:digest3"},
+		{Reference: "nginx:1.21", Digest: "sha256:digest1"},
+		{Reference: "redis:6.2", Digest: "sha256:digest2"},
+		{Reference: "postgres:13", Digest: "sha256:digest3"},
 	}
 
 	for _, img := range images {
@@ -181,8 +178,7 @@ func TestGetImageByID(t *testing.T) {
 	}()
 
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
+		Reference: "nginx:1.21",
 		Digest:     "sha256:test123",
 	}
 
@@ -239,8 +235,7 @@ func TestGetOrCreateImage_Concurrent(t *testing.T) {
 	}()
 
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
+		Reference: "nginx:1.21",
 		Digest:     "sha256:concurrent123",
 	}
 
@@ -320,8 +315,7 @@ func TestGetOrCreateImage_TransactionBehavior(t *testing.T) {
 	}
 
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
+		Reference: "nginx:1.21",
 		Digest:     "sha256:tx123",
 	}
 

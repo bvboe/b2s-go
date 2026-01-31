@@ -24,9 +24,8 @@ func TestAddContainerInstance(t *testing.T) {
 			Container: "app",
 		},
 		Image: ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:abc123",
+			Reference: "nginx:1.21",
+			Digest:    "sha256:abc123",
 		},
 	}
 
@@ -41,7 +40,7 @@ func TestAddContainerInstance(t *testing.T) {
 		t.Fatal("Instance not found after adding")
 	}
 
-	if retrieved.Image.Repository != "nginx" || retrieved.Image.Tag != "1.21" {
+	if retrieved.Image.Reference != "nginx:1.21" {
 		t.Errorf("Retrieved instance has wrong values: %+v", retrieved)
 	}
 }
@@ -57,9 +56,8 @@ func TestAddMultipleInstances(t *testing.T) {
 				Container: "app",
 			},
 			Image: ImageID{
-				Repository: "nginx",
-				Tag:        "1.21",
-				Digest:     "sha256:abc123",
+				Reference: "nginx:1.21",
+				Digest:    "sha256:abc123",
 			},
 		},
 		{
@@ -69,9 +67,8 @@ func TestAddMultipleInstances(t *testing.T) {
 				Container: "proxy",
 			},
 			Image: ImageID{
-				Repository: "envoy",
-				Tag:        "v1.20",
-				Digest:     "sha256:def456",
+				Reference: "envoy:v1.20",
+				Digest:    "sha256:def456",
 			},
 		},
 		{
@@ -81,9 +78,8 @@ func TestAddMultipleInstances(t *testing.T) {
 				Container: "sidecar",
 			},
 			Image: ImageID{
-				Repository: "busybox",
-				Tag:        "latest",
-				Digest:     "sha256:ghi789",
+				Reference: "busybox:latest",
+				Digest:    "sha256:ghi789",
 			},
 		},
 	}
@@ -149,9 +145,8 @@ func TestSetContainerInstances(t *testing.T) {
 				Container: "app",
 			},
 			Image: ImageID{
-				Repository: "nginx",
-				Tag:        "1.21",
-				Digest:     "sha256:abc123",
+				Reference: "nginx:1.21",
+				Digest:    "sha256:abc123",
 			},
 		},
 		{
@@ -161,9 +156,8 @@ func TestSetContainerInstances(t *testing.T) {
 				Container: "proxy",
 			},
 			Image: ImageID{
-				Repository: "envoy",
-				Tag:        "v1.20",
-				Digest:     "sha256:def456",
+				Reference: "envoy:v1.20",
+				Digest:    "sha256:def456",
 			},
 		},
 	}
@@ -293,9 +287,8 @@ func TestUpdateExistingInstance(t *testing.T) {
 			Container: "app",
 		},
 		Image: ImageID{
-			Repository: "nginx",
-			Tag:        "1.20",
-			Digest:     "sha256:old123",
+			Reference: "nginx:1.20",
+			Digest:    "sha256:old123",
 		},
 	}
 	m.AddContainerInstance(instance)
@@ -308,9 +301,8 @@ func TestUpdateExistingInstance(t *testing.T) {
 			Container: "app",
 		},
 		Image: ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:new456",
+			Reference: "nginx:1.21",
+			Digest:    "sha256:new456",
 		},
 	}
 	m.AddContainerInstance(updated)
@@ -321,7 +313,7 @@ func TestUpdateExistingInstance(t *testing.T) {
 	}
 
 	retrieved, _ := m.GetInstance("default", "test-pod", "app")
-	if retrieved.Image.Tag != "1.21" || retrieved.Image.Digest != "sha256:new456" {
+	if retrieved.Image.Reference != "nginx:1.21" || retrieved.Image.Digest != "sha256:new456" {
 		t.Errorf("Instance not updated correctly: %+v", retrieved)
 	}
 }

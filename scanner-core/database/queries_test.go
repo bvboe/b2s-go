@@ -28,8 +28,7 @@ func TestGetScannedContainerInstances(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
+			Reference: "nginx:1.21",
 			Digest:     "sha256:abc123",
 		},
 		NodeName:         "worker-1",
@@ -88,11 +87,8 @@ func TestGetScannedContainerInstances(t *testing.T) {
 		if inst.NodeName != "worker-1" {
 			t.Errorf("Expected node_name=worker-1, got %s", inst.NodeName)
 		}
-		if inst.Repository != "nginx" {
-			t.Errorf("Expected repository=nginx, got %s", inst.Repository)
-		}
-		if inst.Tag != "1.21" {
-			t.Errorf("Expected tag=1.21, got %s", inst.Tag)
+		if inst.Reference != "nginx:1.21" {
+			t.Errorf("Expected reference=nginx:1.21, got %s", inst.Reference)
 		}
 		if inst.Digest != "sha256:abc123" {
 			t.Errorf("Expected digest=sha256:abc123, got %s", inst.Digest)
@@ -118,8 +114,7 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
+			Reference: "nginx:1.21",
 			Digest:     "sha256:completed",
 		},
 		NodeName:         "worker-1",
@@ -149,8 +144,7 @@ func TestGetScannedContainerInstances_OnlyReturnsCompleted(t *testing.T) {
 			Container: "redis",
 		},
 		Image: containers.ImageID{
-			Repository: "redis",
-			Tag:        "latest",
+			Reference: "redis:latest",
 			Digest:     "sha256:pending",
 		},
 		NodeName:         "worker-1",
@@ -199,8 +193,7 @@ func TestGetVulnerabilityInstances(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
+			Reference: "nginx:1.21",
 			Digest:     "sha256:vuln-test",
 		},
 		NodeName:         "worker-2",
@@ -318,8 +311,7 @@ func TestGetVulnerabilityInstances_EmptyResult(t *testing.T) {
 			Container: "alpine",
 		},
 		Image: containers.ImageID{
-			Repository: "alpine",
-			Tag:        "3.19",
+			Reference: "alpine:3.19",
 			Digest:     "sha256:no-vulns",
 		},
 		NodeName:         "worker-1",
@@ -370,8 +362,7 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
+			Reference: "nginx:1.21",
 			Digest:     "sha256:completed",
 		},
 		NodeName:         "worker-1",
@@ -414,8 +405,7 @@ func TestGetVulnerabilityInstances_OnlyCompletedScans(t *testing.T) {
 			Container: "redis",
 		},
 		Image: containers.ImageID{
-			Repository: "redis",
-			Tag:        "latest",
+			Reference: "redis:latest",
 			Digest:     "sha256:failed",
 		},
 		NodeName:         "worker-1",
@@ -492,8 +482,7 @@ func TestGetLastUpdatedTimestamp(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
+			Reference: "nginx:1.21",
 			Digest:     "sha256:timestamp-test",
 		},
 		NodeName:         "worker-1",
@@ -543,8 +532,7 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 			Container: "test-container",
 		},
 		Image: containers.ImageID{
-			Repository: "test/image",
-			Tag:        "v1.0",
+			Reference: "test/image:v1.0",
 			Digest:     "sha256:risk-test-123",
 		},
 		NodeName:         "worker-1",
@@ -685,8 +673,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
+			Reference: "nginx:1.21",
 			Digest:     "sha256:old-scan",
 		},
 		NodeName:         "worker-1",
@@ -719,8 +706,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 			Container: "redis",
 		},
 		Image: containers.ImageID{
-			Repository: "redis",
-			Tag:        "7.0",
+			Reference: "redis:7.0",
 			Digest:     "sha256:current-scan",
 		},
 		NodeName:         "worker-1",
@@ -753,8 +739,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 			Container: "alpine",
 		},
 		Image: containers.ImageID{
-			Repository: "alpine",
-			Tag:        "3.19",
+			Reference: "alpine:3.19",
 			Digest:     "sha256:never-tracked",
 		},
 		NodeName:         "worker-1",
@@ -782,8 +767,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 			Container: "busybox",
 		},
 		Image: containers.ImageID{
-			Repository: "busybox",
-			Tag:        "latest",
+			Reference: "busybox:latest",
 			Digest:     "sha256:pending",
 		},
 		NodeName:         "worker-1",
@@ -803,8 +787,7 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 			Container: "curl",
 		},
 		Image: containers.ImageID{
-			Repository: "curlimages/curl",
-			Tag:        "latest",
+			Reference: "curlimages/curl:latest",
 			Digest:     "sha256:no-sbom",
 		},
 		NodeName:         "worker-1",

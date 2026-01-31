@@ -195,8 +195,8 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 		// Generate hierarchical labels
 		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
-			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
+		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
@@ -220,8 +220,7 @@ func (c *Collector) collectScannedInstanceMetrics() (MetricFamily, error) {
 				"container":                               instance.Container,
 				"distro":                                  instance.OSName,
 				"architecture":                            instance.Architecture,
-				"image_repo":                              instance.Repository,
-				"image_tag":                               instance.Tag,
+				"image_reference":                         instance.Reference,
 				"image_digest":                            instance.Digest,
 				"instance_type":                           "CONTAINER",
 			},
@@ -245,8 +244,8 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 		// Generate hierarchical labels
 		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
-			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
+		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
@@ -270,8 +269,7 @@ func (c *Collector) collectVulnerabilityMetrics(instances []database.Vulnerabili
 				"pod":                                     instance.Pod,
 				"container":                               instance.Container,
 				"distro":                                  instance.OSName,
-				"image_repo":                              instance.Repository,
-				"image_tag":                               instance.Tag,
+				"image_reference":                         instance.Reference,
 				"image_digest":                            instance.Digest,
 				"instance_type":                           "CONTAINER",
 				"severity":                                instance.Severity,
@@ -308,8 +306,8 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 		// Generate hierarchical labels
 		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
-			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
+		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
@@ -333,8 +331,7 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(instances []database.Vu
 				"pod":                                     instance.Pod,
 				"container":                               instance.Container,
 				"distro":                                  instance.OSName,
-				"image_repo":                              instance.Repository,
-				"image_tag":                               instance.Tag,
+				"image_reference":                         instance.Reference,
 				"image_digest":                            instance.Digest,
 				"instance_type":                           "CONTAINER",
 				"severity":                                instance.Severity,
@@ -366,8 +363,8 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 		// Generate hierarchical labels
 		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.NodeName)
 		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, instance.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s:%s",
-			c.deploymentUUID, instance.Namespace, instance.Repository, instance.Tag)
+		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
+			c.deploymentUUID, instance.Namespace, instance.Reference)
 		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
 			c.deploymentUUID, instance.Namespace, instance.Digest)
 		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
@@ -391,8 +388,7 @@ func (c *Collector) collectVulnerabilityRiskMetrics(instances []database.Vulnera
 				"pod":                                     instance.Pod,
 				"container":                               instance.Container,
 				"distro":                                  instance.OSName,
-				"image_repo":                              instance.Repository,
-				"image_tag":                               instance.Tag,
+				"image_reference":                         instance.Reference,
 				"image_digest":                            instance.Digest,
 				"instance_type":                           "CONTAINER",
 				"severity":                                instance.Severity,

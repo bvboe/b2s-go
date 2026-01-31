@@ -12,83 +12,79 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestParseImageName(t *testing.T) {
+func TestExtractImageReference(t *testing.T) {
 	tests := []struct {
-		name           string
-		imageName      string
-		wantRepository string
-		wantTag        string
+		name          string
+		imageName     string
+		wantReference string
 	}{
 		{
-			name:           "simple image with tag",
-			imageName:      "nginx:1.21",
-			wantRepository: "nginx",
-			wantTag:        "1.21",
+			name:          "simple image with tag",
+			imageName:     "nginx:1.21",
+			wantReference: "nginx:1.21",
 		},
 		{
-			name:           "simple image without tag defaults to latest",
-			imageName:      "nginx",
-			wantRepository: "nginx",
-			wantTag:        "latest",
+			name:          "simple image without tag preserved as-is",
+			imageName:     "nginx",
+			wantReference: "nginx",
 		},
 		{
-			name:           "fully qualified image with tag",
-			imageName:      "docker.io/library/nginx:1.21",
-			wantRepository: "docker.io/library/nginx",
-			wantTag:        "1.21",
+			name:          "fully qualified image with tag",
+			imageName:     "docker.io/library/nginx:1.21",
+			wantReference: "docker.io/library/nginx:1.21",
 		},
 		{
-			name:           "gcr image with tag",
-			imageName:      "gcr.io/myproject/myimage:v1.2.3",
-			wantRepository: "gcr.io/myproject/myimage",
-			wantTag:        "v1.2.3",
+			name:          "gcr image with tag",
+			imageName:     "gcr.io/myproject/myimage:v1.2.3",
+			wantReference: "gcr.io/myproject/myimage:v1.2.3",
 		},
 		{
-			name:           "image with digest is stripped",
-			imageName:      "nginx:1.21@sha256:abc123",
-			wantRepository: "nginx",
-			wantTag:        "1.21",
+			name:          "image with tag and digest preserves full reference",
+			imageName:     "nginx:1.21@sha256:abc123",
+			wantReference: "nginx:1.21@sha256:abc123",
 		},
 		{
-			name:           "image with only digest and no tag",
-			imageName:      "nginx@sha256:abc123",
-			wantRepository: "nginx",
-			wantTag:        "latest",
+			name:          "image with only digest preserves digest reference",
+			imageName:     "nginx@sha256:abc123",
+			wantReference: "nginx@sha256:abc123",
 		},
 		{
-			name:           "image with port in registry",
-			imageName:      "localhost:5000/myimage:latest",
-			wantRepository: "localhost:5000/myimage",
-			wantTag:        "latest",
+			name:          "harbor registry image with digest only preserves full reference",
+			imageName:     "harbor.cloudnative.biz/chainguard-mirror/calico-cni@sha256:6ac36c78896157d10d99a02206f124cb157ec4f57bd95ebb20bb930c0ce25f8d",
+			wantReference: "harbor.cloudnative.biz/chainguard-mirror/calico-cni@sha256:6ac36c78896157d10d99a02206f124cb157ec4f57bd95ebb20bb930c0ce25f8d",
 		},
 		{
-			name:           "empty string",
-			imageName:      "",
-			wantRepository: "",
-			wantTag:        "latest",
+			name:          "image with port in registry",
+			imageName:     "localhost:5000/myimage:latest",
+			wantReference: "localhost:5000/myimage:latest",
 		},
 		{
-			name:           "image with multiple path components",
-			imageName:      "registry.k8s.io/kube-proxy:v1.28.0",
-			wantRepository: "registry.k8s.io/kube-proxy",
-			wantTag:        "v1.28.0",
+			name:          "empty string preserved as-is",
+			imageName:     "",
+			wantReference: "",
 		},
 		{
-			name:           "image with sha1 tag",
-			imageName:      "myimage:abc123def456",
-			wantRepository: "myimage",
-			wantTag:        "abc123def456",
+			name:          "image with multiple path components",
+			imageName:     "registry.k8s.io/kube-proxy:v1.28.0",
+			wantReference: "registry.k8s.io/kube-proxy:v1.28.0",
+		},
+		{
+			name:          "image with sha1 tag",
+			imageName:     "myimage:abc123def456",
+			wantReference: "myimage:abc123def456",
+		},
+		{
+			name:          "image with port in registry and no tag preserved as-is",
+			imageName:     "localhost:5000/myimage",
+			wantReference: "localhost:5000/myimage",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotRepository, gotTag := parseImageName(tt.imageName)
-			if gotRepository != tt.wantRepository {
-				t.Errorf("parseImageName() repository = %v, want %v", gotRepository, tt.wantRepository)
-			}
-			if gotTag != tt.wantTag {
-				t.Errorf("parseImageName() tag = %v, want %v", gotTag, tt.wantTag)
+			gotReference := extractImageReference(tt.imageName)
+			if gotReference != tt.wantReference {
+				t.Errorf("extractImageReference() = %v, want %v", gotReference, tt.wantReference)
 			}
 		})
 	}
@@ -167,70 +163,68 @@ func TestExtractDigestFromImageID(t *testing.T) {
 	}
 }
 
-// TestParseImageNameAndExtractDigest tests the combination of both functions
+// TestExtractImageReferenceAndDigest tests the combination of both functions
 // to ensure they work correctly together as used in extractContainerInstances
-func TestParseImageNameAndExtractDigest(t *testing.T) {
+func TestExtractImageReferenceAndDigest(t *testing.T) {
 	tests := []struct {
 		name           string
 		containerImage string // from pod.spec.containers[].image
 		statusImageID  string // from pod.status.containerStatuses[].imageID
-		wantRepository string
-		wantTag        string
+		wantReference  string
 		wantDigest     string
 	}{
 		{
 			name:           "typical Kubernetes pod status",
 			containerImage: "nginx:1.21",
 			statusImageID:  "docker.io/library/nginx@sha256:4c0fdaa8b6341bfdeca5f18f7837462c80cff90527ee35ef185571e1c327beac",
-			wantRepository: "nginx",
-			wantTag:        "1.21",
+			wantReference:  "nginx:1.21",
 			wantDigest:     "sha256:4c0fdaa8b6341bfdeca5f18f7837462c80cff90527ee35ef185571e1c327beac",
 		},
 		{
-			name:           "image without tag, status with digest",
+			name:           "image without tag preserved as-is",
 			containerImage: "nginx",
 			statusImageID:  "docker.io/library/nginx@sha256:abc123",
-			wantRepository: "nginx",
-			wantTag:        "latest",
+			wantReference:  "nginx",
 			wantDigest:     "sha256:abc123",
 		},
 		{
 			name:           "fully qualified image with private registry",
 			containerImage: "gcr.io/myproject/myimage:v1.0.0",
 			statusImageID:  "gcr.io/myproject/myimage@sha256:def456",
-			wantRepository: "gcr.io/myproject/myimage",
-			wantTag:        "v1.0.0",
+			wantReference:  "gcr.io/myproject/myimage:v1.0.0",
 			wantDigest:     "sha256:def456",
 		},
 		{
 			name:           "pending pod without status",
 			containerImage: "nginx:1.21",
 			statusImageID:  "",
-			wantRepository: "nginx",
-			wantTag:        "1.21",
+			wantReference:  "nginx:1.21",
 			wantDigest:     "",
 		},
 		{
-			name:           "image specified by digest",
+			name:           "image specified by digest preserves digest reference",
 			containerImage: "nginx@sha256:original123",
 			statusImageID:  "docker.io/library/nginx@sha256:actual456",
-			wantRepository: "nginx",
-			wantTag:        "latest",
+			wantReference:  "nginx@sha256:original123",
 			wantDigest:     "sha256:actual456",
+		},
+		{
+			name:           "harbor calico image pulled by digest preserves full reference",
+			containerImage: "harbor.cloudnative.biz/chainguard-mirror/calico-cni@sha256:6ac36c78896157d10d99a02206f124cb157ec4f57bd95ebb20bb930c0ce25f8d",
+			statusImageID:  "harbor.cloudnative.biz/chainguard-mirror/calico-cni@sha256:6ac36c78896157d10d99a02206f124cb157ec4f57bd95ebb20bb930c0ce25f8d",
+			wantReference:  "harbor.cloudnative.biz/chainguard-mirror/calico-cni@sha256:6ac36c78896157d10d99a02206f124cb157ec4f57bd95ebb20bb930c0ce25f8d",
+			wantDigest:     "sha256:6ac36c78896157d10d99a02206f124cb157ec4f57bd95ebb20bb930c0ce25f8d",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Simulate what happens in extractContainerInstances
-			gotRepository, gotTag := parseImageName(tt.containerImage)
+			gotReference := extractImageReference(tt.containerImage)
 			gotDigest := extractDigestFromImageID(tt.statusImageID)
 
-			if gotRepository != tt.wantRepository {
-				t.Errorf("repository = %v, want %v", gotRepository, tt.wantRepository)
-			}
-			if gotTag != tt.wantTag {
-				t.Errorf("tag = %v, want %v", gotTag, tt.wantTag)
+			if gotReference != tt.wantReference {
+				t.Errorf("reference = %v, want %v", gotReference, tt.wantReference)
 			}
 			if gotDigest != tt.wantDigest {
 				t.Errorf("digest = %v, want %v", gotDigest, tt.wantDigest)
@@ -301,11 +295,8 @@ func TestWatchPodsInformerIntegration(t *testing.T) {
 		t.Fatal("Container instance not found in manager")
 	}
 
-	if instance.Image.Repository != "nginx" {
-		t.Errorf("Expected repository 'nginx', got '%s'", instance.Image.Repository)
-	}
-	if instance.Image.Tag != "1.21" {
-		t.Errorf("Expected tag '1.21', got '%s'", instance.Image.Tag)
+	if instance.Image.Reference != "nginx:1.21" {
+		t.Errorf("Expected reference 'nginx:1.21', got '%s'", instance.Image.Reference)
 	}
 	if instance.Image.Digest != "sha256:abc123" {
 		t.Errorf("Expected digest 'sha256:abc123', got '%s'", instance.Image.Digest)

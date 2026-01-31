@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 26
+const currentSchemaVersion = 28
 
 type migration struct {
 	version int
@@ -145,6 +145,16 @@ var migrations = []migration{
 		version: 26,
 		name:    "rename_metric_staleness_to_app_state",
 		up:      migrateToV26,
+	},
+	{
+		version: 27,
+		name:    "add_reference_column_to_instances",
+		up:      migrateToV27,
+	},
+	{
+		version: 28,
+		name:    "drop_repository_tag_columns",
+		up:      migrateToV28,
 	},
 }
 
@@ -1824,6 +1834,105 @@ func migrateToV26(conn *sql.DB) error {
 	}
 
 	log.Println("Migration v26: Successfully renamed metric_staleness to app_state")
+	return nil
+}
+
+// migrateToV27 adds reference column to container_instances and populates it from repository+tag
+// This fixes the ":latest" bug for digest-only images by preserving the original reference
+func migrateToV27(conn *sql.DB) error {
+	log.Println("Migration v27: Adding reference column to container_instances...")
+
+	// Add reference column
+	_, err := conn.Exec(`ALTER TABLE container_instances ADD COLUMN reference TEXT`)
+	if err != nil {
+		return fmt.Errorf("failed to add reference column: %w", err)
+	}
+
+	// Populate reference from repository:tag (or just repository if tag is empty)
+	_, err = conn.Exec(`
+		UPDATE container_instances
+		SET reference = CASE
+			WHEN tag != '' THEN repository || ':' || tag
+			ELSE repository
+		END
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to populate reference column: %w", err)
+	}
+
+	log.Println("Migration v27: Successfully added and populated reference column")
+	return nil
+}
+
+// migrateToV28 drops the repository and tag columns from container_instances
+// This completes the migration to using reference instead of repository+tag
+func migrateToV28(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v28: Dropping repository and tag columns from container_instances...")
+
+	// SQLite doesn't support DROP COLUMN directly, so we need to rebuild the table
+	// Step 1: Create new table without repository and tag columns
+	_, err = tx.Exec(`
+		CREATE TABLE container_instances_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			namespace TEXT NOT NULL,
+			pod TEXT NOT NULL,
+			container TEXT NOT NULL,
+			reference TEXT NOT NULL,
+			image_id INTEGER NOT NULL,
+			node_name TEXT,
+			container_runtime TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(namespace, pod, container),
+			FOREIGN KEY (image_id) REFERENCES container_images(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new instances table: %w", err)
+	}
+
+	// Step 2: Copy data from old table to new table
+	_, err = tx.Exec(`
+		INSERT INTO container_instances_new (id, namespace, pod, container, reference, image_id, node_name, container_runtime, created_at)
+		SELECT id, namespace, pod, container, reference, image_id, node_name, container_runtime, created_at
+		FROM container_instances
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy instances data: %w", err)
+	}
+
+	// Step 3: Drop old table
+	_, err = tx.Exec(`DROP TABLE container_instances`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old instances table: %w", err)
+	}
+
+	// Step 4: Rename new table
+	_, err = tx.Exec(`ALTER TABLE container_instances_new RENAME TO container_instances`)
+	if err != nil {
+		return fmt.Errorf("failed to rename instances table: %w", err)
+	}
+
+	// Step 5: Recreate indexes
+	_, err = tx.Exec(`
+		CREATE INDEX idx_instances_namespace ON container_instances(namespace);
+		CREATE INDEX idx_instances_image ON container_instances(image_id);
+		CREATE INDEX idx_instances_created_at ON container_instances(created_at);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create instances indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v28: Successfully dropped repository and tag columns")
 	return nil
 }
 

@@ -49,9 +49,8 @@ func TestJobQueueIntegration(t *testing.T) {
 
 	// Create a test image
 	testImage := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
-		Digest:     "sha256:abc123",
+		Reference: "nginx:1.21",
+		Digest:    "sha256:abc123",
 	}
 
 	// Create a container instance to initialize the image record in the database
@@ -137,9 +136,8 @@ func TestJobQueueErrorHandling(t *testing.T) {
 
 	// Create a test image
 	testImage := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
-		Digest:     "sha256:def456",
+		Reference: "nginx:1.21",
+		Digest:    "sha256:def456",
 	}
 
 	// Create a container instance to initialize the image record
@@ -222,9 +220,8 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 
 	// Create a test image
 	testImage := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
-		Digest:     "sha256:ghi789",
+		Reference: "nginx:1.21",
+		Digest:    "sha256:ghi789",
 	}
 
 	// Create a container instance to initialize the image record
@@ -302,9 +299,8 @@ func TestJobQueueForceScan(t *testing.T) {
 
 	// Create a test image
 	testImage := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "1.21",
-		Digest:     "sha256:jkl012",
+		Reference: "nginx:1.21",
+		Digest:    "sha256:jkl012",
 	}
 
 	// Create a container instance to initialize the image record
@@ -401,9 +397,8 @@ func TestJobQueueMaxDepthDrop(t *testing.T) {
 	// Create test images
 	for i := 1; i <= 5; i++ {
 		image := containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:test" + string(rune('0'+i)),
+			Reference: "nginx:1.21",
+			Digest:    "sha256:test" + string(rune('0'+i)),
 		}
 
 		instance := containers.ContainerInstance{
@@ -495,9 +490,8 @@ func TestJobQueueMaxDepthDropOldest(t *testing.T) {
 	// Enqueue 4 jobs quickly
 	for i := 1; i <= 4; i++ {
 		image := containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:job" + string(rune('0'+i)),
+			Reference: "nginx:1.21",
+			Digest:    "sha256:job" + string(rune('0'+i)),
 		}
 
 		instance := containers.ContainerInstance{
@@ -567,9 +561,8 @@ func TestJobQueueMetricsTracking(t *testing.T) {
 	// Enqueue 3 jobs
 	for i := 1; i <= 3; i++ {
 		image := containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:metric" + string(rune('0'+i)),
+			Reference: "nginx:1.21",
+			Digest:    "sha256:metric" + string(rune('0'+i)),
 		}
 
 		instance := containers.ContainerInstance{

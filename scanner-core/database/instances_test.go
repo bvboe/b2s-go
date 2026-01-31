@@ -28,9 +28,8 @@ func TestAddInstance(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:abc123",
+			Reference: "nginx:1.21",
+			Digest:    "sha256:abc123",
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -81,9 +80,8 @@ func TestAddInstanceDuplicate(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:abc123",
+			Reference: "nginx:1.21",
+			Digest:    "sha256:abc123",
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -126,9 +124,8 @@ func TestAddInstanceWithImageUpdate(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.20",
-			Digest:     "sha256:old123",
+			Reference: "nginx:1.20",
+			Digest:    "sha256:old123",
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -143,7 +140,7 @@ func TestAddInstanceWithImageUpdate(t *testing.T) {
 	}
 
 	// Update instance with different image
-	instance.Image.Tag = "1.21"
+	instance.Image.Reference = "nginx:1.21"
 	instance.Image.Digest = "sha256:new456"
 
 	isNew, err = db.AddInstance(instance)
@@ -165,8 +162,8 @@ func TestAddInstanceWithImageUpdate(t *testing.T) {
 		t.Errorf("Expected 1 instance after update, got %d", len(instanceRows))
 	}
 
-	if instanceRows[0].Tag != "1.21" || instanceRows[0].Digest != "sha256:new456" {
-		t.Errorf("Instance not updated correctly: tag=%s, digest=%s", instanceRows[0].Tag, instanceRows[0].Digest)
+	if instanceRows[0].Reference != "nginx:1.21" || instanceRows[0].Digest != "sha256:new456" {
+		t.Errorf("Instance not updated correctly: reference=%s, digest=%s", instanceRows[0].Reference, instanceRows[0].Digest)
 	}
 }
 
@@ -194,15 +191,14 @@ func TestAddInstanceValidation(t *testing.T) {
 					Container: "nginx",
 				},
 				Image: containers.ImageID{
-					Repository: "nginx",
-					Tag:        "1.21",
-					Digest:     "", // Missing digest
+					Reference: "nginx:1.21",
+					Digest:    "", // Missing digest
 				},
 			},
 			expectError: true,
 		},
 		{
-			name: "missing repository",
+			name: "missing reference",
 			instance: containers.ContainerInstance{
 				ID: containers.ContainerInstanceID{
 					Namespace: "default",
@@ -210,9 +206,8 @@ func TestAddInstanceValidation(t *testing.T) {
 					Container: "nginx",
 				},
 				Image: containers.ImageID{
-					Repository: "", // Missing repository
-					Tag:        "1.21",
-					Digest:     "sha256:abc123",
+					Reference: "", // Missing reference
+					Digest:    "sha256:abc123",
 				},
 			},
 			expectError: true,
@@ -226,9 +221,8 @@ func TestAddInstanceValidation(t *testing.T) {
 					Container: "nginx",
 				},
 				Image: containers.ImageID{
-					Repository: "nginx",
-					Tag:        "1.21",
-					Digest:     "sha256:abc123",
+					Reference: "nginx:1.21",
+					Digest:    "sha256:abc123",
 				},
 			},
 			expectError: true,
@@ -242,9 +236,8 @@ func TestAddInstanceValidation(t *testing.T) {
 					Container: "nginx",
 				},
 				Image: containers.ImageID{
-					Repository: "nginx",
-					Tag:        "1.21",
-					Digest:     "sha256:abc123",
+					Reference: "nginx:1.21",
+					Digest:    "sha256:abc123",
 				},
 			},
 			expectError: false,
@@ -282,9 +275,8 @@ func TestRemoveInstance(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     "sha256:abc123",
+			Reference: "nginx:1.21",
+			Digest:    "sha256:abc123",
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -331,9 +323,8 @@ func TestSetInstances(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.20",
-			Digest:     "sha256:old123",
+			Reference: "nginx:1.20",
+			Digest:    "sha256:old123",
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -353,9 +344,8 @@ func TestSetInstances(t *testing.T) {
 				Container: "nginx",
 			},
 			Image: containers.ImageID{
-				Repository: "nginx",
-				Tag:        "1.21",
-				Digest:     "sha256:new123",
+				Reference: "nginx:1.21",
+				Digest:    "sha256:new123",
 			},
 			NodeName:         "worker-2",
 			ContainerRuntime: "docker",
@@ -367,9 +357,8 @@ func TestSetInstances(t *testing.T) {
 				Container: "envoy",
 			},
 			Image: containers.ImageID{
-				Repository: "envoy",
-				Tag:        "v1.20",
-				Digest:     "sha256:envoy456",
+				Reference: "envoy:v1.20",
+				Digest:    "sha256:envoy456",
 			},
 			NodeName:         "worker-2",
 			ContainerRuntime: "containerd",
@@ -439,9 +428,8 @@ func TestSetInstancesValidation(t *testing.T) {
 				Container: "nginx",
 			},
 			Image: containers.ImageID{
-				Repository: "nginx",
-				Tag:        "1.21",
-				Digest:     "sha256:valid123",
+				Reference: "nginx:1.21",
+				Digest:    "sha256:valid123",
 			},
 		},
 		{
@@ -451,9 +439,8 @@ func TestSetInstancesValidation(t *testing.T) {
 				Container: "nginx",
 			},
 			Image: containers.ImageID{
-				Repository: "nginx",
-				Tag:        "1.21",
-				Digest:     "", // Missing digest
+				Reference: "nginx:1.21",
+				Digest:    "", // Missing digest
 			},
 		},
 	}

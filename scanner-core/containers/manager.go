@@ -110,9 +110,9 @@ func (m *Manager) AddContainerInstance(instance ContainerInstance) {
 	key := makeKey(instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 	m.instances[key] = instance
 
-	log.Printf("Add container instance: namespace=%s, pod=%s, container=%s, image=%s:%s (digest=%s)",
+	log.Printf("Add container instance: namespace=%s, pod=%s, container=%s, image=%s (digest=%s)",
 		instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-		instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		instance.Image.Reference, instance.Image.Digest)
 
 	// Persist to database if configured
 	if m.db != nil {
@@ -185,9 +185,9 @@ func (m *Manager) SetContainerInstances(instances []ContainerInstance) {
 		log.Printf("Sample instances:")
 		for i := 0; i < sampleCount; i++ {
 			instance := instances[i]
-			log.Printf("  [%d] ns=%s, pod=%s, container=%s, image=%s:%s, node=%s",
+			log.Printf("  [%d] ns=%s, pod=%s, container=%s, image=%s, node=%s",
 				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-				instance.Image.Repository, instance.Image.Tag, instance.NodeName)
+				instance.Image.Reference, instance.NodeName)
 		}
 		if len(instances) > sampleCount {
 			log.Printf("  ... and %d more instances", len(instances)-sampleCount)
@@ -273,14 +273,14 @@ func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
 	switch scanStatus {
 	case "pending":
 		// New image, enqueue normal scan
-		log.Printf("Enqueuing scan for new image: %s:%s (digest=%s)",
-			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		log.Printf("Enqueuing scan for new image: %s (digest=%s)",
+			instance.Image.Reference, instance.Image.Digest)
 		m.scanQueue.EnqueueScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
 
 	case "failed":
 		// Previous scan failed, retry with force scan
-		log.Printf("Retrying failed scan for image: %s:%s (digest=%s)",
-			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		log.Printf("Retrying failed scan for image: %s (digest=%s)",
+			instance.Image.Reference, instance.Image.Digest)
 		m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
 
 	case "scanned":
@@ -292,8 +292,8 @@ func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
 		}
 		if !isComplete {
 			// Data is incomplete, retry with force scan
-			log.Printf("Retrying scan for image with incomplete data: %s:%s (digest=%s)",
-				instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+			log.Printf("Retrying scan for image with incomplete data: %s (digest=%s)",
+				instance.Image.Reference, instance.Image.Digest)
 			m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
 		}
 		// If complete, no action needed
@@ -302,8 +302,8 @@ func (m *Manager) checkAndEnqueueScan(instance ContainerInstance) {
 		// Image is in an intermediate state (generating_sbom).
 		// This typically means a previous scan was interrupted (e.g., pod restart).
 		// Re-enqueue with force scan to resume/restart the scan.
-		log.Printf("Retrying interrupted scan for image: %s:%s (digest=%s)",
-			instance.Image.Repository, instance.Image.Tag, instance.Image.Digest)
+		log.Printf("Retrying interrupted scan for image: %s (digest=%s)",
+			instance.Image.Reference, instance.Image.Digest)
 		m.scanQueue.EnqueueForceScan(instance.Image, instance.NodeName, instance.ContainerRuntime)
 	}
 }

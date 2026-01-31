@@ -15,38 +15,14 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// parseImageName parses a container image string into repository, tag, and imageID
-// Example: "nginx:1.21" -> repository="nginx", tag="1.21"
-// Example: "docker.io/library/nginx:1.21" -> repository="docker.io/library/nginx", tag="1.21"
-// Example: "localhost:5000/myimage:latest" -> repository="localhost:5000/myimage", tag="latest"
-func parseImageName(imageName string) (repository, tag string) {
-	// Split by '@' first to handle digest
-	parts := strings.Split(imageName, "@")
-	imageName = parts[0]
-
-	// Find the last ':' to separate tag (to handle registry ports like localhost:5000)
-	lastColon := strings.LastIndex(imageName, ":")
-	if lastColon == -1 {
-		// No colon, no tag
-		repository = imageName
-		tag = "latest"
-		return
-	}
-
-	// Check if the part after the last colon contains a slash
-	// If it does, the colon is part of the registry (e.g., localhost:5000/image)
-	afterColon := imageName[lastColon+1:]
-	if strings.Contains(afterColon, "/") {
-		// Colon is part of registry port, not a tag separator
-		repository = imageName
-		tag = "latest"
-		return
-	}
-
-	// Normal case: colon separates repository and tag
-	repository = imageName[:lastColon]
-	tag = afterColon
-	return
+// extractImageReference extracts the image reference from a container image string
+// This preserves the original reference exactly as specified by the user
+// Example: "nginx:1.21" -> "nginx:1.21"
+// Example: "nginx@sha256:abc123" -> "nginx@sha256:abc123" (digest reference preserved)
+// Example: "nginx" -> "nginx" (preserved as-is, no normalization to :latest)
+func extractImageReference(imageName string) string {
+	// Return the image name exactly as specified - preserve user intent
+	return imageName
 }
 
 // extractDigestFromImageID extracts just the digest from a Kubernetes ImageID
@@ -123,7 +99,7 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 	}
 
 	for _, container := range allContainers {
-		repository, tag := parseImageName(container.Image)
+		reference := extractImageReference(container.Image)
 		status := statusMap[container.Name]
 		// Extract just the digest part (e.g., "sha256:abc123...")
 		digest := extractDigestFromImageID(status.imageID)
@@ -137,8 +113,8 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 			continue
 		}
 
-		if repository == "" {
-			log.Printf("Warning: container has empty repository: namespace=%s, pod=%s, container=%s",
+		if reference == "" {
+			log.Printf("Warning: container has empty reference: namespace=%s, pod=%s, container=%s",
 				pod.Namespace, pod.Name, container.Name)
 			continue
 		}
@@ -150,9 +126,8 @@ func extractContainerInstances(pod *corev1.Pod) []containers.ContainerInstance {
 				Container: container.Name,
 			},
 			Image: containers.ImageID{
-				Repository: repository,
-				Tag:        tag,
-				Digest:     digest,
+				Reference: reference,
+				Digest:    digest,
 			},
 			NodeName:         nodeName,
 			ContainerRuntime: status.runtime,

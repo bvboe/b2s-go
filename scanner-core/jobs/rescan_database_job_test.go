@@ -73,8 +73,7 @@ type MockScanQueue struct {
 
 type EnqueuedScan struct {
 	Digest           string
-	Repository       string
-	Tag              string
+	Reference        string
 	NodeName         string
 	ContainerRuntime string
 }
@@ -82,8 +81,7 @@ type EnqueuedScan struct {
 func (m *MockScanQueue) EnqueueForceScan(image containers.ImageID, nodeName string, containerRuntime string) {
 	m.enqueuedScans = append(m.enqueuedScans, EnqueuedScan{
 		Digest:           image.Digest,
-		Repository:       image.Repository,
-		Tag:              image.Tag,
+		Reference:        image.Reference,
 		NodeName:         nodeName,
 		ContainerRuntime: containerRuntime,
 	})
@@ -120,8 +118,7 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 				Namespace:        "default",
 				Pod:              "pod1",
 				Container:        "container1",
-				Repository:       "nginx",
-				Tag:              "latest",
+				Reference:        "nginx:latest",
 				NodeName:         "node1",
 				ContainerRuntime: "docker",
 			},
@@ -129,8 +126,7 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 				Namespace:        "default",
 				Pod:              "pod2",
 				Container:        "container2",
-				Repository:       "redis",
-				Tag:              "7.0",
+				Reference:        "redis:7.0",
 				NodeName:         "node2",
 				ContainerRuntime: "containerd",
 			},
@@ -158,15 +154,13 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 	expectedScans := map[string]EnqueuedScan{
 		"sha256:abc123": {
 			Digest:           "sha256:abc123",
-			Repository:       "nginx",
-			Tag:              "latest",
+			Reference:        "nginx:latest",
 			NodeName:         "node1",
 			ContainerRuntime: "docker",
 		},
 		"sha256:def456": {
 			Digest:           "sha256:def456",
-			Repository:       "redis",
-			Tag:              "7.0",
+			Reference:        "redis:7.0",
 			NodeName:         "node2",
 			ContainerRuntime: "containerd",
 		},
@@ -179,11 +173,8 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 			continue
 		}
 
-		if scan.Repository != expected.Repository {
-			t.Errorf("Expected repository %s, got %s", expected.Repository, scan.Repository)
-		}
-		if scan.Tag != expected.Tag {
-			t.Errorf("Expected tag %s, got %s", expected.Tag, scan.Tag)
+		if scan.Reference != expected.Reference {
+			t.Errorf("Expected reference %s, got %s", expected.Reference, scan.Reference)
 		}
 		if scan.NodeName != expected.NodeName {
 			t.Errorf("Expected node %s, got %s", expected.NodeName, scan.NodeName)
@@ -208,7 +199,7 @@ func TestRescanDatabaseJob_NoGrypeDatabase(t *testing.T) {
 			{ID: 1, Digest: "sha256:abc123", Status: "completed"},
 		},
 		instances: map[string]*database.ContainerInstanceRow{
-			"sha256:abc123": {NodeName: "node1", ContainerRuntime: "docker", Repository: "nginx", Tag: "latest"},
+			"sha256:abc123": {NodeName: "node1", ContainerRuntime: "docker", Reference: "nginx:latest"},
 		},
 	}
 
@@ -286,9 +277,9 @@ func TestRescanDatabaseJob_MissingInstances(t *testing.T) {
 			{ID: 3, Digest: "sha256:ghi789", Status: "completed"},
 		},
 		instances: map[string]*database.ContainerInstanceRow{
-			"sha256:abc123": {NodeName: "node1", ContainerRuntime: "docker", Repository: "nginx", Tag: "latest"},
+			"sha256:abc123": {NodeName: "node1", ContainerRuntime: "docker", Reference: "nginx:latest"},
 			// sha256:def456 is missing (orphaned)
-			"sha256:ghi789": {NodeName: "node3", ContainerRuntime: "containerd", Repository: "redis", Tag: "7.0"},
+			"sha256:ghi789": {NodeName: "node3", ContainerRuntime: "containerd", Reference: "redis:7.0"},
 		},
 	}
 

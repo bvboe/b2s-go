@@ -30,8 +30,8 @@ func (db *DB) getOrCreateImageTx(exec interface {
 }, image containers.ImageID) (int64, bool, error) {
 	// Validate required fields
 	if image.Digest == "" {
-		return 0, false, fmt.Errorf("cannot create/get image without digest: repository=%s, tag=%s",
-			image.Repository, image.Tag)
+		return 0, false, fmt.Errorf("cannot create/get image without digest: reference=%s",
+			image.Reference)
 	}
 
 	// Try to get existing image by digest
@@ -65,9 +65,9 @@ func (db *DB) getOrCreateImageTx(exec interface {
 		return 0, false, fmt.Errorf("failed to get image ID: %w", err)
 	}
 
-	log.Printf("New image added to database: %s:%s (digest=%s, id=%d)",
-		image.Repository, image.Tag, image.Digest, id)
-	log.Printf("TODO: Request SBOM for image: %s:%s", image.Repository, image.Tag)
+	log.Printf("New image added to database: %s (digest=%s, id=%d)",
+		image.Reference, image.Digest, id)
+	log.Printf("TODO: Request SBOM for image: %s", image.Reference)
 
 	return id, true, nil
 }

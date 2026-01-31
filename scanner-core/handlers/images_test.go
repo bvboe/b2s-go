@@ -398,8 +398,8 @@ func TestImageDetailFullHandler(t *testing.T) {
 							},
 						},
 					}, nil
-				} else if strings.Contains(query, "repository") {
-					// Repositories query
+				} else if strings.Contains(query, "reference") {
+					// References query
 					return &database.QueryResult{
 						Columns: []string{"repo"},
 						Rows: []map[string]interface{}{

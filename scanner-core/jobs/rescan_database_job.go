@@ -127,9 +127,8 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 		// Enqueue force scan (ForceScan=true skips SBOM generation, only runs Grype)
 		j.scanQueue.EnqueueForceScan(
 			containers.ImageID{
-				Digest:     img.Digest,
-				Repository: instance.Repository,
-				Tag:        instance.Tag,
+				Digest:    img.Digest,
+				Reference: instance.Reference,
 			},
 			instance.NodeName,
 			instance.ContainerRuntime,

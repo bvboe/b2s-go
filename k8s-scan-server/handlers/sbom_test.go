@@ -76,9 +76,8 @@ func TestSBOMHandler_DigestNormalization(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     testDigest,
+			Reference: "nginx:1.21",
+			Digest:    testDigest,
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -131,9 +130,8 @@ func TestSBOMHandler_DatabaseCacheHit(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     testDigest,
+			Reference: "nginx:1.21",
+			Digest:    testDigest,
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",
@@ -229,9 +227,8 @@ func TestSBOMHandler_ImageWithoutNodeName(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     testDigest,
+			Reference: "nginx:1.21",
+			Digest:    testDigest,
 		},
 		NodeName:         "", // No node name
 		ContainerRuntime: "docker",
@@ -277,9 +274,8 @@ func TestSBOMHandler_ContextTimeout(t *testing.T) {
 			Container: "nginx",
 		},
 		Image: containers.ImageID{
-			Repository: "nginx",
-			Tag:        "1.21",
-			Digest:     testDigest,
+			Reference: "nginx:1.21",
+			Digest:    testDigest,
 		},
 		NodeName:         "worker-1",
 		ContainerRuntime: "containerd",

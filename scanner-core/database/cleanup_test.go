@@ -22,19 +22,16 @@ func TestCleanupOrphanedImages(t *testing.T) {
 
 	// Create some test images and instances
 	image1 := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "latest",
-		Digest:     "sha256:orphaned1",
+		Reference: "nginx:latest",
+		Digest:    "sha256:orphaned1",
 	}
 	image2 := containers.ImageID{
-		Repository: "redis",
-		Tag:        "7",
-		Digest:     "sha256:active1",
+		Reference: "redis:7",
+		Digest:    "sha256:active1",
 	}
 	image3 := containers.ImageID{
-		Repository: "postgres",
-		Tag:        "15",
-		Digest:     "sha256:orphaned2",
+		Reference: "postgres:15",
+		Digest:    "sha256:orphaned2",
 	}
 
 	// Add instances - only image2 has an active instance
@@ -159,9 +156,8 @@ func TestCleanupOrphanedImages_NoOrphans(t *testing.T) {
 
 	// Create an image with an active instance
 	image := containers.ImageID{
-		Repository: "nginx",
-		Tag:        "latest",
-		Digest:     "sha256:active1",
+		Reference: "nginx:latest",
+		Digest:    "sha256:active1",
 	}
 
 	instance := containers.ContainerInstance{

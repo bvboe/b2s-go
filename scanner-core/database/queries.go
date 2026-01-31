@@ -378,8 +378,7 @@ type ScannedContainerInstance struct {
 	Pod          string `json:"pod"`
 	Container    string `json:"container"`
 	NodeName     string `json:"node_name"`
-	Repository   string `json:"repository"`
-	Tag          string `json:"tag"`
+	Reference    string `json:"reference"`
 	Digest       string `json:"digest"`
 	OSName       string `json:"os_name"`
 	Architecture string `json:"architecture"`
@@ -393,8 +392,7 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 			ci.pod,
 			ci.container,
 			ci.node_name,
-			ci.repository,
-			ci.tag,
+			ci.reference,
 			img.digest,
 			COALESCE(img.os_name, '') as os_name,
 			COALESCE(img.architecture, '') as architecture
@@ -420,8 +418,7 @@ func (db *DB) GetScannedContainerInstances() ([]ScannedContainerInstance, error)
 			&instance.Pod,
 			&instance.Container,
 			&instance.NodeName,
-			&instance.Repository,
-			&instance.Tag,
+			&instance.Reference,
 			&instance.Digest,
 			&instance.OSName,
 			&instance.Architecture,
@@ -504,21 +501,20 @@ func (db *DB) GetImageScanStatusCounts() ([]ImageScanStatusCount, error) {
 
 // VulnerabilityInstance represents a vulnerability found in a running container instance
 type VulnerabilityInstance struct {
-	VulnID         int64  `json:"vuln_id"`
-	Namespace      string `json:"namespace"`
-	Pod            string `json:"pod"`
-	Container      string `json:"container"`
-	NodeName       string `json:"node_name"`
-	Repository     string `json:"repository"`
-	Tag            string `json:"tag"`
-	Digest         string `json:"digest"`
-	OSName         string `json:"os_name"`
-	CVEID          string `json:"cve_id"`
-	PackageName    string `json:"package_name"`
-	PackageVersion string `json:"package_version"`
-	Severity       string `json:"severity"`
-	FixStatus      string `json:"fix_status"`
-	FixedVersion   string `json:"fixed_version"`
+	VulnID         int64   `json:"vuln_id"`
+	Namespace      string  `json:"namespace"`
+	Pod            string  `json:"pod"`
+	Container      string  `json:"container"`
+	NodeName       string  `json:"node_name"`
+	Reference      string  `json:"reference"`
+	Digest         string  `json:"digest"`
+	OSName         string  `json:"os_name"`
+	CVEID          string  `json:"cve_id"`
+	PackageName    string  `json:"package_name"`
+	PackageVersion string  `json:"package_version"`
+	Severity       string  `json:"severity"`
+	FixStatus      string  `json:"fix_status"`
+	FixedVersion   string  `json:"fixed_version"`
 	Count          int     `json:"count"`
 	KnownExploited int     `json:"known_exploited"`
 	Risk           float64 `json:"risk"`
@@ -533,8 +529,7 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 			ci.pod,
 			ci.container,
 			ci.node_name,
-			ci.repository,
-			ci.tag,
+			ci.reference,
 			img.digest,
 			COALESCE(img.os_name, '') as os_name,
 			v.cve_id,
@@ -570,8 +565,7 @@ func (db *DB) GetVulnerabilityInstances() ([]VulnerabilityInstance, error) {
 			&instance.Pod,
 			&instance.Container,
 			&instance.NodeName,
-			&instance.Repository,
-			&instance.Tag,
+			&instance.Reference,
 			&instance.Digest,
 			&instance.OSName,
 			&instance.CVEID,

@@ -17,23 +17,14 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// parseImageName parses a container image string into repository and tag
-// Example: "nginx:1.21" -> repository="nginx", tag="1.21"
-// Example: "docker.io/library/nginx:1.21" -> repository="docker.io/library/nginx", tag="1.21"
-func parseImageName(imageName string) (repository, tag string) {
-	// Split by '@' first to handle digest
-	parts := strings.Split(imageName, "@")
-	imageName = parts[0]
-
-	// Split by ':' to separate tag
-	parts = strings.Split(imageName, ":")
-	repository = parts[0]
-	if len(parts) > 1 {
-		tag = parts[1]
-	} else {
-		tag = "latest"
-	}
-	return
+// extractImageReference extracts the image reference from a container image string
+// This preserves the original reference exactly as specified by the user
+// Example: "nginx:1.21" -> "nginx:1.21"
+// Example: "nginx@sha256:abc123" -> "nginx@sha256:abc123" (digest reference preserved)
+// Example: "nginx" -> "nginx" (preserved as-is, no normalization to :latest)
+func extractImageReference(imageName string) string {
+	// Return the image name exactly as specified - preserve user intent
+	return imageName
 }
 
 // extractContainerInstance creates a ContainerInstance from Docker container info
@@ -49,7 +40,7 @@ func extractContainerInstance(ctx context.Context, cli *client.Client, container
 		return containers.ContainerInstance{}, err
 	}
 
-	repository, tag := parseImageName(containerJSON.Config.Image)
+	reference := extractImageReference(containerJSON.Config.Image)
 
 	// Extract image digest from RepoDigests if available
 	digest := ""
@@ -71,9 +62,8 @@ func extractContainerInstance(ctx context.Context, cli *client.Client, container
 			Container: containerName,
 		},
 		Image: containers.ImageID{
-			Repository: repository,
-			Tag:        tag,
-			Digest:     digest,
+			Reference: reference,
+			Digest:    digest,
 		},
 		NodeName:         hostname, // Use hostname as node name for agent deployments
 		ContainerRuntime: "docker",

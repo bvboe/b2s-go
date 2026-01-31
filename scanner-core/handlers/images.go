@@ -237,7 +237,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	// Search filter (image name)
 	if search != "" {
 		escapedSearch := strings.ReplaceAll(search, "'", "''")
-		conditions = append(conditions, fmt.Sprintf("(instances.repository || ':' || instances.tag) LIKE '%%%s%%'", escapedSearch))
+		conditions = append(conditions, fmt.Sprintf("instances.reference LIKE '%%%s%%'", escapedSearch))
 	}
 
 	// Namespace filter
@@ -267,18 +267,18 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	}
 
 	// Group by
-	groupBy := " GROUP BY instances.repository || ':' || instances.tag, images.digest, images.os_name, status.status"
+	groupBy := " GROUP BY instances.reference, images.digest, images.os_name, status.status"
 
 	// Build count query
 	countQuery := "SELECT COUNT(*) FROM (" +
-		"SELECT instances.repository || ':' || instances.tag as image" +
+		"SELECT instances.reference as image" +
 		whereClause +
 		groupBy +
 		") subquery"
 
 	// Build main query with sorting
 	selectClause := `SELECT
-      instances.repository || ':' || instances.tag as image,
+      instances.reference as image,
       images.digest,
       COUNT(*) as instance_count,
       COALESCE(vuln_counts.critical_count, 0) as critical_count,
@@ -687,10 +687,10 @@ WHERE images.digest = '` + escapedDigest + `'`
 
 		// Get distinct repositories for this image
 		repoQuery := `
-SELECT DISTINCT repository || ':' || tag as repo
+SELECT DISTINCT reference as repo
 FROM container_instances
 WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
-ORDER BY repository, tag`
+ORDER BY reference`
 
 		log.Printf("ImageDetailFullHandler: fetching repositories for image_id: %v", imageID)
 		repoResult, err := provider.ExecuteReadOnlyQuery(repoQuery)

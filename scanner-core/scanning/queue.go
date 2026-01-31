@@ -135,8 +135,8 @@ func (q *JobQueue) Enqueue(job ScanJob) {
 		switch q.config.FullBehavior {
 		case QueueFullDrop:
 			// Drop the new job
-			log.Printf("Queue full (depth=%d), dropping new job: image=%s:%s (digest=%s)",
-				len(q.jobs), job.Image.Repository, job.Image.Tag, job.Image.Digest)
+			log.Printf("Queue full (depth=%d), dropping new job: image=%s (digest=%s)",
+				len(q.jobs), job.Image.Reference, job.Image.Digest)
 			q.updateMetrics(0, 0, 1) // Increment dropped count
 			return
 
@@ -144,9 +144,8 @@ func (q *JobQueue) Enqueue(job ScanJob) {
 			// Remove oldest job and add new one
 			dropped := q.jobs[0]
 			q.jobs = q.jobs[1:]
-			log.Printf("Queue full (depth=%d), dropping oldest job: image=%s:%s, adding new: image=%s:%s",
-				len(q.jobs)+1, dropped.Image.Repository, dropped.Image.Tag,
-				job.Image.Repository, job.Image.Tag)
+			log.Printf("Queue full (depth=%d), dropping oldest job: image=%s, adding new: image=%s",
+				len(q.jobs)+1, dropped.Image.Reference, job.Image.Reference)
 			q.updateMetrics(0, 0, 1) // Increment dropped count
 
 		case QueueFullBlock:
@@ -169,8 +168,8 @@ func (q *JobQueue) Enqueue(job ScanJob) {
 	q.jobs = append(q.jobs, job)
 	currentDepth := len(q.jobs)
 
-	log.Printf("Enqueued scan job: image=%s:%s (digest=%s), node=%s, runtime=%s (queue depth: %d)",
-		job.Image.Repository, job.Image.Tag, job.Image.Digest, job.NodeName, job.ContainerRuntime, currentDepth)
+	log.Printf("Enqueued scan job: image=%s (digest=%s), node=%s, runtime=%s (queue depth: %d)",
+		job.Image.Reference, job.Image.Digest, job.NodeName, job.ContainerRuntime, currentDepth)
 
 	// Update metrics
 	q.updateMetrics(currentDepth, 1, 0)
@@ -297,8 +296,8 @@ func (q *JobQueue) worker() {
 
 // processJob handles a single scan job
 func (q *JobQueue) processJob(job ScanJob) {
-	log.Printf("Processing scan job: image=%s:%s (digest=%s, forceScan=%v)",
-		job.Image.Repository, job.Image.Tag, job.Image.Digest, job.ForceScan)
+	log.Printf("Processing scan job: image=%s (digest=%s, forceScan=%v)",
+		job.Image.Reference, job.Image.Digest, job.ForceScan)
 
 	// Check if we already have scan results
 	status, err := q.db.GetImageStatus(job.Image.Digest)
@@ -336,8 +335,8 @@ func (q *JobQueue) processJob(job ScanJob) {
 
 	sbomJSON, err := q.sbomRetriever(ctx, job.Image, job.NodeName, job.ContainerRuntime)
 	if err != nil {
-		log.Printf("Error retrieving SBOM for %s:%s: %v",
-			job.Image.Repository, job.Image.Tag, err)
+		log.Printf("Error retrieving SBOM for %s: %v",
+			job.Image.Reference, err)
 
 		// Determine if this is a failure or unavailability
 		// If no node scanner is available, mark as unavailable; otherwise failed
@@ -355,8 +354,8 @@ func (q *JobQueue) processJob(job ScanJob) {
 	// that fetch SBOMs on-demand from pod-scanner do NOT cache (see handlers/sbom.go).
 	// StoreSBOM will automatically update status to StatusScanningVulnerabilities
 	if err := q.db.StoreSBOM(job.Image.Digest, sbomJSON); err != nil {
-		log.Printf("Error storing SBOM for %s:%s: %v",
-			job.Image.Repository, job.Image.Tag, err)
+		log.Printf("Error storing SBOM for %s: %v",
+			job.Image.Reference, err)
 
 		if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusSBOMFailed, err.Error()); updateErr != nil {
 			log.Printf("Error updating status to failed: %v", updateErr)
@@ -364,8 +363,8 @@ func (q *JobQueue) processJob(job ScanJob) {
 		return
 	}
 
-	log.Printf("Successfully scanned and stored SBOM for %s:%s (digest=%s)",
-		job.Image.Repository, job.Image.Tag, job.Image.Digest)
+	log.Printf("Successfully scanned and stored SBOM for %s (digest=%s)",
+		job.Image.Reference, job.Image.Digest)
 
 	// Now scan for vulnerabilities
 	q.processVulnerabilityScan(job, sbomJSON)
@@ -373,8 +372,8 @@ func (q *JobQueue) processJob(job ScanJob) {
 
 // processVulnerabilityScan scans an SBOM for vulnerabilities
 func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
-	log.Printf("Starting vulnerability scan for %s:%s (digest=%s)",
-		job.Image.Repository, job.Image.Tag, job.Image.Digest)
+	log.Printf("Starting vulnerability scan for %s (digest=%s)",
+		job.Image.Reference, job.Image.Digest)
 
 	// Wait for grype DB to be ready before scanning
 	if q.dbReadinessState != nil {
@@ -416,8 +415,8 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 
 	scanResult, err := grype.ScanVulnerabilitiesWithConfig(ctx, sbomJSON, q.grypeCfg)
 	if err != nil {
-		log.Printf("Error scanning vulnerabilities for %s:%s: %v",
-			job.Image.Repository, job.Image.Tag, err)
+		log.Printf("Error scanning vulnerabilities for %s: %v",
+			job.Image.Reference, err)
 
 		if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusVulnScanFailed, err.Error()); updateErr != nil {
 			log.Printf("Error updating status to failed: %v", updateErr)
@@ -428,8 +427,8 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 	// Store the vulnerability report with grype DB version info
 	// StoreVulnerabilities will automatically update status to StatusCompleted
 	if err := q.db.StoreVulnerabilities(job.Image.Digest, scanResult.VulnerabilityJSON, scanResult.DBStatus.Built); err != nil {
-		log.Printf("Error storing vulnerabilities for %s:%s: %v",
-			job.Image.Repository, job.Image.Tag, err)
+		log.Printf("Error storing vulnerabilities for %s: %v",
+			job.Image.Reference, err)
 
 		if updateErr := q.db.UpdateStatus(job.Image.Digest, database.StatusVulnScanFailed, err.Error()); updateErr != nil {
 			log.Printf("Error updating status to failed: %v", updateErr)
@@ -437,8 +436,8 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 		return
 	}
 
-	log.Printf("Successfully scanned and stored vulnerabilities for %s:%s (digest=%s)",
-		job.Image.Repository, job.Image.Tag, job.Image.Digest)
+	log.Printf("Successfully scanned and stored vulnerabilities for %s (digest=%s)",
+		job.Image.Reference, job.Image.Digest)
 }
 
 // Shutdown gracefully shuts down the queue, waiting for current job to complete

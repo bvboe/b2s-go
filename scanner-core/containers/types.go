@@ -9,9 +9,8 @@ type ContainerInstanceID struct {
 
 // ImageID identifies a container image
 type ImageID struct {
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Digest     string `json:"digest"` // SHA256 digest (e.g., sha256:abc123...)
+	Reference string `json:"reference"` // Original image reference (e.g., "nginx:1.21" or "nginx@sha256:abc...")
+	Digest    string `json:"digest"`    // SHA256 digest (e.g., sha256:abc123...)
 }
 
 // ContainerInstance represents a running container instance in the cluster

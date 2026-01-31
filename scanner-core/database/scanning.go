@@ -259,7 +259,7 @@ func (db *DB) GetFirstInstanceForImage(digest string) (*ContainerInstanceRow, er
 	err := db.conn.QueryRow(`
 		SELECT
 			ci.id, ci.namespace, ci.pod, ci.container,
-			ci.repository, ci.tag, ci.image_id, img.digest,
+			ci.reference, ci.image_id, img.digest,
 			ci.created_at, ci.node_name, ci.container_runtime
 		FROM container_instances ci
 		JOIN container_images img ON ci.image_id = img.id
@@ -267,7 +267,7 @@ func (db *DB) GetFirstInstanceForImage(digest string) (*ContainerInstanceRow, er
 		ORDER BY ci.created_at ASC
 		LIMIT 1
 	`, digest).Scan(&inst.ID, &inst.Namespace, &inst.Pod, &inst.Container,
-		&inst.Repository, &inst.Tag, &inst.ImageID, &inst.Digest,
+		&inst.Reference, &inst.ImageID, &inst.Digest,
 		&inst.CreatedAt, &inst.NodeName, &inst.ContainerRuntime)
 
 	if err == sql.ErrNoRows {

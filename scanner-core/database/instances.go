@@ -15,8 +15,7 @@ type ContainerInstanceRow struct {
 	Pod              string `json:"pod"`
 	Container        string `json:"container"`
 	ImageID          int64  `json:"image_id"`
-	Repository       string `json:"repository"`
-	Tag              string `json:"tag"`
+	Reference        string `json:"reference"`
 	Digest           string `json:"digest"`
 	CreatedAt        string `json:"created_at"`
 	NodeName         string `json:"node_name"`
@@ -31,8 +30,8 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 		return false, fmt.Errorf("cannot add instance without digest: namespace=%s, pod=%s, container=%s",
 			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 	}
-	if instance.Image.Repository == "" {
-		return false, fmt.Errorf("cannot add instance without repository: namespace=%s, pod=%s, container=%s",
+	if instance.Image.Reference == "" {
+		return false, fmt.Errorf("cannot add instance without reference: namespace=%s, pod=%s, container=%s",
 			instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 	}
 	if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
@@ -67,9 +66,9 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 			// Image has changed (or digest was empty before), update it
 			_, err = tx.Exec(`
 				UPDATE container_instances
-				SET image_id = ?, repository = ?, tag = ?, node_name = ?, container_runtime = ?
+				SET image_id = ?, reference = ?, node_name = ?, container_runtime = ?
 				WHERE id = ?
-			`, imageID, instance.Image.Repository, instance.Image.Tag, instance.NodeName, instance.ContainerRuntime, existingID)
+			`, imageID, instance.Image.Reference, instance.NodeName, instance.ContainerRuntime, existingID)
 
 			if err != nil {
 				return false, fmt.Errorf("failed to update instance: %w", err)
@@ -98,10 +97,10 @@ func (db *DB) AddInstance(instance containers.ContainerInstance) (bool, error) {
 
 	// Instance doesn't exist, create it
 	_, err = tx.Exec(`
-		INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id, node_name, container_runtime)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO container_instances (namespace, pod, container, reference, image_id, node_name, container_runtime)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-		instance.Image.Repository, instance.Image.Tag, imageID, instance.NodeName, instance.ContainerRuntime)
+		instance.Image.Reference, imageID, instance.NodeName, instance.ContainerRuntime)
 
 	if err != nil {
 		return false, fmt.Errorf("failed to insert instance: %w", err)
@@ -150,8 +149,8 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) (*container
 			return nil, fmt.Errorf("instance %d has empty digest: namespace=%s, pod=%s, container=%s",
 				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 		}
-		if instance.Image.Repository == "" {
-			return nil, fmt.Errorf("instance %d has empty repository: namespace=%s, pod=%s, container=%s",
+		if instance.Image.Reference == "" {
+			return nil, fmt.Errorf("instance %d has empty reference: namespace=%s, pod=%s, container=%s",
 				i, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container)
 		}
 		if instance.ID.Namespace == "" || instance.ID.Pod == "" || instance.ID.Container == "" {
@@ -201,10 +200,10 @@ func (db *DB) SetInstances(instances []containers.ContainerInstance) (*container
 
 		// Insert instance
 		_, err = tx.Exec(`
-			INSERT INTO container_instances (namespace, pod, container, repository, tag, image_id, node_name, container_runtime)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO container_instances (namespace, pod, container, reference, image_id, node_name, container_runtime)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`, instance.ID.Namespace, instance.ID.Pod, instance.ID.Container,
-			instance.Image.Repository, instance.Image.Tag, imageID, instance.NodeName, instance.ContainerRuntime)
+			instance.Image.Reference, imageID, instance.NodeName, instance.ContainerRuntime)
 
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert instance: %w", err)
@@ -226,7 +225,7 @@ func (db *DB) GetAllInstances() (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT
 			ci.id, ci.namespace, ci.pod, ci.container,
-			ci.repository, ci.tag, ci.image_id, img.digest,
+			ci.reference, ci.image_id, img.digest,
 			ci.created_at, ci.node_name, ci.container_runtime
 		FROM container_instances ci
 		JOIN container_images img ON ci.image_id = img.id
@@ -242,7 +241,7 @@ func (db *DB) GetAllInstances() (interface{}, error) {
 		var inst ContainerInstanceRow
 		var nodeName, containerRuntime sql.NullString
 		err := rows.Scan(&inst.ID, &inst.Namespace, &inst.Pod, &inst.Container,
-			&inst.Repository, &inst.Tag, &inst.ImageID, &inst.Digest, &inst.CreatedAt,
+			&inst.Reference, &inst.ImageID, &inst.Digest, &inst.CreatedAt,
 			&nodeName, &containerRuntime)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan instance: %w", err)

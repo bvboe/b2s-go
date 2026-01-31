@@ -15,10 +15,10 @@ import (
 // GenerateSBOM generates an SBOM for a Docker image using syft library
 // Returns the SBOM as JSON bytes in syft JSON format
 func GenerateSBOM(ctx context.Context, image containers.ImageID) ([]byte, error) {
-	// Build the image reference using repository:tag format only
+	// Use the image reference directly - it's already in the correct format (e.g., "nginx:1.21")
 	// We explicitly avoid digest-based references to prevent any pull attempts from registries
-	// Since we only scan locally running containers, repository:tag is always available
-	imageRef := fmt.Sprintf("%s:%s", image.Repository, image.Tag)
+	// Since we only scan locally running containers, the reference is always available
+	imageRef := image.Reference
 
 	log.Printf("Generating SBOM for image: %s", imageRef)
 
