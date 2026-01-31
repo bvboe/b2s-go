@@ -82,23 +82,13 @@ func (d *DatabaseReadinessState) GetStatus() *grype.DatabaseStatus {
 	return nil
 }
 
-// ReadinessHandler returns a handler that checks if the database is ready
-// Returns 200 OK if ready, 503 Service Unavailable if not
+// ReadinessHandler returns a handler for readiness checks.
+// Always returns 200 OK since the server can accept requests immediately.
+// The scan queue handles waiting for the vulnerability database internally.
 func ReadinessHandler(state *DatabaseReadinessState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if state.IsReady() {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ready"))
-			return
-		}
-
-		status := state.GetStatus()
-		w.WriteHeader(http.StatusServiceUnavailable)
-		if status != nil && status.Error != "" {
-			_, _ = w.Write([]byte("not ready: " + status.Error))
-		} else {
-			_, _ = w.Write([]byte("not ready: database not initialized"))
-		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready"))
 	}
 }
 
