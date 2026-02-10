@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/anchore/syft v1.41.1
+	github.com/anchore/syft v1.41.2
 	github.com/bvboe/b2s-go/scanner-core v0.0.0-20251229133410-246b755cc828
 )
 
@@ -288,7 +288,7 @@ require (
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.44.1 // indirect
+	modernc.org/sqlite v1.44.3 // indirect
 )
 
 require (
