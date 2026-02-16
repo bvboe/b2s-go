@@ -6,8 +6,8 @@ require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/google/go-containerregistry v0.20.7
 	helm.sh/helm/v3 v3.20.0
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
+	k8s.io/apimachinery v0.35.1
+	k8s.io/client-go v0.35.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -108,7 +108,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
-	k8s.io/api v0.35.0 // indirect
+	k8s.io/api v0.35.1 // indirect
 	k8s.io/apiextensions-apiserver v0.35.0 // indirect
 	k8s.io/apiserver v0.35.0 // indirect
 	k8s.io/cli-runtime v0.35.0 // indirect
