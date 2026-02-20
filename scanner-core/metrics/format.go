@@ -12,15 +12,15 @@ func FormatPrometheus(data *MetricsData) string {
 
 	for _, family := range data.Families {
 		// Write HELP line
-		output.WriteString(fmt.Sprintf("# HELP %s %s\n", family.Name, family.Help))
+		fmt.Fprintf(&output, "# HELP %s %s\n", family.Name, family.Help)
 		// Write TYPE line
-		output.WriteString(fmt.Sprintf("# TYPE %s %s\n", family.Name, family.Type))
+		fmt.Fprintf(&output, "# TYPE %s %s\n", family.Name, family.Type)
 
 		// Write each metric
 		for _, metric := range family.Metrics {
 			// Format labels
 			labels := formatLabels(metric.Labels)
-			output.WriteString(fmt.Sprintf("%s{%s} %g\n", family.Name, labels, metric.Value))
+			fmt.Fprintf(&output, "%s{%s} %g\n", family.Name, labels, metric.Value)
 		}
 	}
 
