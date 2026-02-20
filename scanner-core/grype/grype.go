@@ -425,9 +425,13 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 
 	// Create vulnerability matcher with all default matchers (dpkg, rpm, apk, etc.)
 	// Use DefaultMatcherConfig() to ensure we match Grype CLI defaults
+	// Enable EOL distro warnings to maintain parity with upstream grype CLI
 	vulnerabilityMatcher := grype.VulnerabilityMatcher{
 		VulnerabilityProvider: vulnProvider,
 		Matchers:              matcher.NewDefaultMatchers(DefaultMatcherConfig()),
+		Alerts: grype.AlertsConfig{
+			EnableEOLDistroWarnings: true,
+		},
 	}
 
 	// Find vulnerability matches
@@ -441,6 +445,16 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 	}
 
 	log.Printf("Found %d vulnerability matches (%d ignored)", remainingMatches.Count(), len(ignoredMatches))
+
+	// Collect EOL distro packages for alerting (maintains parity with grype CLI)
+	eolPackages := vulnerabilityMatcher.EOLDistroPackages()
+	var distroAlertData *models.DistroAlertData
+	if len(eolPackages) > 0 {
+		log.Printf("Detected %d packages from EOL distribution", len(eolPackages))
+		distroAlertData = &models.DistroAlertData{
+			EOLDistroPackages: eolPackages,
+		}
+	}
 
 	// Build database info for the output document
 	dbInfo := buildDBInfo(dbStatus, vulnProvider)
@@ -457,6 +471,7 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		dbInfo,                 // dbInfo
 		models.SortBySeverity,  // sortStrategy
 		false,                  // outputTimestamp
+		distroAlertData,        // distroAlertData (EOL warnings for upstream grype parity)
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create document: %w", err)
