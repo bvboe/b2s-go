@@ -4,9 +4,9 @@ go 1.25.0
 
 require (
 	github.com/bvboe/b2s-go/scanner-core v0.0.0
-	k8s.io/api v0.35.0
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
+	k8s.io/api v0.35.1
+	k8s.io/apimachinery v0.35.1
+	k8s.io/client-go v0.35.1
 )
 
 require (
