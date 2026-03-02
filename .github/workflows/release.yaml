@@ -172,13 +172,13 @@ jobs:
         cosign sign --yes "${CHART_REF}"
 
     - name: Download SBOM artifacts
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         pattern: sbom-*
         path: sboms
 
     - name: Download agent binaries
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: bjorn2scan-agent-binaries
         path: agent-binaries
