@@ -34,7 +34,7 @@ jobs:
           scanner-core/go.sum
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Build agent test container
       working-directory: bjorn2scan-agent
