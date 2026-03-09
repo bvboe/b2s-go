@@ -4,7 +4,7 @@ go 1.25.6
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/google/go-containerregistry v0.21.1
+	github.com/google/go-containerregistry v0.21.2
 	helm.sh/helm/v3 v3.20.0
 	k8s.io/apimachinery v0.35.2
 	k8s.io/client-go v0.35.2
