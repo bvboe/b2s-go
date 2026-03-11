@@ -7,12 +7,6 @@
 - [ ] None currently
 
 ## Backlog
-- [ ] Rerun code-simplifier analysis and address suggestions
-  - [ ] High priority: Extract shared SQL filter building logic (~200 lines saved)
-  - [ ] High priority: Consolidate CSV export functions (~100 lines saved)
-  - [ ] High priority: Extract vulnerability label building in metrics
-  - [ ] Medium priority: Create URL path parsing and pagination helpers
-  - [ ] See conversation from 2026-01-09 for full analysis
 - [ ] Remove gomezboe.com dependency from grype database update tests
   - [ ] Replace `scripts/test-grype-db-updater` with self-contained unit tests
   - [ ] Consider mocking distribution.Client for IsUpdateAvailable tests
@@ -52,6 +46,12 @@
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 
 ## Recently Completed
+- [x] [2026-03-11] Implemented code simplification suggestions (net ~330 lines removed)
+  - Created `scanner-core/handlers/queryhelpers.go` with shared SQL filter building helpers
+  - Consolidated 4 CSV export functions into single `exportQueryResultAsCSV()` function
+  - Extracted vulnerability label building in metrics with `buildVulnerabilityLabels()` helper
+  - Refactored `buildImagesQuery`, `buildPodsQuery`, `buildNamespaceSummaryQuery`, `buildDistributionSummaryQuery`
+  - Refactored `collectScannedContainerMetrics`, `collectVulnerabilityMetrics`, `collectVulnerabilityExploitedMetrics`, `collectVulnerabilityRiskMetrics`
 - [x] [2026-03-11] Added integration tests for database migrations with realistic data
   - Created `scanner-core/database/migration_integration_test.go`
   - Tests populate database with realistic data before running migrations

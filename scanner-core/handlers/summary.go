@@ -84,22 +84,10 @@ JOIN containers instances ON images.id = instances.image_id`
 	var conditions []string
 
 	// Namespace filter
-	if len(namespaces) > 0 {
-		escaped := make([]string, len(namespaces))
-		for i, ns := range namespaces {
-			escaped[i] = "'" + strings.ReplaceAll(ns, "'", "''") + "'"
-		}
-		conditions = append(conditions, "instances.namespace IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("instances.namespace", namespaces))
 
 	// OS name filter
-	if len(osNames) > 0 {
-		escaped := make([]string, len(osNames))
-		for i, os := range osNames {
-			escaped[i] = "'" + strings.ReplaceAll(os, "'", "''") + "'"
-		}
-		conditions = append(conditions, "images.os_name IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("images.os_name", osNames))
 
 	// Note: vulnStatuses and packageTypes filters affect vulnerability/package subqueries
 	// For scan status counts, we count images regardless of their vulnerability details
@@ -262,37 +250,9 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 // buildNamespaceSummaryQuery constructs the SQL query for namespace-level aggregations
 func buildNamespaceSummaryQuery(namespaces, vulnStatuses, packageTypes, osNames []string, sortBy, sortOrder string, limit, offset int) (string, string) {
-	// Build package type filter for packages subquery
-	packageTypeFilter := ""
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		packageTypeFilter = "WHERE type IN (" + strings.Join(escapedTypes, ",") + ")"
-	}
-
-	// Build vulnerability filters for vulnerabilities subquery
-	var vulnFilters []string
-	if len(vulnStatuses) > 0 {
-		escapedStatuses := make([]string, len(vulnStatuses))
-		for i, status := range vulnStatuses {
-			escapedStatuses[i] = "'" + strings.ReplaceAll(status, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "fix_status IN ("+strings.Join(escapedStatuses, ",")+")")
-	}
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "package_type IN ("+strings.Join(escapedTypes, ",")+")")
-	}
-
-	vulnStatusFilter := ""
-	if len(vulnFilters) > 0 {
-		vulnStatusFilter = "WHERE " + strings.Join(vulnFilters, " AND ")
-	}
+	// Build subquery filters using helper functions
+	packageTypeFilter := buildPackageTypeFilter(packageTypes)
+	vulnStatusFilter := buildVulnerabilityFilter(vulnStatuses, packageTypes)
 
 	// Base query with subqueries
 	baseQuery := fmt.Sprintf(`
@@ -326,28 +286,13 @@ WHERE status.status = 'completed'`, packageTypeFilter, vulnStatusFilter)
 	var conditions []string
 
 	// Namespace filter
-	if len(namespaces) > 0 {
-		escaped := make([]string, len(namespaces))
-		for i, ns := range namespaces {
-			escaped[i] = "'" + strings.ReplaceAll(ns, "'", "''") + "'"
-		}
-		conditions = append(conditions, "instances.namespace IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("instances.namespace", namespaces))
 
 	// OS name filter
-	if len(osNames) > 0 {
-		escaped := make([]string, len(osNames))
-		for i, os := range osNames {
-			escaped[i] = "'" + strings.ReplaceAll(os, "'", "''") + "'"
-		}
-		conditions = append(conditions, "images.os_name IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("images.os_name", osNames))
 
 	// Add conditions to base query
-	whereClause := baseQuery
-	if len(conditions) > 0 {
-		whereClause += " AND " + strings.Join(conditions, " AND ")
-	}
+	whereClause := baseQuery + buildWhereClause(conditions)
 
 	// Group by
 	groupBy := " GROUP BY instances.namespace"
@@ -544,37 +489,9 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 // buildDistributionSummaryQuery constructs the SQL query for distribution-level aggregations
 func buildDistributionSummaryQuery(namespaces, vulnStatuses, packageTypes, osNames []string, sortBy, sortOrder string, limit, offset int) (string, string) {
-	// Build package type filter for packages subquery
-	packageTypeFilter := ""
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		packageTypeFilter = "WHERE type IN (" + strings.Join(escapedTypes, ",") + ")"
-	}
-
-	// Build vulnerability filters for vulnerabilities subquery
-	var vulnFilters []string
-	if len(vulnStatuses) > 0 {
-		escapedStatuses := make([]string, len(vulnStatuses))
-		for i, status := range vulnStatuses {
-			escapedStatuses[i] = "'" + strings.ReplaceAll(status, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "fix_status IN ("+strings.Join(escapedStatuses, ",")+")")
-	}
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "package_type IN ("+strings.Join(escapedTypes, ",")+")")
-	}
-
-	vulnStatusFilter := ""
-	if len(vulnFilters) > 0 {
-		vulnStatusFilter = "WHERE " + strings.Join(vulnFilters, " AND ")
-	}
+	// Build subquery filters using helper functions
+	packageTypeFilter := buildPackageTypeFilter(packageTypes)
+	vulnStatusFilter := buildVulnerabilityFilter(vulnStatuses, packageTypes)
 
 	// Base query with subqueries
 	baseQuery := fmt.Sprintf(`
@@ -610,28 +527,13 @@ WHERE status.status = 'completed'
 	var conditions []string
 
 	// Namespace filter
-	if len(namespaces) > 0 {
-		escaped := make([]string, len(namespaces))
-		for i, ns := range namespaces {
-			escaped[i] = "'" + strings.ReplaceAll(ns, "'", "''") + "'"
-		}
-		conditions = append(conditions, "instances.namespace IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("instances.namespace", namespaces))
 
 	// OS name filter
-	if len(osNames) > 0 {
-		escaped := make([]string, len(osNames))
-		for i, os := range osNames {
-			escaped[i] = "'" + strings.ReplaceAll(os, "'", "''") + "'"
-		}
-		conditions = append(conditions, "images.os_name IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("images.os_name", osNames))
 
 	// Add conditions to base query
-	whereClause := baseQuery
-	if len(conditions) > 0 {
-		whereClause += " AND " + strings.Join(conditions, " AND ")
-	}
+	whereClause := baseQuery + buildWhereClause(conditions)
 
 	// Group by
 	groupBy := " GROUP BY images.os_name"

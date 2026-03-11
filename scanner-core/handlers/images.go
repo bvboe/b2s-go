@@ -128,7 +128,7 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		// Handle CSV export
 		if format == "csv" {
-			exportCSV(w, result)
+			exportQueryResultAsCSV(w, result, "images.csv")
 			return
 		}
 
@@ -194,40 +194,9 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
   ) vuln_counts ON images.id = vuln_counts.image_id
   WHERE 1=1`
 
-	// Build package type filter for packages subquery
-	packageTypeFilter := ""
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		packageTypeFilter = "WHERE type IN (" + strings.Join(escapedTypes, ",") + ")"
-	}
-
-	// Build vulnerability filters for vulnerabilities subquery
-	// This subquery needs to apply BOTH fix_status and package_type filters
-	var vulnFilters []string
-
-	if len(vulnStatuses) > 0 {
-		escapedStatuses := make([]string, len(vulnStatuses))
-		for i, status := range vulnStatuses {
-			escapedStatuses[i] = "'" + strings.ReplaceAll(status, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "fix_status IN ("+strings.Join(escapedStatuses, ",")+")")
-	}
-
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "package_type IN ("+strings.Join(escapedTypes, ",")+")")
-	}
-
-	vulnStatusFilter := ""
-	if len(vulnFilters) > 0 {
-		vulnStatusFilter = "WHERE " + strings.Join(vulnFilters, " AND ")
-	}
+	// Build subquery filters using helper functions
+	packageTypeFilter := buildPackageTypeFilter(packageTypes)
+	vulnStatusFilter := buildVulnerabilityFilter(vulnStatuses, packageTypes)
 
 	baseQuery = fmt.Sprintf(baseQuery, packageTypeFilter, vulnStatusFilter)
 
@@ -235,36 +204,18 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	var conditions []string
 
 	// Search filter (image name)
-	if search != "" {
-		escapedSearch := strings.ReplaceAll(search, "'", "''")
-		conditions = append(conditions, fmt.Sprintf("instances.reference LIKE '%%%s%%'", escapedSearch))
-	}
+	conditions = appendCondition(conditions, buildLikeCondition("instances.reference", search))
 
 	// Namespace filter
-	if len(namespaces) > 0 {
-		escaped := make([]string, len(namespaces))
-		for i, ns := range namespaces {
-			escaped[i] = "'" + strings.ReplaceAll(ns, "'", "''") + "'"
-		}
-		conditions = append(conditions, "instances.namespace IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("instances.namespace", namespaces))
 
 	// Note: Vulnerability fix status filter is now applied in the vulnerabilities subquery
 
 	// OS name filter
-	if len(osNames) > 0 {
-		escaped := make([]string, len(osNames))
-		for i, os := range osNames {
-			escaped[i] = "'" + strings.ReplaceAll(os, "'", "''") + "'"
-		}
-		conditions = append(conditions, "images.os_name IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("images.os_name", osNames))
 
 	// Add conditions to base query
-	whereClause := baseQuery
-	if len(conditions) > 0 {
-		whereClause += " AND " + strings.Join(conditions, " AND ")
-	}
+	whereClause := baseQuery + buildWhereClause(conditions)
 
 	// Group by
 	groupBy := " GROUP BY instances.reference, images.digest, images.os_name, status.status"
@@ -394,7 +345,7 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		// Handle CSV export
 		if format == "csv" {
-			exportPodsCSV(w, result)
+			exportQueryResultAsCSV(w, result, "pods.csv")
 			return
 		}
 
@@ -444,74 +395,29 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
   ) vuln_counts ON images.id = vuln_counts.image_id
   WHERE 1=1`
 
-	// Build package type filter for packages subquery
-	packageTypeFilter := ""
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		packageTypeFilter = "WHERE type IN (" + strings.Join(escapedTypes, ",") + ")"
-	}
-
-	// Build vulnerability filters for vulnerabilities subquery
-	var vulnFilters []string
-
-	if len(vulnStatuses) > 0 {
-		escapedStatuses := make([]string, len(vulnStatuses))
-		for i, status := range vulnStatuses {
-			escapedStatuses[i] = "'" + strings.ReplaceAll(status, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "fix_status IN ("+strings.Join(escapedStatuses, ",")+")")
-	}
-
-	if len(packageTypes) > 0 {
-		escapedTypes := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escapedTypes[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		vulnFilters = append(vulnFilters, "package_type IN ("+strings.Join(escapedTypes, ",")+")")
-	}
-
-	vulnStatusFilter := ""
-	if len(vulnFilters) > 0 {
-		vulnStatusFilter = "WHERE " + strings.Join(vulnFilters, " AND ")
-	}
+	// Build subquery filters using helper functions
+	packageTypeFilter := buildPackageTypeFilter(packageTypes)
+	vulnStatusFilter := buildVulnerabilityFilter(vulnStatuses, packageTypes)
 
 	baseQuery = fmt.Sprintf(baseQuery, packageTypeFilter, vulnStatusFilter)
 
 	// Build WHERE conditions
 	var conditions []string
 
-	// Search filter (pod, container, or namespace)
+	// Search filter (pod, container, or namespace) - searches across multiple fields
 	if search != "" {
-		escapedSearch := strings.ReplaceAll(search, "'", "''")
+		escapedSearch := escapeSQL(search)
 		conditions = append(conditions, fmt.Sprintf("(instances.namespace LIKE '%%%s%%' OR instances.pod LIKE '%%%s%%' OR instances.name LIKE '%%%s%%')", escapedSearch, escapedSearch, escapedSearch))
 	}
 
 	// Namespace filter
-	if len(namespaces) > 0 {
-		escaped := make([]string, len(namespaces))
-		for i, ns := range namespaces {
-			escaped[i] = "'" + strings.ReplaceAll(ns, "'", "''") + "'"
-		}
-		conditions = append(conditions, "instances.namespace IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("instances.namespace", namespaces))
 
 	// OS name filter
-	if len(osNames) > 0 {
-		escaped := make([]string, len(osNames))
-		for i, os := range osNames {
-			escaped[i] = "'" + strings.ReplaceAll(os, "'", "''") + "'"
-		}
-		conditions = append(conditions, "images.os_name IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("images.os_name", osNames))
 
 	// Add conditions to base query
-	whereClause := baseQuery
-	if len(conditions) > 0 {
-		whereClause += " AND " + strings.Join(conditions, " AND ")
-	}
+	whereClause := baseQuery + buildWhereClause(conditions)
 
 	// Build count query
 	countQuery := "SELECT COUNT(*) FROM (" +
@@ -576,37 +482,10 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 	return mainQuery, countQuery
 }
 
-// exportCSV exports query results as CSV
-func exportCSV(w http.ResponseWriter, result *database.QueryResult) {
+// exportQueryResultAsCSV exports query results as CSV with the specified filename
+func exportQueryResultAsCSV(w http.ResponseWriter, result *database.QueryResult, filename string) {
 	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=images.csv")
-
-	writer := csv.NewWriter(w)
-	defer writer.Flush()
-
-	// Write headers
-	if err := writer.Write(result.Columns); err != nil {
-		log.Printf("Error writing CSV headers: %v", err)
-		return
-	}
-
-	// Write rows
-	for _, rowMap := range result.Rows {
-		strRow := make([]string, len(result.Columns))
-		for i, col := range result.Columns {
-			strRow[i] = fmt.Sprintf("%v", rowMap[col])
-		}
-		if err := writer.Write(strRow); err != nil {
-			log.Printf("Error writing CSV row: %v", err)
-			return
-		}
-	}
-}
-
-// exportPodsCSV exports pods query results as CSV
-func exportPodsCSV(w http.ResponseWriter, result *database.QueryResult) {
-	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=pods.csv")
+	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
 
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
@@ -653,7 +532,7 @@ func ImageDetailFullHandler(provider ImageQueryProvider) http.HandlerFunc {
 		}
 
 		// Build query to get basic image details
-		escapedDigest := strings.ReplaceAll(digest, "'", "''")
+		escapedDigest := escapeSQL(digest)
 		imageQuery := `
 SELECT
     images.id,
@@ -836,7 +715,7 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 
 		// Handle CSV export
 		if format == "csv" {
-			exportVulnerabilitiesCSV(w, result)
+			exportQueryResultAsCSV(w, result, "vulnerabilities.csv")
 			return
 		}
 
@@ -858,42 +737,21 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 
 // buildImageVulnerabilitiesQuery constructs the SQL query for image vulnerabilities
 func buildImageVulnerabilitiesQuery(digest string, severities, fixStatuses, packageTypes []string, sortBy, sortOrder string, limit, offset int) (string, string) {
-	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+	escapedDigest := escapeSQL(digest)
 
 	// Build WHERE conditions
 	var conditions []string
 
 	// Severity filter
-	if len(severities) > 0 {
-		escaped := make([]string, len(severities))
-		for i, s := range severities {
-			escaped[i] = "'" + strings.ReplaceAll(s, "'", "''") + "'"
-		}
-		conditions = append(conditions, "v.severity IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("v.severity", severities))
 
 	// Fix status filter
-	if len(fixStatuses) > 0 {
-		escaped := make([]string, len(fixStatuses))
-		for i, s := range fixStatuses {
-			escaped[i] = "'" + strings.ReplaceAll(s, "'", "''") + "'"
-		}
-		conditions = append(conditions, "v.fix_status IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("v.fix_status", fixStatuses))
 
 	// Package type filter
-	if len(packageTypes) > 0 {
-		escaped := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escaped[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		conditions = append(conditions, "v.package_type IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("v.package_type", packageTypes))
 
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = " AND " + strings.Join(conditions, " AND ")
-	}
+	whereClause := buildWhereClause(conditions)
 
 	// Base query
 	baseQuery := fmt.Sprintf(`
@@ -1000,36 +858,10 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 	return mainQuery, countQuery
 }
 
-// exportVulnerabilitiesCSV exports vulnerabilities as CSV
-func exportVulnerabilitiesCSV(w http.ResponseWriter, result *database.QueryResult) {
-	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=vulnerabilities.csv")
-
-	writer := csv.NewWriter(w)
-	defer writer.Flush()
-
-	// Write headers
-	if err := writer.Write(result.Columns); err != nil {
-		log.Printf("Error writing CSV headers: %v", err)
-		return
-	}
-
-	// Write rows
-	for _, rowMap := range result.Rows {
-		strRow := make([]string, len(result.Columns))
-		for i, col := range result.Columns {
-			strRow[i] = fmt.Sprintf("%v", rowMap[col])
-		}
-		if err := writer.Write(strRow); err != nil {
-			log.Printf("Error writing CSV row: %v", err)
-			return
-		}
-	}
-}
 
 // exportRawVulnerabilitiesJSON exports the raw Grype vulnerability JSON for an image
 func exportRawVulnerabilitiesJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
-	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+	escapedDigest := escapeSQL(digest)
 	query := `SELECT vulnerabilities FROM images WHERE digest = '` + escapedDigest + `'`
 
 	result, err := provider.ExecuteReadOnlyQuery(query)
@@ -1136,7 +968,7 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		// Handle CSV export
 		if format == "csv" {
-			exportPackagesCSV(w, result)
+			exportQueryResultAsCSV(w, result, "packages.csv")
 			return
 		}
 
@@ -1158,24 +990,15 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 // buildImagePackagesQuery constructs the SQL query for image packages
 func buildImagePackagesQuery(digest string, packageTypes []string, sortBy, sortOrder string, limit, offset int) (string, string) {
-	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+	escapedDigest := escapeSQL(digest)
 
 	// Build WHERE conditions
 	var conditions []string
 
 	// Package type filter
-	if len(packageTypes) > 0 {
-		escaped := make([]string, len(packageTypes))
-		for i, t := range packageTypes {
-			escaped[i] = "'" + strings.ReplaceAll(t, "'", "''") + "'"
-		}
-		conditions = append(conditions, "p.type IN ("+strings.Join(escaped, ",")+")")
-	}
+	conditions = appendCondition(conditions, buildINClause("p.type", packageTypes))
 
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = " AND " + strings.Join(conditions, " AND ")
-	}
+	whereClause := buildWhereClause(conditions)
 
 	// Base query
 	baseQuery := fmt.Sprintf(`
@@ -1232,36 +1055,10 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 	return mainQuery, countQuery
 }
 
-// exportPackagesCSV exports packages as CSV
-func exportPackagesCSV(w http.ResponseWriter, result *database.QueryResult) {
-	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=packages.csv")
-
-	writer := csv.NewWriter(w)
-	defer writer.Flush()
-
-	// Write headers
-	if err := writer.Write(result.Columns); err != nil {
-		log.Printf("Error writing CSV headers: %v", err)
-		return
-	}
-
-	// Write rows
-	for _, rowMap := range result.Rows {
-		strRow := make([]string, len(result.Columns))
-		for i, col := range result.Columns {
-			strRow[i] = fmt.Sprintf("%v", rowMap[col])
-		}
-		if err := writer.Write(strRow); err != nil {
-			log.Printf("Error writing CSV row: %v", err)
-			return
-		}
-	}
-}
 
 // exportRawSBOMJSON exports the raw Syft SBOM JSON for an image
 func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
-	escapedDigest := strings.ReplaceAll(digest, "'", "''")
+	escapedDigest := escapeSQL(digest)
 	query := `SELECT sbom FROM images WHERE digest = '` + escapedDigest + `'`
 
 	result, err := provider.ExecuteReadOnlyQuery(query)

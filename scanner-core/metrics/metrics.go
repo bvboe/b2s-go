@@ -7,6 +7,105 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
+// containerInfo holds common container information used for building hierarchical labels
+type containerInfo struct {
+	NodeName   string
+	Namespace  string
+	Pod        string
+	Name       string
+	Reference  string
+	Digest     string
+	OSName     string
+	Arch       string
+}
+
+// hierarchicalLabels holds the pre-computed hierarchical label values
+type hierarchicalLabels struct {
+	DeploymentUUIDHostName               string
+	DeploymentUUIDNamespace              string
+	DeploymentUUIDNamespaceImage         string
+	DeploymentUUIDNamespaceImageDigest   string
+	DeploymentUUIDNamespacePod           string
+	DeploymentUUIDNamespacePodContainer  string
+}
+
+// buildHierarchicalLabels computes hierarchical labels from deployment UUID and container info
+func buildHierarchicalLabels(deploymentUUID string, info containerInfo) hierarchicalLabels {
+	return hierarchicalLabels{
+		DeploymentUUIDHostName:              fmt.Sprintf("%s.%s", deploymentUUID, info.NodeName),
+		DeploymentUUIDNamespace:             fmt.Sprintf("%s.%s", deploymentUUID, info.Namespace),
+		DeploymentUUIDNamespaceImage:        fmt.Sprintf("%s.%s.%s", deploymentUUID, info.Namespace, info.Reference),
+		DeploymentUUIDNamespaceImageDigest:  fmt.Sprintf("%s.%s.%s", deploymentUUID, info.Namespace, info.Digest),
+		DeploymentUUIDNamespacePod:          fmt.Sprintf("%s.%s.%s", deploymentUUID, info.Namespace, info.Pod),
+		DeploymentUUIDNamespacePodContainer: fmt.Sprintf("%s.%s.%s.%s", deploymentUUID, info.Namespace, info.Pod, info.Name),
+	}
+}
+
+// buildBaseLabels creates the common label map used by container metrics
+func (c *Collector) buildBaseLabels(info containerInfo) map[string]string {
+	hl := buildHierarchicalLabels(c.deploymentUUID, info)
+	return map[string]string{
+		"deployment_uuid":                         c.deploymentUUID,
+		"deployment_name":                         c.deploymentName,
+		"deployment_uuid_host_name":               hl.DeploymentUUIDHostName,
+		"deployment_uuid_namespace":               hl.DeploymentUUIDNamespace,
+		"deployment_uuid_namespace_image":         hl.DeploymentUUIDNamespaceImage,
+		"deployment_uuid_namespace_image_digest":  hl.DeploymentUUIDNamespaceImageDigest,
+		"deployment_uuid_namespace_pod":           hl.DeploymentUUIDNamespacePod,
+		"deployment_uuid_namespace_pod_container": hl.DeploymentUUIDNamespacePodContainer,
+		"host_name":                               info.NodeName,
+		"namespace":                               info.Namespace,
+		"pod":                                     info.Pod,
+		"container":                               info.Name,
+		"distro":                                  info.OSName,
+		"architecture":                            info.Arch,
+		"image_reference":                         info.Reference,
+		"image_digest":                            info.Digest,
+		"instance_type":                           "CONTAINER",
+	}
+}
+
+// buildVulnerabilityLabels creates labels for vulnerability metrics (extends base labels)
+func (c *Collector) buildVulnerabilityLabels(v database.ContainerVulnerability) map[string]string {
+	info := containerInfo{
+		NodeName:  v.NodeName,
+		Namespace: v.Namespace,
+		Pod:       v.Pod,
+		Name:      v.Name,
+		Reference: v.Reference,
+		Digest:    v.Digest,
+		OSName:    v.OSName,
+	}
+	hl := buildHierarchicalLabels(c.deploymentUUID, info)
+	vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
+
+	return map[string]string{
+		"deployment_uuid":                         c.deploymentUUID,
+		"deployment_name":                         c.deploymentName,
+		"deployment_uuid_host_name":               hl.DeploymentUUIDHostName,
+		"deployment_uuid_namespace":               hl.DeploymentUUIDNamespace,
+		"deployment_uuid_namespace_image":         hl.DeploymentUUIDNamespaceImage,
+		"deployment_uuid_namespace_image_digest":  hl.DeploymentUUIDNamespaceImageDigest,
+		"deployment_uuid_namespace_pod":           hl.DeploymentUUIDNamespacePod,
+		"deployment_uuid_namespace_pod_container": hl.DeploymentUUIDNamespacePodContainer,
+		"host_name":                               info.NodeName,
+		"namespace":                               info.Namespace,
+		"pod":                                     info.Pod,
+		"container":                               info.Name,
+		"distro":                                  info.OSName,
+		"image_reference":                         info.Reference,
+		"image_digest":                            info.Digest,
+		"instance_type":                           "CONTAINER",
+		"severity":                                v.Severity,
+		"vulnerability":                           v.CVEID,
+		"vulnerability_id":                        vulnerabilityID,
+		"package_name":                            v.PackageName,
+		"package_version":                         v.PackageVersion,
+		"fix_status":                              v.FixStatus,
+		"fixed_version":                           v.FixedVersion,
+	}
+}
+
 // InfoProvider provides deployment information for metrics labels
 type InfoProvider interface {
 	GetDeploymentName() string // hostname for agent, cluster name for k8s
@@ -192,39 +291,19 @@ func (c *Collector) collectScannedContainerMetrics() (MetricFamily, error) {
 	metrics := make([]MetricPoint, 0, len(containers))
 
 	for _, ctr := range containers {
-		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, ctr.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, ctr.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, ctr.Namespace, ctr.Reference)
-		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, ctr.Namespace, ctr.Digest)
-		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, ctr.Namespace, ctr.Pod)
-		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, ctr.Namespace, ctr.Pod, ctr.Name)
-
+		info := containerInfo{
+			NodeName:  ctr.NodeName,
+			Namespace: ctr.Namespace,
+			Pod:       ctr.Pod,
+			Name:      ctr.Name,
+			Reference: ctr.Reference,
+			Digest:    ctr.Digest,
+			OSName:    ctr.OSName,
+			Arch:      ctr.Architecture,
+		}
 		metrics = append(metrics, MetricPoint{
-			Labels: map[string]string{
-				"deployment_uuid":                         c.deploymentUUID,
-				"deployment_name":                         c.deploymentName,
-				"deployment_uuid_host_name":               deploymentUUIDHostName,
-				"deployment_uuid_namespace":               deploymentUUIDNamespace,
-				"deployment_uuid_namespace_image":         deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
-				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
-				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               ctr.NodeName,
-				"namespace":                               ctr.Namespace,
-				"pod":                                     ctr.Pod,
-				"container":                               ctr.Name,
-				"distro":                                  ctr.OSName,
-				"architecture":                            ctr.Architecture,
-				"image_reference":                         ctr.Reference,
-				"image_digest":                            ctr.Digest,
-				"instance_type":                           "CONTAINER",
-			},
-			Value: 1,
+			Labels: c.buildBaseLabels(info),
+			Value:  1,
 		})
 	}
 
@@ -241,46 +320,9 @@ func (c *Collector) collectVulnerabilityMetrics(vulns []database.ContainerVulner
 	metrics := make([]MetricPoint, 0, len(vulns))
 
 	for _, v := range vulns {
-		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, v.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, v.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Reference)
-		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Digest)
-		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Pod)
-		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Pod, v.Name)
-		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
-
 		metrics = append(metrics, MetricPoint{
-			Labels: map[string]string{
-				"deployment_uuid":                         c.deploymentUUID,
-				"deployment_name":                         c.deploymentName,
-				"deployment_uuid_host_name":               deploymentUUIDHostName,
-				"deployment_uuid_namespace":               deploymentUUIDNamespace,
-				"deployment_uuid_namespace_image":         deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
-				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
-				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               v.NodeName,
-				"namespace":                               v.Namespace,
-				"pod":                                     v.Pod,
-				"container":                               v.Name,
-				"distro":                                  v.OSName,
-				"image_reference":                         v.Reference,
-				"image_digest":                            v.Digest,
-				"instance_type":                           "CONTAINER",
-				"severity":                                v.Severity,
-				"vulnerability":                           v.CVEID,
-				"vulnerability_id":                        vulnerabilityID,
-				"package_name":                            v.PackageName,
-				"package_version":                         v.PackageVersion,
-				"fix_status":                              v.FixStatus,
-				"fixed_version":                           v.FixedVersion,
-			},
-			Value: float64(v.Count),
+			Labels: c.buildVulnerabilityLabels(v),
+			Value:  float64(v.Count),
 		})
 	}
 
@@ -303,46 +345,9 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(vulns []database.Contai
 			continue
 		}
 
-		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, v.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, v.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Reference)
-		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Digest)
-		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Pod)
-		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Pod, v.Name)
-		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
-
 		metrics = append(metrics, MetricPoint{
-			Labels: map[string]string{
-				"deployment_uuid":                         c.deploymentUUID,
-				"deployment_name":                         c.deploymentName,
-				"deployment_uuid_host_name":               deploymentUUIDHostName,
-				"deployment_uuid_namespace":               deploymentUUIDNamespace,
-				"deployment_uuid_namespace_image":         deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
-				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
-				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               v.NodeName,
-				"namespace":                               v.Namespace,
-				"pod":                                     v.Pod,
-				"container":                               v.Name,
-				"distro":                                  v.OSName,
-				"image_reference":                         v.Reference,
-				"image_digest":                            v.Digest,
-				"instance_type":                           "CONTAINER",
-				"severity":                                v.Severity,
-				"vulnerability":                           v.CVEID,
-				"vulnerability_id":                        vulnerabilityID,
-				"package_name":                            v.PackageName,
-				"package_version":                         v.PackageVersion,
-				"fix_status":                              v.FixStatus,
-				"fixed_version":                           v.FixedVersion,
-			},
-			Value: float64(v.KnownExploited * v.Count),
+			Labels: c.buildVulnerabilityLabels(v),
+			Value:  float64(v.KnownExploited * v.Count),
 		})
 	}
 
@@ -360,46 +365,9 @@ func (c *Collector) collectVulnerabilityRiskMetrics(vulns []database.ContainerVu
 	metrics := make([]MetricPoint, 0, len(vulns))
 
 	for _, v := range vulns {
-		// Generate hierarchical labels
-		deploymentUUIDHostName := fmt.Sprintf("%s.%s", c.deploymentUUID, v.NodeName)
-		deploymentUUIDNamespace := fmt.Sprintf("%s.%s", c.deploymentUUID, v.Namespace)
-		deploymentUUIDNamespaceImage := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Reference)
-		deploymentUUIDNamespaceImageDigest := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Digest)
-		deploymentUUIDNamespacePod := fmt.Sprintf("%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Pod)
-		deploymentUUIDNamespacePodContainer := fmt.Sprintf("%s.%s.%s.%s",
-			c.deploymentUUID, v.Namespace, v.Pod, v.Name)
-		vulnerabilityID := fmt.Sprintf("%s.%d", c.deploymentUUID, v.VulnID)
-
 		metrics = append(metrics, MetricPoint{
-			Labels: map[string]string{
-				"deployment_uuid":                         c.deploymentUUID,
-				"deployment_name":                         c.deploymentName,
-				"deployment_uuid_host_name":               deploymentUUIDHostName,
-				"deployment_uuid_namespace":               deploymentUUIDNamespace,
-				"deployment_uuid_namespace_image":         deploymentUUIDNamespaceImage,
-				"deployment_uuid_namespace_image_digest":  deploymentUUIDNamespaceImageDigest,
-				"deployment_uuid_namespace_pod":           deploymentUUIDNamespacePod,
-				"deployment_uuid_namespace_pod_container": deploymentUUIDNamespacePodContainer,
-				"host_name":                               v.NodeName,
-				"namespace":                               v.Namespace,
-				"pod":                                     v.Pod,
-				"container":                               v.Name,
-				"distro":                                  v.OSName,
-				"image_reference":                         v.Reference,
-				"image_digest":                            v.Digest,
-				"instance_type":                           "CONTAINER",
-				"severity":                                v.Severity,
-				"vulnerability":                           v.CVEID,
-				"vulnerability_id":                        vulnerabilityID,
-				"package_name":                            v.PackageName,
-				"package_version":                         v.PackageVersion,
-				"fix_status":                              v.FixStatus,
-				"fixed_version":                           v.FixedVersion,
-			},
-			Value: v.Risk * float64(v.Count),
+			Labels: c.buildVulnerabilityLabels(v),
+			Value:  v.Risk * float64(v.Count),
 		})
 	}
 
