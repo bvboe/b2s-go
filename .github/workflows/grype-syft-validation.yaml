@@ -66,7 +66,7 @@ jobs:
           ${{ runner.os }}-helm-
 
     - name: Build k8s-scan-server image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         file: ./k8s-scan-server/Dockerfile
@@ -79,7 +79,7 @@ jobs:
         load: true
 
     - name: Build pod-scanner image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         file: ./pod-scanner/Dockerfile
