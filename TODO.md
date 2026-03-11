@@ -7,10 +7,6 @@
 - [ ] None currently
 
 ## Backlog
-- [ ] Add integration tests for database migrations with actual data
-  - Migration v25 caused a deadlock bug that only triggered when the database had existing rows
-  - Unit tests with empty/mock data passed, but production crashed (30k+ restarts)
-  - Need tests that populate the database with realistic data before running migrations
 - [ ] Rerun code-simplifier analysis and address suggestions
   - [ ] High priority: Extract shared SQL filter building logic (~200 lines saved)
   - [ ] High priority: Consolidate CSV export functions (~100 lines saved)
@@ -56,6 +52,12 @@
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 
 ## Recently Completed
+- [x] [2026-03-11] Added integration tests for database migrations with realistic data
+  - Created `scanner-core/database/migration_integration_test.go`
+  - Tests populate database with realistic data before running migrations
+  - Includes deadlock timeout detection (30 seconds)
+  - Tests for v25 (architecture), v27 (reference), concurrent access, and large datasets
+  - Addresses the v25 bug that caused 30k+ pod restarts in production
 - [x] [2026-01-18] Fixed grype database timestamp handling issues
   - Added RFC3339 parsing support for grype v6 timestamps in `vulndb/database_updater.go`
   - Fixed stale timestamp issue in `grype/grype.go` by reading actual timestamp from SQLite after loading
