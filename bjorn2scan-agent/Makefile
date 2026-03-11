@@ -32,8 +32,14 @@ build-all: clean ## Build binaries for all platforms (Linux amd64, arm64)
 		output="$(DIST_DIR)/$(BINARY_NAME)-$${GOOS}-$${GOARCH}" ; \
 		echo "Building for $${GOOS}/$${GOARCH}..." ; \
 		GOOS=$${GOOS} GOARCH=$${GOARCH} CGO_ENABLED=0 go build $(LDFLAGS) -o $${output} . ; \
-		tar -czf $(DIST_DIR)/$(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz --transform='s/-$${GOOS}-$${GOARCH}$$//' -C $(DIST_DIR) $(BINARY_NAME)-$${GOOS}-$${GOARCH} ; \
-		(cd $(DIST_DIR) && sha256sum $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz > $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz.sha256) ; \
+		mv $${output} $(DIST_DIR)/$(BINARY_NAME) ; \
+		tar -czf $(DIST_DIR)/$(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz -C $(DIST_DIR) $(BINARY_NAME) ; \
+		rm $(DIST_DIR)/$(BINARY_NAME) ; \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			(cd $(DIST_DIR) && sha256sum $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz > $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz.sha256) ; \
+		else \
+			(cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz > $(BINARY_NAME)-$${GOOS}-$${GOARCH}.tar.gz.sha256) ; \
+		fi ; \
 	done
 	@echo "Build complete! Artifacts in $(DIST_DIR)/"
 	@ls -lh $(DIST_DIR)/
