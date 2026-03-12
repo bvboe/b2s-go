@@ -298,6 +298,8 @@ create_and_push_tag() {
 monitor_workflow() {
     local version=$1
     local tag="v$version"
+    local max_attempts=12  # 12 attempts * 5 seconds = 60 seconds max wait
+    local attempt=0
 
     if ! check_gh_cli; then
         log_info "Skipping workflow monitoring"
@@ -305,16 +307,36 @@ monitor_workflow() {
         return 0
     fi
 
-    log_info "Waiting for workflow to start (this may take a few seconds)..."
-    sleep 5
+    log_info "Waiting for release workflow to start for $tag..."
 
-    # Get the latest release workflow run
-    local run_id=$(gh run list --workflow=release.yaml --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    # Poll for a workflow run that matches our tag
+    local run_id=""
+    while [ -z "$run_id" ] && [ $attempt -lt $max_attempts ]; do
+        attempt=$((attempt + 1))
+        sleep 5
+
+        # Get workflow run that matches our tag (headBranch equals tag name for tag-triggered workflows)
+        run_id=$(gh run list --workflow=release.yaml --limit 5 --json databaseId,headBranch,status \
+            --jq ".[] | select(.headBranch == \"$tag\") | .databaseId" 2>/dev/null | head -1)
+
+        if [ -z "$run_id" ]; then
+            log_info "Waiting for workflow... (attempt $attempt/$max_attempts)"
+        fi
+    done
 
     if [ -z "$run_id" ]; then
-        log_warning "Could not find workflow run"
-        log_info "Check GitHub Actions manually"
-        return 0
+        log_error "No release workflow started for $tag after 60 seconds"
+        log_info "The tag was pushed but GitHub Actions did not trigger the workflow"
+        log_info "Possible causes:"
+        log_info "  - GitHub Actions outage or delay"
+        log_info "  - Workflow file syntax error"
+        log_info "  - Repository workflow permissions"
+        log_info ""
+        log_info "To retry manually:"
+        log_info "  git push origin :refs/tags/$tag && git push origin $tag"
+        log_info ""
+        log_info "Check status at: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions"
+        return 1
     fi
 
     log_info "Release workflow started (Run ID: $run_id)"
