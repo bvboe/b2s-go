@@ -265,7 +265,7 @@
                     throw new Error('Failed to load node status');
                 }
 
-                const nodes = await response.json();
+                const nodes = await response.json() || [];
                 tableBody.innerHTML = '';
 
                 // Count nodes by status

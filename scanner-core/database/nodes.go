@@ -207,7 +207,8 @@ func (db *DB) GetAllNodes() ([]nodes.NodeWithStatus, error) {
 	_ = rows.Close()
 
 	// Now convert rows to NodeWithStatus (which makes additional queries)
-	var result []nodes.NodeWithStatus
+	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
+	result := make([]nodes.NodeWithStatus, 0, len(nodeRows))
 	for _, row := range nodeRows {
 		node, err := db.nodeRowToNodeWithStatus(&row)
 		if err != nil {
@@ -712,7 +713,8 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 	_ = rows.Close()
 
 	// Now convert rows to NodeWithStatus (which makes additional queries)
-	var result []nodes.NodeWithStatus
+	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
+	result := make([]nodes.NodeWithStatus, 0, len(nodeRows))
 	for _, row := range nodeRows {
 		node, err := db.nodeRowToNodeWithStatus(&row)
 		if err != nil {

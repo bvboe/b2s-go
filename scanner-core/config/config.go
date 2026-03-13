@@ -141,8 +141,8 @@ func defaultConfig() *Config {
 		// Metrics staleness - 60 minutes by default
 		MetricsStalenessWindow: 60 * time.Minute,
 
-		// Host scanning - disabled by default
-		HostScanningEnabled:  false,
+		// Host scanning - enabled by default
+		HostScanningEnabled:  true,
 		HostScanningInterval: 24 * time.Hour,
 	}
 }
