@@ -43,8 +43,12 @@
                                     <select id="osNameFilter" name="osName" multiple onchange="onFilterChange()">
                                     </select>
 
-                                    <label for="statusFilter"><b>Scan Status:</b></label>
-                                    <select id="statusFilter" name="status" multiple onchange="onFilterChange()">
+                                    <label for="vulnStatusFilter"><b>Vulnerability Status:</b></label>
+                                    <select id="vulnStatusFilter" name="vulnStatus" multiple onchange="onFilterChange()">
+                                    </select>
+
+                                    <label for="packageTypeFilter"><b>Vulnerable Package Type:</b></label>
+                                    <select id="packageTypeFilter" name="packageType" multiple onchange="onFilterChange()">
                                     </select>
                                 </form>
                             </td>
@@ -127,33 +131,80 @@
         // Override loadFilterOptions for node-specific filters
         async function loadFilterOptions() {
             try {
-                // Load nodes to get unique OS releases and statuses
-                const response = await fetch('/api/nodes');
-                if (!response.ok) throw new Error('Failed to load nodes');
+                // Load filter options from node-specific endpoint
+                const response = await fetch('/api/node-filter-options');
+                if (!response.ok) throw new Error('Failed to load node filter options');
 
-                const nodes = await response.json();
+                const filterData = await response.json();
 
-                // Extract unique OS releases
-                const osReleases = [...new Set(nodes.map(n => n.os_release).filter(Boolean))].sort();
+                // OS Distribution filter
                 const osSelect = document.getElementById('osNameFilter');
+                const osReleases = filterData.osNames || [];
                 osSelect.innerHTML = osReleases.map(os =>
                     `<option value="${escapeHtml(os)}">${escapeHtml(os)}</option>`
                 ).join('');
 
-                // Extract unique statuses
-                const statuses = [...new Set(nodes.map(n => n.status).filter(Boolean))].sort();
-                const statusSelect = document.getElementById('statusFilter');
-                statusSelect.innerHTML = statuses.map(status =>
+                // Vulnerability status filter
+                const vulnStatusSelect = document.getElementById('vulnStatusFilter');
+                const vulnStatuses = filterData.vulnStatuses || ['fixed', 'not-fixed', 'wont-fix', 'unknown'];
+                vulnStatusSelect.innerHTML = vulnStatuses.map(status =>
                     `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
+                ).join('');
+
+                // Package type filter
+                const packageTypeSelect = document.getElementById('packageTypeFilter');
+                const packageTypes = filterData.packageTypes || [];
+                packageTypeSelect.innerHTML = packageTypes.map(type =>
+                    `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
                 ).join('');
 
                 // Initialize custom multiselects
                 nodeMultiselectInstances['osNameFilter'] = new CustomMultiSelect(osSelect, 'All distributions');
-                nodeMultiselectInstances['statusFilter'] = new CustomMultiSelect(statusSelect, 'All statuses');
+                nodeMultiselectInstances['vulnStatusFilter'] = new CustomMultiSelect(vulnStatusSelect, 'All statuses');
+                nodeMultiselectInstances['packageTypeFilter'] = new CustomMultiSelect(packageTypeSelect, 'All types');
+
+                // Apply URL filters after multiselects are initialized
+                applyNodeUrlFilters();
 
             } catch (error) {
                 console.error('Error loading filter options:', error);
             }
+        }
+
+        // Apply URL parameters to node filters
+        function applyNodeUrlFilters() {
+            const urlParams = new URLSearchParams(window.location.search);
+
+            const filterMappings = [
+                { params: ['osName', 'osNames'], filterId: 'osNameFilter' },
+                { params: ['vulnStatus', 'vulnStatuses'], filterId: 'vulnStatusFilter' },
+                { params: ['packageType', 'packageTypes'], filterId: 'packageTypeFilter' }
+            ];
+
+            filterMappings.forEach(mapping => {
+                let values = null;
+                for (const paramName of mapping.params) {
+                    const paramValue = urlParams.get(paramName);
+                    if (paramValue) {
+                        values = paramValue;
+                        break;
+                    }
+                }
+
+                if (values) {
+                    const valueArray = values.split(',').map(v => v.trim()).filter(v => v);
+                    const instance = nodeMultiselectInstances[mapping.filterId];
+                    if (instance) {
+                        valueArray.forEach(value => {
+                            const checkbox = instance.checkboxContainer.querySelector(`input[value="${CSS.escape(value)}"]`);
+                            if (checkbox) {
+                                checkbox.checked = true;
+                            }
+                        });
+                        instance.updateDisplay();
+                    }
+                }
+            });
         }
 
         // Override getSelectedValues for node filters
@@ -173,8 +224,11 @@
             const osNames = getSelectedValues('osNameFilter');
             if (osNames.length) params.append('osNames', osNames.join(','));
 
-            const statuses = getSelectedValues('statusFilter');
-            if (statuses.length) params.append('statuses', statuses.join(','));
+            const vulnStatuses = getSelectedValues('vulnStatusFilter');
+            if (vulnStatuses.length) params.append('vulnStatuses', vulnStatuses.join(','));
+
+            const packageTypes = getSelectedValues('packageTypeFilter');
+            if (packageTypes.length) params.append('packageTypes', packageTypes.join(','));
 
             if (includeFormat) {
                 params.append('format', 'csv');

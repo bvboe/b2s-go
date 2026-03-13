@@ -392,8 +392,8 @@ function renderSBOMTable() {
         // Type
         addCellToRow(row, 'left', pkg.type || '');
 
-        // PURL
-        addCellToRow(row, 'left', pkg.purl || '');
+        // Count (vulnerability count)
+        addCellToRow(row, 'right', formatNumber(pkg.count || 0));
 
         tableBody.appendChild(row);
     });

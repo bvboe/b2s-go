@@ -111,28 +111,25 @@
                     </div>
                 </div>
 
-                <!-- Node Summary Section -->
+                <!-- Node Distribution Summary Section -->
                 <div id="nodeDistroSummary">
-                    <h3>Node Summary</h3>
+                    <h3>Node Distribution Summary</h3>
 
                     <table id="nodeDistributionTable" width="100%" class="listingTable">
                         <thead>
                             <tr>
-                                <th><b>Node Name</b></th>
-                                <th colspan="6"><b>Vulnerabilities</b></th>
-                                <th><b>Total Vulns</b></th>
-                                <th><b>Packages</b></th>
+                                <th rowspan="2"><b>OS Distribution</b></th>
+                                <th rowspan="2"><b># Nodes</b></th>
+                                <th colspan="6"><b>Avg Vulnerabilities per Node</b></th>
+                                <th rowspan="2"><b>Avg Packages</b></th>
                             </tr>
                             <tr>
-                                <th></th>
                                 <th><b>Critical</b></th>
                                 <th><b>High</b></th>
                                 <th><b>Medium</b></th>
                                 <th><b>Low</b></th>
                                 <th><b>Negligible</b></th>
                                 <th><b>Unknown</b></th>
-                                <th></th>
-                                <th></th>
                             </tr>
                         </thead>
                         <tbody id="nodeDistributionTableBody"></tbody>
@@ -607,23 +604,23 @@
             });
         }
 
-        // Load node summary table
+        // Load node distribution summary table
         async function loadNodeDistributionTable() {
             try {
-                const response = await fetch('/api/summary/by-node');
+                const response = await fetch('/api/summary/by-node-distro');
                 if (!response.ok) {
                     // If 404, hide the section (host scanning may be disabled)
                     if (response.status === 404) {
                         document.getElementById('nodeDistroSummary').style.display = 'none';
                         return;
                     }
-                    throw new Error('Failed to load node summary');
+                    throw new Error('Failed to load node distribution summary');
                 }
 
-                const nodes = await response.json();
-                renderNodeDistributionTable(nodes || []);
+                const distributions = await response.json();
+                renderNodeDistributionTable(distributions || []);
             } catch (error) {
-                console.error('Error loading node summary:', error);
+                console.error('Error loading node distribution summary:', error);
                 const tbody = document.getElementById('nodeDistributionTableBody');
                 tbody.innerHTML = '';
                 const row = document.createElement('tr');
@@ -636,12 +633,12 @@
             }
         }
 
-        // Render node summary table
-        function renderNodeDistributionTable(nodes) {
+        // Render node distribution summary table
+        function renderNodeDistributionTable(distributions) {
             const tbody = document.getElementById('nodeDistributionTableBody');
             tbody.innerHTML = '';
 
-            if (nodes.length === 0) {
+            if (distributions.length === 0) {
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
                 cell.innerHTML = 'No data available';
@@ -651,22 +648,22 @@
                 return;
             }
 
-            nodes.forEach(node => {
+            distributions.forEach(dist => {
                 const row = document.createElement('tr');
                 row.classList.add('clickable-row');
                 row.onclick = function() {
-                    window.location.href = 'nodes.html?name=' + encodeURIComponent(node.node_name);
+                    window.location.href = 'nodes.html?osNames=' + encodeURIComponent(dist.os_name);
                 };
 
-                addCellToRow(row, 'left', node.node_name || '');
-                addCellToRow(row, 'right', formatNumber(node.critical || 0));
-                addCellToRow(row, 'right', formatNumber(node.high || 0));
-                addCellToRow(row, 'right', formatNumber(node.medium || 0));
-                addCellToRow(row, 'right', formatNumber(node.low || 0));
-                addCellToRow(row, 'right', formatNumber(node.negligible || 0));
-                addCellToRow(row, 'right', formatNumber(node.unknown || 0));
-                addCellToRow(row, 'right', formatNumber(node.total || 0));
-                addCellToRow(row, 'right', formatNumber(node.package_count || 0));
+                addCellToRow(row, 'left', dist.os_name || 'Unknown');
+                addCellToRow(row, 'right', formatNumber(dist.node_count || 0));
+                addCellToRow(row, 'right', formatAverage(dist.avg_critical));
+                addCellToRow(row, 'right', formatAverage(dist.avg_high));
+                addCellToRow(row, 'right', formatAverage(dist.avg_medium));
+                addCellToRow(row, 'right', formatAverage(dist.avg_low));
+                addCellToRow(row, 'right', formatAverage(dist.avg_negligible));
+                addCellToRow(row, 'right', formatAverage(dist.avg_unknown));
+                addCellToRow(row, 'right', formatAverage(dist.avg_packages));
 
                 tbody.appendChild(row);
             });

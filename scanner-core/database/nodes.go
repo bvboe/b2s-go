@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
@@ -564,10 +565,11 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	return nil
 }
 
-// GetNodePackages retrieves all packages for a node
+// GetNodePackages retrieves all packages for a node with vulnerability counts
 func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 	rows, err := db.conn.Query(`
-		SELECT np.id, np.node_id, np.name, np.version, np.type, np.language, np.purl, np.details
+		SELECT np.id, np.node_id, np.name, np.version, np.type, np.language, np.purl, np.details,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.package_id = np.id) as vuln_count
 		FROM node_packages np
 		JOIN nodes n ON np.node_id = n.id
 		WHERE n.name = ?
@@ -582,7 +584,7 @@ func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 	for rows.Next() {
 		var pkg nodes.NodePackage
 		var language, purl, details sql.NullString
-		err := rows.Scan(&pkg.ID, &pkg.NodeID, &pkg.Name, &pkg.Version, &pkg.Type, &language, &purl, &details)
+		err := rows.Scan(&pkg.ID, &pkg.NodeID, &pkg.Name, &pkg.Version, &pkg.Type, &language, &purl, &details, &pkg.VulnCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan package row: %w", err)
 		}
@@ -644,11 +646,130 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 	return vulns, nil
 }
 
-// GetNodeSummaries returns vulnerability summaries for all nodes
+// NodeSummaryFilters contains filter options for node summary queries
+type NodeSummaryFilters struct {
+	OSNames      []string // Filter by OS release names
+	VulnStatuses []string // Filter vulnerabilities by fix_status (fixed, not-fixed, wont-fix, unknown)
+	PackageTypes []string // Filter vulnerabilities by package type (deb, rpm, apk, etc.)
+}
+
+// GetNodeSummaries returns vulnerability summaries for all nodes (no filtering)
 func (db *DB) GetNodeSummaries() ([]nodes.NodeSummary, error) {
-	rows, err := db.conn.Query(`
+	return db.GetNodeSummariesFiltered(NodeSummaryFilters{})
+}
+
+// GetNodeSummariesFiltered returns vulnerability summaries for nodes with optional filtering
+func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.NodeSummary, error) {
+	// Build the vulnerability filter clause for subqueries
+	vulnFilter := ""
+	var vulnFilterArgs []interface{}
+
+	if len(filters.VulnStatuses) > 0 || len(filters.PackageTypes) > 0 {
+		conditions := []string{}
+
+		if len(filters.VulnStatuses) > 0 {
+			placeholders := make([]string, len(filters.VulnStatuses))
+			for i, status := range filters.VulnStatuses {
+				placeholders[i] = "?"
+				vulnFilterArgs = append(vulnFilterArgs, status)
+			}
+			conditions = append(conditions, "nv.fix_status IN ("+strings.Join(placeholders, ",")+")")
+		}
+
+		if len(filters.PackageTypes) > 0 {
+			placeholders := make([]string, len(filters.PackageTypes))
+			for i, pkgType := range filters.PackageTypes {
+				placeholders[i] = "?"
+				vulnFilterArgs = append(vulnFilterArgs, pkgType)
+			}
+			conditions = append(conditions, "np.type IN ("+strings.Join(placeholders, ",")+")")
+		}
+
+		if len(conditions) > 0 {
+			vulnFilter = " AND " + strings.Join(conditions, " AND ")
+		}
+	}
+
+	// Build node filter clause
+	nodeFilter := ""
+	var nodeFilterArgs []interface{}
+	if len(filters.OSNames) > 0 {
+		placeholders := make([]string, len(filters.OSNames))
+		for i, os := range filters.OSNames {
+			placeholders[i] = "?"
+			nodeFilterArgs = append(nodeFilterArgs, os)
+		}
+		nodeFilter = " WHERE n.os_release IN (" + strings.Join(placeholders, ",") + ")"
+	}
+
+	// Build query with optional package join for vulnerability counts
+	var query string
+	var args []interface{}
+
+	if len(filters.PackageTypes) > 0 {
+		// Need to join with node_packages to filter by package type
+		query = `
 		SELECT
 			n.name,
+			COALESCE(n.os_release, '') as os_release,
+			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.severity = 'Critical'` + vulnFilter + `) as critical,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.severity = 'High'` + vulnFilter + `) as high,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.severity = 'Medium'` + vulnFilter + `) as medium,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.severity = 'Low'` + vulnFilter + `) as low,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.severity = 'Negligible'` + vulnFilter + `) as negligible,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id` + vulnFilter + `) as total
+		FROM nodes n` + nodeFilter + `
+		ORDER BY n.name`
+
+		// Add args for each subquery (7 severity counts + total = 8 subqueries)
+		for i := 0; i < 8; i++ {
+			args = append(args, vulnFilterArgs...)
+		}
+		args = append(args, nodeFilterArgs...)
+	} else if len(filters.VulnStatuses) > 0 {
+		// Only filtering by vuln status, no package join needed
+		query = `
+		SELECT
+			n.name,
+			COALESCE(n.os_release, '') as os_release,
+			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Critical'` + vulnFilter + `) as critical,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'High'` + vulnFilter + `) as high,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Medium'` + vulnFilter + `) as medium,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low'` + vulnFilter + `) as low,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible'` + vulnFilter + `) as negligible,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total
+		FROM nodes n` + nodeFilter + `
+		ORDER BY n.name`
+
+		// Add args for each subquery (7 severity counts + total = 8 subqueries)
+		for i := 0; i < 8; i++ {
+			args = append(args, vulnFilterArgs...)
+		}
+		args = append(args, nodeFilterArgs...)
+	} else {
+		// No vulnerability filtering, use simple query
+		query = `
+		SELECT
+			n.name,
+			COALESCE(n.os_release, '') as os_release,
 			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Critical') as critical,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'High') as high,
@@ -657,21 +778,65 @@ func (db *DB) GetNodeSummaries() ([]nodes.NodeSummary, error) {
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Negligible') as negligible,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')) as unknown,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id) as total
-		FROM nodes n
-		ORDER BY n.name
-	`)
+		FROM nodes n` + nodeFilter + `
+		ORDER BY n.name`
+
+		args = append(args, nodeFilterArgs...)
+	}
+
+	rows, err := db.conn.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query node summaries: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var summaries []nodes.NodeSummary
+	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
+	summaries := make([]nodes.NodeSummary, 0)
 	for rows.Next() {
 		var summary nodes.NodeSummary
-		err := rows.Scan(&summary.NodeName, &summary.PackageCount, &summary.Critical, &summary.High,
+		err := rows.Scan(&summary.NodeName, &summary.OSRelease, &summary.PackageCount, &summary.Critical, &summary.High,
 			&summary.Medium, &summary.Low, &summary.Negligible, &summary.Unknown, &summary.Total)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan summary row: %w", err)
+		}
+		summaries = append(summaries, summary)
+	}
+
+	return summaries, nil
+}
+
+// GetNodeDistributionSummary returns averaged vulnerability counts grouped by OS distribution
+// Only includes nodes with completed scans (status = 'completed')
+func (db *DB) GetNodeDistributionSummary() ([]nodes.NodeDistributionSummary, error) {
+	rows, err := db.conn.Query(`
+		SELECT
+			COALESCE(n.os_release, 'Unknown') as os_name,
+			COUNT(DISTINCT n.id) as node_count,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Critical')), 0) as avg_critical,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'High')), 0) as avg_high,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Medium')), 0) as avg_medium,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low')), 0) as avg_low,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible')), 0) as avg_negligible,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible'))), 0) as avg_unknown,
+			COALESCE(AVG((SELECT COUNT(*) FROM node_packages np WHERE np.node_id = n.id)), 0) as avg_packages
+		FROM nodes n
+		WHERE n.status = 'completed'
+		GROUP BY COALESCE(n.os_release, 'Unknown')
+		ORDER BY node_count DESC, os_name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query node distribution summary: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
+	summaries := make([]nodes.NodeDistributionSummary, 0)
+	for rows.Next() {
+		var summary nodes.NodeDistributionSummary
+		err := rows.Scan(&summary.OSName, &summary.NodeCount, &summary.AvgCritical, &summary.AvgHigh,
+			&summary.AvgMedium, &summary.AvgLow, &summary.AvgNegligible, &summary.AvgUnknown, &summary.AvgPackages)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan distribution summary row: %w", err)
 		}
 		summaries = append(summaries, summary)
 	}
@@ -724,4 +889,73 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 	}
 
 	return result, nil
+}
+
+// NodeFilterOptions contains filter options for node-related pages
+type NodeFilterOptions struct {
+	OSNames      []string `json:"osNames"`
+	VulnStatuses []string `json:"vulnStatuses"`
+	PackageTypes []string `json:"packageTypes"`
+}
+
+// GetNodeFilterOptions returns distinct values for node filter dropdowns
+func (db *DB) GetNodeFilterOptions() (*NodeFilterOptions, error) {
+	options := &NodeFilterOptions{
+		OSNames:      make([]string, 0),
+		VulnStatuses: make([]string, 0),
+		PackageTypes: make([]string, 0),
+	}
+
+	// Get distinct OS releases from nodes
+	osRows, err := db.conn.Query(`
+		SELECT DISTINCT os_release FROM nodes
+		WHERE os_release IS NOT NULL AND os_release != ''
+		ORDER BY os_release
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query OS releases: %w", err)
+	}
+	for osRows.Next() {
+		var osName string
+		if err := osRows.Scan(&osName); err == nil && osName != "" {
+			options.OSNames = append(options.OSNames, osName)
+		}
+	}
+	_ = osRows.Close()
+
+	// Get distinct fix statuses from node vulnerabilities
+	vulnRows, err := db.conn.Query(`
+		SELECT DISTINCT fix_status FROM node_vulnerabilities
+		WHERE fix_status IS NOT NULL AND fix_status != ''
+		ORDER BY fix_status
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query vuln statuses: %w", err)
+	}
+	for vulnRows.Next() {
+		var status string
+		if err := vulnRows.Scan(&status); err == nil && status != "" {
+			options.VulnStatuses = append(options.VulnStatuses, status)
+		}
+	}
+	_ = vulnRows.Close()
+
+	// Get distinct package types from node packages
+	pkgRows, err := db.conn.Query(`
+		SELECT DISTINCT type FROM node_packages
+		WHERE type IS NOT NULL AND type != ''
+		ORDER BY type
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query package types: %w", err)
+	}
+	for pkgRows.Next() {
+		var pkgType string
+		if err := pkgRows.Scan(&pkgType); err == nil && pkgType != "" {
+			options.PackageTypes = append(options.PackageTypes, pkgType)
+		}
+	}
+	_ = pkgRows.Close()
+
+	return options, nil
 }

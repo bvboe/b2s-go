@@ -14,6 +14,8 @@ func RegisterNodeHandlers(mux *http.ServeMux, db *database.DB) {
 	mux.HandleFunc("/api/nodes", ListNodesHandler(db))
 	mux.HandleFunc("/api/nodes/", NodeDetailHandler(db))
 	mux.HandleFunc("/api/summary/by-node", NodeSummaryHandler(db))
+	mux.HandleFunc("/api/summary/by-node-distro", NodeDistributionSummaryHandler(db))
+	mux.HandleFunc("/api/node-filter-options", NodeFilterOptionsHandler(db))
 }
 
 // ListNodesHandler returns a handler that lists all nodes with their scan status
@@ -109,7 +111,24 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// parseCommaSeparated splits a comma-separated string into a slice, filtering empty values
+func parseCommaSeparated(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 // NodeSummaryHandler returns a handler that provides vulnerability summary by node
+// Supports filters: osNames, vulnStatuses, packageTypes (comma-separated)
 func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -117,7 +136,15 @@ func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
-		summaries, err := db.GetNodeSummaries()
+		// Parse filter parameters
+		params := r.URL.Query()
+		filters := database.NodeSummaryFilters{
+			OSNames:      parseCommaSeparated(params.Get("osNames")),
+			VulnStatuses: parseCommaSeparated(params.Get("vulnStatuses")),
+			PackageTypes: parseCommaSeparated(params.Get("packageTypes")),
+		}
+
+		summaries, err := db.GetNodeSummariesFiltered(filters)
 		if err != nil {
 			log.Printf("Error getting node summaries: %v", err)
 			http.Error(w, "Failed to get node summaries", http.StatusInternalServerError)
@@ -127,6 +154,50 @@ func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(summaries); err != nil {
 			log.Printf("Error encoding node summaries response: %v", err)
+		}
+	}
+}
+
+// NodeDistributionSummaryHandler returns a handler that provides averaged vulnerability summary by node OS distribution
+func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		summaries, err := db.GetNodeDistributionSummary()
+		if err != nil {
+			log.Printf("Error getting node distribution summary: %v", err)
+			http.Error(w, "Failed to get node distribution summary", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(summaries); err != nil {
+			log.Printf("Error encoding node distribution summary response: %v", err)
+		}
+	}
+}
+
+// NodeFilterOptionsHandler returns a handler that provides filter options for node-related pages
+func NodeFilterOptionsHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		options, err := db.GetNodeFilterOptions()
+		if err != nil {
+			log.Printf("Error getting node filter options: %v", err)
+			http.Error(w, "Failed to get node filter options", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(options); err != nil {
+			log.Printf("Error encoding node filter options response: %v", err)
 		}
 	}
 }

@@ -61,6 +61,8 @@ type NodePackage struct {
 	PURL string `json:"purl,omitempty"`
 	// Details contains additional package metadata as JSON
 	Details string `json:"details,omitempty"`
+	// VulnCount is the number of vulnerabilities associated with this package
+	VulnCount int `json:"count"`
 }
 
 // NodeVulnerability represents a vulnerability found on a node
@@ -86,6 +88,7 @@ type NodeVulnerability struct {
 // NodeSummary provides aggregated vulnerability counts by severity
 type NodeSummary struct {
 	NodeName     string `json:"node_name"`
+	OSRelease    string `json:"os_release"`
 	PackageCount int    `json:"package_count"`
 	Critical     int    `json:"critical"`
 	High         int    `json:"high"`
@@ -94,4 +97,17 @@ type NodeSummary struct {
 	Negligible   int    `json:"negligible"`
 	Unknown      int    `json:"unknown"`
 	Total        int    `json:"total"`
+}
+
+// NodeDistributionSummary provides averaged vulnerability counts grouped by OS distribution
+type NodeDistributionSummary struct {
+	OSName        string  `json:"os_name"`
+	NodeCount     int     `json:"node_count"`
+	AvgCritical   float64 `json:"avg_critical"`
+	AvgHigh       float64 `json:"avg_high"`
+	AvgMedium     float64 `json:"avg_medium"`
+	AvgLow        float64 `json:"avg_low"`
+	AvgNegligible float64 `json:"avg_negligible"`
+	AvgUnknown    float64 `json:"avg_unknown"`
+	AvgPackages   float64 `json:"avg_packages"`
 }
