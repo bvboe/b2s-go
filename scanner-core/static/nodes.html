@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bjorn2scan - Nodes</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="multi-select-styles.css">
+    <link rel="stylesheet" href="custom-styles.css">
+</head>
+<body>
+    <table width="100%">
+        <tr>
+            <td valign="top">
+                <table id="headerTable">
+                    <thead></thead>
+                    <tbody id="sidebarNav">
+                        <!-- Sidebar navigation will be populated here -->
+                    </tbody>
+                </table>
+            </td>
+            <td width="100%" valign="top">
+                <h1><div id="clusterName">bjorn2scan</div></h1>
+
+                <table style="border-collapse: collapse;" width="100%" id="filterTable">
+                    <thead>
+                        <tr>
+                            <td width="1%" style="cursor: pointer" onclick="toggleFilterVisible()" class="filterSelected" id="filterCell">
+                                <b><div class="filterContainerSelected" id="filterContainer">Filters</div></b>
+                            </td>
+                            <td colspan="1"></td>
+                        </tr>
+                    </thead>
+                    <tbody id="filterDetails">
+                        <tr height="1px">
+                            <td style="border-left: 1px solid black;"/>
+                            <td style="border-top: 1px solid black; border-right: 1px solid black;"/>
+                        </tr>
+                        <tr>
+                            <td colspan="2" class="filterBody">
+                                <form>
+                                    <label for="osNameFilter"><b>OS Distribution:</b></label>
+                                    <select id="osNameFilter" name="osName" multiple onchange="onFilterChange()">
+                                    </select>
+
+                                    <label for="statusFilter"><b>Scan Status:</b></label>
+                                    <select id="statusFilter" name="status" multiple onchange="onFilterChange()">
+                                    </select>
+                                </form>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div style="text-align: right; text-decoration: underline;">
+                    <b><a href="" id="csvlink">Export to CSV</a></b>
+                </div>
+
+                <table id="vulnerabilityTable" width="100%" class="listingTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="sortable" data-sort-field="node_name" onclick="sortByColumn('node_name')"><b>Node Name</b></th>
+                            <th rowspan="2" class="sortable" data-sort-field="os_release" onclick="sortByColumn('os_release')"><b>OS Distribution</b></th>
+                            <th colspan="6"><b>Vulnerabilities</b></th>
+                            <th rowspan="2" class="sortable" data-sort-field="package_count" onclick="sortByColumn('package_count')"><b># Packages</b></th>
+                        </tr>
+                        <tr>
+                            <th class="sortable" data-sort-field="critical" onclick="sortByColumn('critical')"><b>Critical</b></th>
+                            <th class="sortable" data-sort-field="high" onclick="sortByColumn('high')"><b>High</b></th>
+                            <th class="sortable" data-sort-field="medium" onclick="sortByColumn('medium')"><b>Medium</b></th>
+                            <th class="sortable" data-sort-field="low" onclick="sortByColumn('low')"><b>Low</b></th>
+                            <th class="sortable" data-sort-field="negligible" onclick="sortByColumn('negligible')"><b>Negligible</b></th>
+                            <th class="sortable" data-sort-field="unknown" onclick="sortByColumn('unknown')"><b>Unknown</b></th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+
+                <div id="pagination" style="margin: 20px 0; text-align: center;">
+                    <!-- Pagination controls will be inserted here -->
+                </div>
+
+                <div id="app-footer"></div>
+            </td>
+        </tr>
+    </table>
+
+    <script src="shared.js"></script>
+    <script>
+        // Node-specific multiselect instances
+        let nodeMultiselectInstances = {};
+
+        // Page-specific configuration for nodes.html
+        initSharedPage({
+            apiEndpoint: '/api/summary/by-node',
+            dataKey: 'nodes',
+            pageTitle: 'Nodes',
+            currentPageUrl: 'nodes.html',
+            defaultSortBy: 'node_name',
+            columnCount: 9,
+            renderRow: function(row, item) {
+                // Make row clickable to navigate to node detail page
+                row.onclick = function() {
+                    window.location.href = 'node.html?name=' + encodeURIComponent(item.node_name);
+                };
+                row.style.cursor = 'pointer';
+
+                // Add node name
+                addCellToRow(row, 'left', item.node_name || '');
+
+                // Add OS distribution (from summary, may not have this field)
+                addCellToRow(row, 'left', item.os_release || '-');
+
+                // Show vulnerability counts
+                addCellToRow(row, 'right', formatNumber(item.critical));
+                addCellToRow(row, 'right', formatNumber(item.high));
+                addCellToRow(row, 'right', formatNumber(item.medium));
+                addCellToRow(row, 'right', formatNumber(item.low));
+                addCellToRow(row, 'right', formatNumber(item.negligible));
+                addCellToRow(row, 'right', formatNumber(item.unknown));
+
+                // Package count
+                addCellToRow(row, 'right', formatNumber(item.package_count));
+            }
+        });
+
+        // Override loadFilterOptions for node-specific filters
+        async function loadFilterOptions() {
+            try {
+                // Load nodes to get unique OS releases and statuses
+                const response = await fetch('/api/nodes');
+                if (!response.ok) throw new Error('Failed to load nodes');
+
+                const nodes = await response.json();
+
+                // Extract unique OS releases
+                const osReleases = [...new Set(nodes.map(n => n.os_release).filter(Boolean))].sort();
+                const osSelect = document.getElementById('osNameFilter');
+                osSelect.innerHTML = osReleases.map(os =>
+                    `<option value="${escapeHtml(os)}">${escapeHtml(os)}</option>`
+                ).join('');
+
+                // Extract unique statuses
+                const statuses = [...new Set(nodes.map(n => n.status).filter(Boolean))].sort();
+                const statusSelect = document.getElementById('statusFilter');
+                statusSelect.innerHTML = statuses.map(status =>
+                    `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
+                ).join('');
+
+                // Initialize custom multiselects
+                nodeMultiselectInstances['osNameFilter'] = new CustomMultiSelect(osSelect, 'All distributions');
+                nodeMultiselectInstances['statusFilter'] = new CustomMultiSelect(statusSelect, 'All statuses');
+
+            } catch (error) {
+                console.error('Error loading filter options:', error);
+            }
+        }
+
+        // Override getSelectedValues for node filters
+        function getSelectedValues(selectId) {
+            const instance = nodeMultiselectInstances[selectId];
+            return instance ? instance.getSelected() : [];
+        }
+
+        // Override buildQueryParams for node-specific parameters
+        function buildQueryParams(includeFormat = false) {
+            const params = new URLSearchParams();
+            params.append('page', currentPage);
+            params.append('pageSize', includeFormat ? 10000 : pageSize);
+            params.append('sortBy', sortBy);
+            params.append('sortOrder', sortOrder);
+
+            const osNames = getSelectedValues('osNameFilter');
+            if (osNames.length) params.append('osNames', osNames.join(','));
+
+            const statuses = getSelectedValues('statusFilter');
+            if (statuses.length) params.append('statuses', statuses.join(','));
+
+            if (includeFormat) {
+                params.append('format', 'csv');
+            }
+
+            return params;
+        }
+
+        // Override loadDataTable to handle node summary response format
+        async function loadDataTable() {
+            const tableBody = document.querySelector('#vulnerabilityTable tbody');
+
+            try {
+                const params = buildQueryParams(false);
+                const response = await fetch(`${pageConfig.apiEndpoint}?${params}`);
+
+                if (!response.ok) {
+                    throw new Error(`Failed to load data: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                tableBody.innerHTML = '';
+
+                // Node summary endpoint returns array directly, not paginated
+                const items = Array.isArray(data) ? data : (data[pageConfig.dataKey] || []);
+
+                // Client-side sorting
+                items.sort((a, b) => {
+                    let aVal = a[sortBy];
+                    let bVal = b[sortBy];
+
+                    // Handle string vs number comparison
+                    if (typeof aVal === 'string') {
+                        aVal = aVal.toLowerCase();
+                        bVal = (bVal || '').toLowerCase();
+                    }
+
+                    if (aVal < bVal) return sortOrder === 'ASC' ? -1 : 1;
+                    if (aVal > bVal) return sortOrder === 'ASC' ? 1 : -1;
+                    return 0;
+                });
+
+                // Client-side pagination
+                totalItems = items.length;
+                totalPages = Math.ceil(totalItems / pageSize) || 1;
+                const startIndex = (currentPage - 1) * pageSize;
+                const pageItems = items.slice(startIndex, startIndex + pageSize);
+
+                pageItems.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.classList.add('clickable-row');
+                    pageConfig.renderRow(row, item);
+                    tableBody.appendChild(row);
+                });
+
+                renderPagination();
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                tableBody.innerHTML = '';
+                const row = document.createElement('tr');
+                const cell = addCellToRow(row, 'left', 'Error loading data: ' + error.message);
+                cell.colSpan = pageConfig.columnCount;
+                cell.style.color = 'red';
+                tableBody.appendChild(row);
+                renderPagination();
+            }
+        }
+
+        // Load page when DOM is ready
+        document.addEventListener('DOMContentLoaded', initPage);
+    </script>
+</body>
+</html>
