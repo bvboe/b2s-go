@@ -112,10 +112,10 @@ async function loadVulnFilterOptions() {
             `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
         ).join('');
 
-        // Package type filter - load from global filter options if available
+        // Package type filter - load from node filter options
         const packageTypeSelect = document.getElementById('packageTypeFilter');
         try {
-            const response = await fetch('/api/filter-options');
+            const response = await fetch('/api/node-filter-options');
             if (response.ok) {
                 const data = await response.json();
                 const packageTypes = data.packageTypes || ['deb', 'rpm', 'apk', 'python', 'npm', 'go'];
@@ -146,9 +146,9 @@ async function loadSBOMFilterOptions() {
     try {
         const sbomTypeSelect = document.getElementById('sbomTypeFilter');
 
-        // Load from global filter options if available
+        // Load from node filter options
         try {
-            const response = await fetch('/api/filter-options');
+            const response = await fetch('/api/node-filter-options');
             if (response.ok) {
                 const data = await response.json();
                 const types = data.packageTypes || ['deb', 'rpm', 'apk', 'python', 'npm', 'go'];
