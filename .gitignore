@@ -49,3 +49,7 @@ Thumbs.db
 
 # Local files
 dev-local/
+
+# Cross-compiled binaries
+*-amd64
+*-arm64
