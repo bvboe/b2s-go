@@ -24,6 +24,7 @@ import (
 	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
 	"github.com/bvboe/b2s-go/scanner-core/metrics"
+	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 	"github.com/bvboe/b2s-go/scanner-core/scheduler"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
@@ -350,6 +351,22 @@ func main() {
 	// Create pod-scanner client for SBOM routing
 	podScannerClient := podscanner.NewClient()
 
+	// Initialize node manager for host scanning (if enabled)
+	var nodeManager *nodes.Manager
+	if cfg.HostScanningEnabled {
+		log.Println("Host scanning ENABLED - initializing node manager...")
+		nodeManager = nodes.NewManager()
+		nodeManager.SetDatabase(db)
+
+		// Perform initial node sync
+		if err := k8s.SyncInitialNodes(ctx, clientset, nodeManager); err != nil {
+			log.Printf("Warning: failed to sync initial nodes: %v", err)
+		}
+
+		// Start node watcher in background
+		go k8s.WatchNodes(ctx, clientset, nodeManager)
+	}
+
 	// Create SBOM retriever function that uses pod-scanner
 	sbomRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
 		return podScannerClient.GetSBOMFromNode(ctx, clientset, nodeName, image.Digest)
@@ -402,6 +419,17 @@ func main() {
 	// Connect scan queue to manager
 	manager.SetScanQueue(scanQueue)
 
+	// Configure host SBOM retriever and connect node manager (if enabled)
+	if nodeManager != nil {
+		// Create host SBOM retriever that calls pod-scanner on the target node
+		hostSBOMRetriever := func(ctx context.Context, nodeName string) ([]byte, error) {
+			return podScannerClient.GetHostSBOMFromNode(ctx, clientset, nodeName)
+		}
+		scanQueue.SetHostSBOMRetriever(hostSBOMRetriever)
+		nodeManager.SetScanQueue(scanQueue)
+		log.Println("Host scanning configured and ready")
+	}
+
 	// Initialize scheduler for periodic jobs
 	var sched *scheduler.Scheduler
 	if cfg.JobsEnabled {
@@ -421,6 +449,10 @@ func main() {
 				// Connect readiness state so db-updater can mark pod ready after successful DB update
 				// This fixes the case where initial download fails but db-updater succeeds later
 				rescanJob.SetReadinessSetter(dbReadinessState)
+				// Connect node scanning if enabled - nodes will also be rescanned when grype DB updates
+				if cfg.HostScanningEnabled {
+					rescanJob.SetNodeScanning(db, scanQueue)
+				}
 				if err := sched.AddJob(
 					rescanJob,
 					scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
@@ -503,6 +535,12 @@ func main() {
 
 	// Register jobs debug handlers for listing, triggering, and viewing execution history
 	corehandlers.RegisterJobsHandlersWithDB(mux, sched, db)
+
+	// Register node API handlers (if host scanning is enabled)
+	if cfg.HostScanningEnabled {
+		handlers.RegisterNodeHandlers(mux, db)
+		log.Println("Node API endpoints registered: /api/nodes, /api/nodes/{name}, /api/summary/by-node")
+	}
 
 	// Create collector config for metrics
 	collectorConfig := metrics.CollectorConfig{

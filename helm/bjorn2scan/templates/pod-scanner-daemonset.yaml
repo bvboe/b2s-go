@@ -82,6 +82,12 @@ spec:
           readOnly: true
         - name: tmp
           mountPath: /tmp
+        {{- if .Values.scanServer.config.hostScanning.enabled }}
+        # Host filesystem mount for node-level scanning
+        - name: host-root
+          mountPath: /host
+          readOnly: true
+        {{- end }}
       volumes:
       - name: docker-sock
         hostPath:
@@ -106,6 +112,13 @@ spec:
           path: /var/snap/microk8s/common/var/lib/containerd
       - name: tmp
         emptyDir: {}
+      {{- if .Values.scanServer.config.hostScanning.enabled }}
+      # Host filesystem volume for node-level scanning
+      - name: host-root
+        hostPath:
+          path: /
+          type: Directory
+      {{- end }}
       {{- with .Values.podScanner.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

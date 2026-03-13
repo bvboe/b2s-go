@@ -129,12 +129,20 @@ scanServer:
         interval: "30m"   # How often to check for database updates
         timeout: "30m"    # Maximum execution time for rescanning all images
 
-      # Future jobs can be added here:
-      # telemetry:
-      #   enabled: false
-      #   interval: "5m"
-      #   jitter: "2m"
-      #   timeout: "30s"
+    # Host/Node Scanning Configuration
+    # Scans Kubernetes node host filesystems for packages and vulnerabilities
+    hostScanning:
+      enabled: false  # Disabled by default - opt-in feature
+      # Exclusion paths to avoid double-counting container packages
+      # Note: All patterns must start with './', '*/', or '**/'
+      excludePaths:
+        - "**/snapshots/**"            # containerd snapshots
+        - "**/rootfs/**"               # containerd rootfs
+        - "**/overlay2/**"             # docker overlay
+        - "**/var/lib/kubelet/pods/**" # pod volumes
+        - "**/var/lib/containerd/**"   # containerd data
+        - "**/var/lib/docker/**"       # docker data
+        - "**/var/lib/rancher/**"      # k3s/rancher data
 
   # Data persistence
   persistence:

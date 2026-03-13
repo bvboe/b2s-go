@@ -72,6 +72,10 @@ type Config struct {
 
 	// Metrics staleness tracking
 	MetricsStalenessWindow time.Duration // Duration after which metrics are considered stale (default: 60m)
+
+	// Host scanning configuration
+	HostScanningEnabled  bool          // Enable scanning of host/node packages
+	HostScanningInterval time.Duration // Interval for periodic host SBOM regeneration (default: 24h)
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -136,6 +140,10 @@ func defaultConfig() *Config {
 
 		// Metrics staleness - 60 minutes by default
 		MetricsStalenessWindow: 60 * time.Minute,
+
+		// Host scanning - disabled by default
+		HostScanningEnabled:  false,
+		HostScanningInterval: 24 * time.Hour,
 	}
 }
 
@@ -485,6 +493,17 @@ func LoadConfig(path string) (*Config, error) {
 	if stalenessWindowEnv := os.Getenv("METRICS_STALENESS_WINDOW"); stalenessWindowEnv != "" {
 		if duration, err := time.ParseDuration(stalenessWindowEnv); err == nil {
 			cfg.MetricsStalenessWindow = duration
+		}
+	}
+
+	// Host scanning configuration
+	if hostScanningEnabledEnv := os.Getenv("HOST_SCANNING_ENABLED"); hostScanningEnabledEnv != "" {
+		val := strings.ToLower(hostScanningEnabledEnv)
+		cfg.HostScanningEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if hostScanningIntervalEnv := os.Getenv("HOST_SCANNING_INTERVAL"); hostScanningIntervalEnv != "" {
+		if duration, err := time.ParseDuration(hostScanningIntervalEnv); err == nil {
+			cfg.HostScanningInterval = duration
 		}
 	}
 

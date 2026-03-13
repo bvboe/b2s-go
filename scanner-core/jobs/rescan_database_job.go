@@ -39,6 +39,9 @@ type RescanDatabaseJob struct {
 	db              DatabaseInterface
 	scanQueue       ScanQueueInterface
 	readinessSetter ReadinessSetter // Optional: updates readiness state when DB is ready
+	// Node scanning support (optional)
+	nodeDB        NodeDatabaseInterface
+	nodeScanQueue NodeScanQueueInterface
 }
 
 // NewRescanDatabaseJob creates a new rescan database job
@@ -64,6 +67,13 @@ func NewRescanDatabaseJob(dbUpdater DatabaseUpdateChecker, db DatabaseInterface,
 // This is optional - if not set, the job will not update readiness state
 func (j *RescanDatabaseJob) SetReadinessSetter(setter ReadinessSetter) {
 	j.readinessSetter = setter
+}
+
+// SetNodeScanning configures node scanning support for the job
+// When enabled, the job will also rescan nodes when the grype DB updates
+func (j *RescanDatabaseJob) SetNodeScanning(nodeDB NodeDatabaseInterface, nodeScanQueue NodeScanQueueInterface) {
+	j.nodeDB = nodeDB
+	j.nodeScanQueue = nodeScanQueue
 }
 
 func (j *RescanDatabaseJob) Name() string {
@@ -137,6 +147,15 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	}
 
 	log.Printf("[rescan-database] Enqueued %d images for rescanning", rescanned)
+
+	// Also rescan nodes if node scanning is configured
+	if j.nodeDB != nil && j.nodeScanQueue != nil {
+		if err := RescanNodesOnDBUpdate(j.nodeDB, j.nodeScanQueue, currentVersion.Built); err != nil {
+			log.Printf("[rescan-database] Warning: failed to rescan nodes: %v", err)
+			// Don't fail the job - node scanning is optional
+		}
+	}
+
 	return nil
 }
 

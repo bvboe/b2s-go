@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
 	"github.com/bvboe/b2s-go/scanner-core/metrics"
+	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 	"github.com/bvboe/b2s-go/scanner-core/scheduler"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
@@ -44,8 +46,9 @@ type InfoResponse struct {
 }
 
 type AgentInfo struct {
-	port         string
-	webUIEnabled bool
+	port               string
+	webUIEnabled       bool
+	hostScanningEnabled bool
 	// Cached values computed at startup
 	deploymentIP string
 	consoleURL   string
@@ -53,10 +56,11 @@ type AgentInfo struct {
 	grypeDBStatusGetter func() string
 }
 
-func NewAgentInfo(port string, webUIEnabled bool) *AgentInfo {
+func NewAgentInfo(port string, webUIEnabled bool, hostScanningEnabled bool) *AgentInfo {
 	info := &AgentInfo{
-		port:         port,
-		webUIEnabled: webUIEnabled,
+		port:               port,
+		webUIEnabled:       webUIEnabled,
+		hostScanningEnabled: hostScanningEnabled,
 	}
 
 	// Cache deployment IP at startup
@@ -114,8 +118,7 @@ func (a *AgentInfo) GetScanContainers() bool {
 }
 
 func (a *AgentInfo) GetScanNodes() bool {
-	// Agent does not scan nodes
-	return false
+	return a.hostScanningEnabled
 }
 
 // detectOutboundIP determines the primary outbound IP address.
@@ -345,6 +348,68 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Configure host scanning if enabled
+	if cfg.HostScanningEnabled {
+		log.Println("Host scanning enabled, configuring host SBOM retriever")
+
+		// Create host SBOM retriever that uses syft to scan local filesystem
+		hostSBOMRetriever := func(ctx context.Context, nodeName string) ([]byte, error) {
+			return syft.GenerateHostSBOM(ctx)
+		}
+		scanQueue.SetHostSBOMRetriever(hostSBOMRetriever)
+
+		// Get hostname for node name
+		hostname, err := os.Hostname()
+		if err != nil {
+			hostname = "localhost"
+		}
+
+		// Add this host as a node and trigger initial scan
+		go func() {
+			// Wait a moment for grype DB to initialize
+			time.Sleep(5 * time.Second)
+
+			// Create node entry if it doesn't exist
+			nodeInfo := nodes.Node{
+				Name:     hostname,
+				Hostname: hostname,
+			}
+
+			// Try to get OS info
+			if data, err := os.ReadFile("/etc/os-release"); err == nil {
+				lines := string(data)
+				for _, line := range strings.Split(lines, "\n") {
+					if strings.HasPrefix(line, "PRETTY_NAME=") {
+						nodeInfo.OSRelease = strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), "\"")
+						break
+					}
+				}
+			}
+
+			// Get kernel version
+			if data, err := os.ReadFile("/proc/version"); err == nil {
+				parts := strings.Fields(string(data))
+				if len(parts) >= 3 {
+					nodeInfo.KernelVersion = parts[2]
+				}
+			}
+
+			// Get architecture
+			nodeInfo.Architecture = runtime.GOARCH
+
+			// AddNode returns (isNew, error) - we don't care if it already exists
+			if _, err := db.AddNode(nodeInfo); err != nil {
+				log.Printf("Error creating node entry: %v", err)
+				return
+			}
+
+			log.Printf("Host node registered: %s (%s, %s)", hostname, nodeInfo.OSRelease, nodeInfo.Architecture)
+
+			// Enqueue initial host scan
+			scanQueue.EnqueueHostScan(hostname)
+		}()
+	}
+
 	// Check if Docker is available and start watcher
 	if docker.IsDockerAvailable() {
 		log.Println("Docker detected, starting container watcher")
@@ -456,7 +521,7 @@ func main() {
 	}
 
 	// Setup HTTP server
-	infoProvider := NewAgentInfo(cfg.Port, cfg.WebUIEnabled)
+	infoProvider := NewAgentInfo(cfg.Port, cfg.WebUIEnabled, cfg.HostScanningEnabled)
 
 	// Wire up grype database status getter for metrics
 	// Uses GetCurrentVersion() which returns cached in-memory value (fast)
@@ -477,6 +542,12 @@ func main() {
 	// Register static handlers only if web UI is enabled
 	if cfg.WebUIEnabled {
 		handlers.RegisterStaticHandlers(mux)
+	}
+
+	// Register node handlers if host scanning is enabled
+	if cfg.HostScanningEnabled {
+		handlers.RegisterNodeHandlers(mux, db)
+		log.Println("Node API endpoints registered: /api/nodes, /api/nodes/{name}, /api/summary/by-node")
 	}
 
 	// Register updater API endpoints if updater is initialized

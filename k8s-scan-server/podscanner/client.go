@@ -188,3 +188,83 @@ func (c *Client) WaitForPodScannerReady(ctx context.Context, clientset kubernete
 		}
 	}
 }
+
+// GetHostSBOMFromNode requests host SBOM generation from pod-scanner on a specific node
+// This scans the host filesystem (mounted at /host in pod-scanner) for packages
+// Waits for pod-scanner to become available if it's scheduled but not yet ready
+func (c *Client) GetHostSBOMFromNode(ctx context.Context, clientset kubernetes.Interface, nodeName string) ([]byte, error) {
+	// Try to find running pod-scanner
+	pod, err := c.findPodScannerPod(ctx, clientset, nodeName)
+	if err != nil {
+		// Pod-scanner not running, check if we should wait
+		log.Printf("Pod-scanner not immediately available on node %s: %v", nodeName, err)
+
+		// Check if pod-scanner is scheduled (but not ready yet)
+		scheduled, checkErr := c.IsPodScannerScheduledOnNode(ctx, clientset, nodeName)
+		if checkErr != nil {
+			return nil, fmt.Errorf("failed to check if pod-scanner is scheduled: %w", checkErr)
+		}
+
+		if scheduled {
+			// Pod-scanner is scheduled, wait for it to become ready
+			log.Printf("Pod-scanner is scheduled on node %s but not ready, waiting...", nodeName)
+			waitErr := c.WaitForPodScannerReady(ctx, clientset, nodeName, 2*time.Minute)
+			if waitErr != nil {
+				return nil, fmt.Errorf("pod-scanner did not become ready: %w", waitErr)
+			}
+
+			// Try to find pod again after waiting
+			pod, err = c.findPodScannerPod(ctx, clientset, nodeName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find pod-scanner after waiting: %w", err)
+			}
+		} else {
+			// Not scheduled - DaemonSet won't run on this node (due to taints, node selectors, etc.)
+			log.Printf("No pod-scanner scheduled on node %s, skipping host scan", nodeName)
+			return nil, fmt.Errorf("no pod-scanner scheduled on node %s (DaemonSet not configured to run on this node)", nodeName)
+		}
+	}
+
+	// Build URL to pod-scanner's host SBOM endpoint
+	url := fmt.Sprintf("http://%s:8080/host-sbom", pod.Status.PodIP)
+	log.Printf("Requesting host SBOM from pod-scanner: %s (node=%s)", url, nodeName)
+
+	// Create HTTP request with context
+	// Use a longer timeout for host scans (they take longer than container image scans)
+	hostCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(hostCtx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add node name header for logging on the pod-scanner side
+	req.Header.Set("X-Node-Name", nodeName)
+
+	// Send request to pod-scanner
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request host SBOM from pod-scanner: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close response body: %v", closeErr)
+		}
+	}()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("pod-scanner returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read host SBOM data
+	sbomData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read host SBOM response: %w", err)
+	}
+
+	log.Printf("Successfully received host SBOM from pod-scanner (node=%s, size=%d bytes)", nodeName, len(sbomData))
+	return sbomData, nil
+}

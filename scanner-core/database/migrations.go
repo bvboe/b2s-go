@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 29
+const currentSchemaVersion = 30
 
 type migration struct {
 	version int
@@ -160,6 +160,11 @@ var migrations = []migration{
 		version: 29,
 		name:    "rename_tables_to_match_docker_k8s_terminology",
 		up:      migrateToV29,
+	},
+	{
+		version: 30,
+		name:    "add_nodes_tables",
+		up:      migrateToV30,
 	},
 }
 
@@ -2015,6 +2020,103 @@ func migrateToV29(conn *sql.DB) error {
 	log.Println("  - container_images → images")
 	log.Println("  - container_instances → containers")
 	log.Println("  - containers.container → containers.name")
+	return nil
+}
+
+// migrateToV30 adds nodes, node_packages, and node_vulnerabilities tables
+// This enables host-level vulnerability scanning for Kubernetes nodes
+func migrateToV30(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v30: Creating nodes tables for host-level scanning...")
+
+	// Step 1: Create nodes table
+	_, err = tx.Exec(`
+		CREATE TABLE nodes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT UNIQUE NOT NULL,
+			hostname TEXT,
+			os_release TEXT,
+			kernel_version TEXT,
+			architecture TEXT,
+			container_runtime TEXT,
+			kubelet_version TEXT,
+			status TEXT DEFAULT 'pending',
+			status_error TEXT,
+			sbom_scanned_at DATETIME,
+			vulns_scanned_at DATETIME,
+			grype_db_built TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create nodes table: %w", err)
+	}
+
+	// Step 2: Create node_packages table
+	_, err = tx.Exec(`
+		CREATE TABLE node_packages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id INTEGER NOT NULL REFERENCES nodes(id),
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			type TEXT NOT NULL,
+			language TEXT,
+			purl TEXT,
+			details TEXT,
+			UNIQUE(node_id, name, version, type)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_packages table: %w", err)
+	}
+
+	// Step 3: Create node_vulnerabilities table
+	_, err = tx.Exec(`
+		CREATE TABLE node_vulnerabilities (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id INTEGER NOT NULL REFERENCES nodes(id),
+			package_id INTEGER NOT NULL REFERENCES node_packages(id),
+			cve_id TEXT NOT NULL,
+			severity TEXT NOT NULL,
+			score REAL,
+			fix_status TEXT,
+			fix_version TEXT,
+			known_exploited BOOLEAN DEFAULT FALSE,
+			details TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerabilities table: %w", err)
+	}
+
+	// Step 4: Create indexes for efficient queries
+	_, err = tx.Exec(`
+		CREATE INDEX idx_nodes_status ON nodes(status);
+		CREATE INDEX idx_node_packages_node ON node_packages(node_id);
+		CREATE INDEX idx_node_packages_name ON node_packages(name);
+		CREATE INDEX idx_node_vulnerabilities_node ON node_vulnerabilities(node_id);
+		CREATE INDEX idx_node_vulnerabilities_cve ON node_vulnerabilities(cve_id);
+		CREATE INDEX idx_node_vulnerabilities_severity ON node_vulnerabilities(severity);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v30: Successfully created nodes tables")
+	log.Println("  - nodes: Tracks Kubernetes nodes with OS/kernel info")
+	log.Println("  - node_packages: Packages installed on each node")
+	log.Println("  - node_vulnerabilities: Vulnerabilities found on nodes")
 	return nil
 }
 

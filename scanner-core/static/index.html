@@ -22,13 +22,23 @@
             <td width="100%" valign="top">
                 <h1><div id="clusterName">bjorn2scan</div></h1>
 
-                <!-- Scan Status Widget -->
-                <div id="containerScanStatus">
-                    <h3>Container Scan Status</h3>
-                    <table id="containerScanStatusTable" class="listingTable">
-                        <thead></thead>
-                        <tbody></tbody>
-                    </table>
+                <!-- Scan Status Widgets -->
+                <div style="display: flex; gap: 40px; flex-wrap: wrap;">
+                    <div id="containerScanStatus">
+                        <h3>Container Scan Status</h3>
+                        <table id="containerScanStatusTable" class="listingTable">
+                            <thead></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div id="nodeScanStatus">
+                        <h3>Node Scan Status</h3>
+                        <table id="nodeScanStatusTable" class="listingTable">
+                            <thead></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                 </div>
                 <br/>
 
@@ -101,6 +111,34 @@
                     </div>
                 </div>
 
+                <!-- Node Summary Section -->
+                <div id="nodeDistroSummary">
+                    <h3>Node Summary</h3>
+
+                    <table id="nodeDistributionTable" width="100%" class="listingTable">
+                        <thead>
+                            <tr>
+                                <th><b>Node Name</b></th>
+                                <th colspan="6"><b>Vulnerabilities</b></th>
+                                <th><b>Total Vulns</b></th>
+                                <th><b>Packages</b></th>
+                            </tr>
+                            <tr>
+                                <th></th>
+                                <th><b>Critical</b></th>
+                                <th><b>High</b></th>
+                                <th><b>Medium</b></th>
+                                <th><b>Low</b></th>
+                                <th><b>Negligible</b></th>
+                                <th><b>Unknown</b></th>
+                                <th></th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="nodeDistributionTableBody"></tbody>
+                    </table>
+                </div>
+
                 <div id="app-footer"></div>
             </td>
         </tr>
@@ -130,6 +168,7 @@
             pageSize: 100
         };
 
+
         // Load all data on page init
         async function initPage() {
             try {
@@ -150,8 +189,10 @@
                 // Load all widgets
                 await Promise.all([
                     loadScanStatusWidget(),
+                    loadNodeScanStatusWidget(),
                     loadNamespaceTable(),
-                    loadDistributionTable()
+                    loadDistributionTable(),
+                    loadNodeDistributionTable()
                 ]);
             } catch (error) {
                 console.error('Error initializing page:', error);
@@ -197,6 +238,80 @@
                 }
             } catch (error) {
                 console.error('Error loading scan status:', error);
+                tableBody.innerHTML = '';
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = '⚠️ Error loading data: ' + error.message;
+                cell.colSpan = 2;
+                cell.style.color = 'red';
+                row.appendChild(cell);
+                tableBody.appendChild(row);
+            }
+        }
+
+        // Load node scan status widget
+        async function loadNodeScanStatusWidget() {
+            const tableBody = document.querySelector('#nodeScanStatusTable tbody');
+
+            try {
+                const response = await fetch('/api/nodes');
+                if (!response.ok) {
+                    // If 404 or other error, hide the widget (host scanning may be disabled)
+                    if (response.status === 404) {
+                        document.getElementById('nodeScanStatus').style.display = 'none';
+                        document.getElementById('nodeDistroSummary').style.display = 'none';
+                        return;
+                    }
+                    throw new Error('Failed to load node status');
+                }
+
+                const nodes = await response.json();
+                tableBody.innerHTML = '';
+
+                // Count nodes by status
+                const statusCounts = {};
+                nodes.forEach(node => {
+                    const status = node.status || 'unknown';
+                    statusCounts[status] = (statusCounts[status] || 0) + 1;
+                });
+
+                const statusDescriptions = {
+                    'completed': 'Scanned',
+                    'scanning': 'Scanning',
+                    'pending': 'Pending',
+                    'error': 'Error',
+                    'unknown': 'Unknown'
+                };
+
+                // Display status counts
+                const statusOrder = ['completed', 'scanning', 'pending', 'error', 'unknown'];
+                statusOrder.forEach(status => {
+                    const count = statusCounts[status] || 0;
+                    if (count > 0) {
+                        const row = document.createElement('tr');
+                        const statusCell = document.createElement('td');
+                        statusCell.innerHTML = '<b>' + escapeHtml(statusDescriptions[status] || status) + '</b>';
+                        row.appendChild(statusCell);
+
+                        const countCell = document.createElement('td');
+                        countCell.innerHTML = formatNumber(count);
+                        countCell.style.textAlign = 'right';
+                        row.appendChild(countCell);
+
+                        tableBody.appendChild(row);
+                    }
+                });
+
+                if (nodes.length === 0) {
+                    const row = document.createElement('tr');
+                    const cell = document.createElement('td');
+                    cell.innerHTML = 'No nodes detected';
+                    cell.colSpan = 2;
+                    row.appendChild(cell);
+                    tableBody.appendChild(row);
+                }
+            } catch (error) {
+                console.error('Error loading node scan status:', error);
                 tableBody.innerHTML = '';
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
@@ -492,6 +607,71 @@
             });
         }
 
+        // Load node summary table
+        async function loadNodeDistributionTable() {
+            try {
+                const response = await fetch('/api/summary/by-node');
+                if (!response.ok) {
+                    // If 404, hide the section (host scanning may be disabled)
+                    if (response.status === 404) {
+                        document.getElementById('nodeDistroSummary').style.display = 'none';
+                        return;
+                    }
+                    throw new Error('Failed to load node summary');
+                }
+
+                const nodes = await response.json();
+                renderNodeDistributionTable(nodes || []);
+            } catch (error) {
+                console.error('Error loading node summary:', error);
+                const tbody = document.getElementById('nodeDistributionTableBody');
+                tbody.innerHTML = '';
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = '⚠️ Error loading data: ' + error.message;
+                cell.colSpan = 9;
+                cell.style.color = 'red';
+                row.appendChild(cell);
+                tbody.appendChild(row);
+            }
+        }
+
+        // Render node summary table
+        function renderNodeDistributionTable(nodes) {
+            const tbody = document.getElementById('nodeDistributionTableBody');
+            tbody.innerHTML = '';
+
+            if (nodes.length === 0) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.innerHTML = 'No data available';
+                cell.colSpan = 9;
+                row.appendChild(cell);
+                tbody.appendChild(row);
+                return;
+            }
+
+            nodes.forEach(node => {
+                const row = document.createElement('tr');
+                row.classList.add('clickable-row');
+                row.onclick = function() {
+                    window.location.href = 'nodes.html?name=' + encodeURIComponent(node.node_name);
+                };
+
+                addCellToRow(row, 'left', node.node_name || '');
+                addCellToRow(row, 'right', formatNumber(node.critical || 0));
+                addCellToRow(row, 'right', formatNumber(node.high || 0));
+                addCellToRow(row, 'right', formatNumber(node.medium || 0));
+                addCellToRow(row, 'right', formatNumber(node.low || 0));
+                addCellToRow(row, 'right', formatNumber(node.negligible || 0));
+                addCellToRow(row, 'right', formatNumber(node.unknown || 0));
+                addCellToRow(row, 'right', formatNumber(node.total || 0));
+                addCellToRow(row, 'right', formatNumber(node.package_count || 0));
+
+                tbody.appendChild(row);
+            });
+        }
+
         // Build query parameters
         function buildQueryParams(additionalParams = {}) {
             const params = new URLSearchParams();
@@ -536,8 +716,10 @@
                     // Reload all tables
                     await Promise.all([
                         loadScanStatusWidget(),
+                        loadNodeScanStatusWidget(),
                         loadNamespaceTable(),
-                        loadDistributionTable()
+                        loadDistributionTable(),
+                        loadNodeDistributionTable()
                     ]);
                 }
             } catch (error) {

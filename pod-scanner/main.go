@@ -71,7 +71,12 @@ func main() {
 	http.HandleFunc("/info", infoHandler)
 	http.HandleFunc("/sbom/", handlers.SBOMHandler(runtimeMgr))
 
+	// Register host SBOM endpoint for host-level scanning
+	// This scans the host filesystem (mounted at /host) for packages
+	hostSBOMCfg := handlers.DefaultHostSBOMConfig()
+	http.HandleFunc("/host-sbom", handlers.HostSBOMHandler(hostSBOMCfg))
+
 	log.Printf("pod-scanner v%s starting on port %s (node: %s)", version, port, os.Getenv("NODE_NAME"))
-	log.Printf("Endpoints: /health, /info, /sbom/{digest}")
+	log.Printf("Endpoints: /health, /info, /sbom/{digest}, /host-sbom")
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
