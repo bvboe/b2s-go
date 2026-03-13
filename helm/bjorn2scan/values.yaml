@@ -132,7 +132,7 @@ scanServer:
     # Host/Node Scanning Configuration
     # Scans Kubernetes node host filesystems for packages and vulnerabilities
     hostScanning:
-      enabled: false  # Disabled by default - opt-in feature
+      enabled: true  # Enable host/node scanning
       # Exclusion paths to avoid double-counting container packages
       # Note: All patterns must start with './', '*/', or '**/'
       excludePaths:

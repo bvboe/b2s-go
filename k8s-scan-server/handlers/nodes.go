@@ -80,11 +80,17 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 		switch subResource {
 		case "":
 			// GET /api/nodes/{name} - Get node details
-			result, err = db.GetNode(nodeName)
-			if result == nil && err == nil {
+			node, getErr := db.GetNode(nodeName)
+			if getErr != nil {
+				log.Printf("Error getting node %s: %v", nodeName, getErr)
+				http.Error(w, "Failed to get node", http.StatusInternalServerError)
+				return
+			}
+			if node == nil {
 				http.Error(w, "Node not found", http.StatusNotFound)
 				return
 			}
+			result = node
 
 		case "packages":
 			// GET /api/nodes/{name}/packages - Get node packages
