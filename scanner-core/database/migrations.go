@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 30
+const currentSchemaVersion = 31
 
 type migration struct {
 	version int
@@ -165,6 +165,11 @@ var migrations = []migration{
 		version: 30,
 		name:    "add_nodes_tables",
 		up:      migrateToV30,
+	},
+	{
+		version: 31,
+		name:    "add_node_performance_indexes",
+		up:      migrateToV31,
 	},
 }
 
@@ -2117,6 +2122,66 @@ func migrateToV30(conn *sql.DB) error {
 	log.Println("  - nodes: Tracks Kubernetes nodes with OS/kernel info")
 	log.Println("  - node_packages: Packages installed on each node")
 	log.Println("  - node_vulnerabilities: Vulnerabilities found on nodes")
+	return nil
+}
+
+// migrateToV31 adds performance indexes for node queries
+// Critical: idx_node_vulnerabilities_package is required for fast SBOM view (package vulnerability counts)
+func migrateToV31(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	log.Println("Migration v31: Adding performance indexes for node queries...")
+
+	// Critical index: package_id for counting vulnerabilities per package in SBOM view
+	// Without this index, GetNodePackages() takes 50+ seconds with ~1000 packages and ~30000 vulns
+	log.Println("Migration v31: Creating index on node_vulnerabilities(package_id)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_package ON node_vulnerabilities(package_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerabilities package_id index: %w", err)
+	}
+
+	// Composite index for efficient severity counts per node (used in summary queries)
+	log.Println("Migration v31: Creating composite index on node_vulnerabilities(node_id, severity)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_node_severity ON node_vulnerabilities(node_id, severity)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerabilities node_severity composite index: %w", err)
+	}
+
+	// Index for fix_status filtering in node summary queries
+	log.Println("Migration v31: Creating index on node_vulnerabilities(fix_status)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_fix_status ON node_vulnerabilities(fix_status)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerabilities fix_status index: %w", err)
+	}
+
+	// Index for package type filtering
+	log.Println("Migration v31: Creating index on node_packages(type)...")
+	_, err = tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_node_packages_type ON node_packages(type)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_packages type index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v31: Successfully added performance indexes for node queries")
+	log.Println("  - node_vulnerabilities(package_id): Critical for SBOM view performance")
+	log.Println("  - node_vulnerabilities(node_id, severity): Optimizes summary counts")
+	log.Println("  - node_vulnerabilities(fix_status): Enables fast fix status filtering")
+	log.Println("  - node_packages(type): Enables fast package type filtering")
 	return nil
 }
 

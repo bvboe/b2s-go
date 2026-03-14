@@ -274,14 +274,18 @@
 
                 const statusDescriptions = {
                     'completed': 'Scanned',
+                    'scanning_vulnerabilities': 'Scanning Vulnerabilities',
+                    'generating_sbom': 'Generating SBOM',
                     'scanning': 'Scanning',
                     'pending': 'Pending',
+                    'sbom_failed': 'SBOM Failed',
+                    'vuln_scan_failed': 'Vuln Scan Failed',
                     'error': 'Error',
                     'unknown': 'Unknown'
                 };
 
                 // Display status counts
-                const statusOrder = ['completed', 'scanning', 'pending', 'error', 'unknown'];
+                const statusOrder = ['completed', 'scanning_vulnerabilities', 'generating_sbom', 'scanning', 'pending', 'sbom_failed', 'vuln_scan_failed', 'error', 'unknown'];
                 statusOrder.forEach(status => {
                     const count = statusCounts[status] || 0;
                     if (count > 0) {

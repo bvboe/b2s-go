@@ -580,7 +580,7 @@ func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
-	var packages []nodes.NodePackage
+	packages := []nodes.NodePackage{} // Initialize to empty slice, not nil (JSON: [] not null)
 	for rows.Next() {
 		var pkg nodes.NodePackage
 		var language, purl, details sql.NullString
@@ -618,7 +618,7 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 	}
 	defer func() { _ = rows.Close() }()
 
-	var vulns []nodes.NodeVulnerability
+	vulns := []nodes.NodeVulnerability{} // Initialize to empty slice, not nil (JSON: [] not null)
 	for rows.Next() {
 		var vuln nodes.NodeVulnerability
 		var score sql.NullFloat64

@@ -193,8 +193,12 @@ async function loadVulnerabilitiesTable(nodeName) {
 
         let data = await response.json();
 
-        // Handle both array and paginated response
-        vulnState.allData = Array.isArray(data) ? data : (data.vulnerabilities || []);
+        // Handle null, array, and paginated response
+        if (data === null) {
+            vulnState.allData = [];
+        } else {
+            vulnState.allData = Array.isArray(data) ? data : (data.vulnerabilities || []);
+        }
 
         // Enrich with package info if needed
         await enrichVulnerabilitiesWithPackages(nodeName);
@@ -220,6 +224,8 @@ async function enrichVulnerabilitiesWithPackages(nodeName) {
         if (!response.ok) return;
 
         const packages = await response.json();
+        if (packages === null) return; // No packages yet
+
         const packageMap = {};
 
         // Build package lookup by ID
@@ -246,6 +252,17 @@ async function enrichVulnerabilitiesWithPackages(nodeName) {
 function renderVulnerabilitiesTable() {
     const tableBody = document.querySelector('#cvesTable tbody');
     tableBody.innerHTML = '';
+
+    // Handle empty data
+    if (vulnState.allData.length === 0) {
+        const row = document.createElement('tr');
+        const cell = addCellToRow(row, 'left', 'No vulnerability data available. Node may not have been scanned yet.');
+        cell.colSpan = 8;
+        cell.style.color = '#666';
+        tableBody.appendChild(row);
+        renderVulnPagination(1, 1, 0);
+        return;
+    }
 
     // Filter data
     let filtered = vulnState.allData.filter(vuln => {
@@ -329,8 +346,12 @@ async function loadSBOMTable(nodeName) {
 
         let data = await response.json();
 
-        // Handle both array and paginated response
-        sbomState.allData = Array.isArray(data) ? data : (data.packages || []);
+        // Handle null, array, and paginated response
+        if (data === null) {
+            sbomState.allData = [];
+        } else {
+            sbomState.allData = Array.isArray(data) ? data : (data.packages || []);
+        }
 
         // Apply filters and render
         renderSBOMTable();
@@ -350,6 +371,17 @@ async function loadSBOMTable(nodeName) {
 function renderSBOMTable() {
     const tableBody = document.querySelector('#sbomTable tbody');
     tableBody.innerHTML = '';
+
+    // Handle empty data
+    if (sbomState.allData.length === 0) {
+        const row = document.createElement('tr');
+        const cell = addCellToRow(row, 'left', 'No package data available. Node may not have been scanned yet.');
+        cell.colSpan = 4;
+        cell.style.color = '#666';
+        tableBody.appendChild(row);
+        renderSBOMPagination(1, 1, 0);
+        return;
+    }
 
     // Filter data
     let filtered = sbomState.allData.filter(pkg => {
