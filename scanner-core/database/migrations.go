@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 31
+const currentSchemaVersion = 32
 
 type migration struct {
 	version int
@@ -170,6 +170,11 @@ var migrations = []migration{
 		version: 31,
 		name:    "add_node_performance_indexes",
 		up:      migrateToV31,
+	},
+	{
+		version: 32,
+		name:    "add_node_package_instance_count",
+		up:      migrateToV32,
 	},
 }
 
@@ -2185,3 +2190,31 @@ func migrateToV31(conn *sql.DB) error {
 	return nil
 }
 
+// migrateToV32 adds number_of_instances column to node_packages table
+// This tracks how many times the same package (name+version+type) appears in different locations
+func migrateToV32(conn *sql.DB) error {
+	log.Println("Migration v32: Adding number_of_instances column to node_packages...")
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Add number_of_instances column with default value of 1
+	_, err = tx.Exec(`
+		ALTER TABLE node_packages ADD COLUMN number_of_instances INTEGER DEFAULT 1
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add number_of_instances column: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v32: Successfully added number_of_instances column to node_packages")
+	log.Println("  - Existing packages default to 1 instance")
+	log.Println("  - Future SBOM imports will count actual instances")
+	return nil
+}

@@ -332,8 +332,11 @@ function renderVulnerabilitiesTable() {
         // Package type
         addCellToRow(row, 'left', vuln.package_type || '');
 
-        // Score
+        // Risk (score)
         addCellToRow(row, 'right', vuln.score ? vuln.score.toFixed(1) : '-');
+
+        // Exploits (known_exploited)
+        addCellToRow(row, 'left', vuln.known_exploited ? 'Yes' : 'No');
 
         tableBody.appendChild(row);
     });

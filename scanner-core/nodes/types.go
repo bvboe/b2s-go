@@ -61,8 +61,8 @@ type NodePackage struct {
 	PURL string `json:"purl,omitempty"`
 	// Details contains additional package metadata as JSON
 	Details string `json:"details,omitempty"`
-	// VulnCount is the number of vulnerabilities associated with this package
-	VulnCount int `json:"count"`
+	// Count is the number of instances of this package (same name+version+type in different locations)
+	Count int `json:"count"`
 }
 
 // NodeVulnerability represents a vulnerability found on a node
@@ -72,7 +72,7 @@ type NodeVulnerability struct {
 	PackageID int64  `json:"package_id"`
 	CVEID     string `json:"cve_id"`
 	Severity  string `json:"severity"`
-	// Score is the CVSS score
+	// Score is the CVSS score (displayed as Risk in UI)
 	Score float64 `json:"score,omitempty"`
 	// FixStatus indicates if a fix is available (fixed, not-fixed, unknown)
 	FixStatus string `json:"fix_status,omitempty"`
@@ -80,6 +80,10 @@ type NodeVulnerability struct {
 	FixVersion string `json:"fix_version,omitempty"`
 	// KnownExploited indicates if this vulnerability is in CISA KEV catalog
 	KnownExploited bool `json:"known_exploited"`
+	// Package information (joined from node_packages)
+	PackageName    string `json:"package_name"`
+	PackageVersion string `json:"package_version"`
+	PackageType    string `json:"package_type"`
 	// Details contains additional vulnerability metadata as JSON
 	Details   string    `json:"details,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
