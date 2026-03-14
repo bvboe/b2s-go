@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
@@ -25,6 +26,8 @@ func RegisterNodeHandlers(mux *http.ServeMux, db *database.DB) {
 	mux.HandleFunc("/api/summary/by-node", NodeSummaryHandler(db))
 	mux.HandleFunc("/api/summary/by-node-distro", NodeDistributionSummaryHandler(db))
 	mux.HandleFunc("/api/node-filter-options", NodeFilterOptionsHandler(db))
+	mux.HandleFunc("/api/node-vulnerabilities/", NodeVulnerabilityDetailsHandler(db))
+	mux.HandleFunc("/api/node-packages/", NodePackageDetailsHandler(db))
 }
 
 // ListNodesHandler returns a handler that lists all nodes with their scan status
@@ -207,6 +210,88 @@ func NodeFilterOptionsHandler(db *database.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(options); err != nil {
 			log.Printf("Error encoding node filter options response: %v", err)
+		}
+	}
+}
+
+// NodeVulnerabilityDetailsHandler returns JSON details for a specific node vulnerability
+// Route: GET /api/node-vulnerabilities/{id}/details
+func NodeVulnerabilityDetailsHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parse path: /api/node-vulnerabilities/{id}/details
+		path := strings.TrimPrefix(r.URL.Path, "/api/node-vulnerabilities/")
+		if !strings.HasSuffix(path, "/details") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+
+		idStr := strings.TrimSuffix(path, "/details")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid vulnerability ID", http.StatusBadRequest)
+			return
+		}
+
+		details, err := db.GetNodeVulnerabilityDetails(id)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, "Vulnerability not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("Error getting node vulnerability details: %v", err)
+			http.Error(w, "Failed to get vulnerability details", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(details)); err != nil {
+			log.Printf("Error writing vulnerability details response: %v", err)
+		}
+	}
+}
+
+// NodePackageDetailsHandler returns JSON details for a specific node package
+// Route: GET /api/node-packages/{id}/details
+func NodePackageDetailsHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parse path: /api/node-packages/{id}/details
+		path := strings.TrimPrefix(r.URL.Path, "/api/node-packages/")
+		if !strings.HasSuffix(path, "/details") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+
+		idStr := strings.TrimSuffix(path, "/details")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid package ID", http.StatusBadRequest)
+			return
+		}
+
+		details, err := db.GetNodePackageDetails(id)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, "Package not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("Error getting node package details: %v", err)
+			http.Error(w, "Failed to get package details", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(details)); err != nil {
+			log.Printf("Error writing package details response: %v", err)
 		}
 	}
 }

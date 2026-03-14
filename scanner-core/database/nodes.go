@@ -441,8 +441,8 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	var report struct {
 		Matches []struct {
 			Vulnerability struct {
-				ID       string  `json:"id"`
-				Severity string  `json:"severity"`
+				ID       string `json:"id"`
+				Severity string `json:"severity"`
 				CVSS     []struct {
 					Score float64 `json:"score"`
 				} `json:"cvss"`
@@ -644,6 +644,42 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 	}
 
 	return vulns, nil
+}
+
+// GetNodeVulnerabilityDetails returns the JSON details for a specific node vulnerability by ID
+func (db *DB) GetNodeVulnerabilityDetails(id int64) (string, error) {
+	var details sql.NullString
+	err := db.conn.QueryRow(`
+		SELECT details FROM node_vulnerabilities WHERE id = ?
+	`, id).Scan(&details)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("vulnerability not found")
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to query vulnerability details: %w", err)
+	}
+	if !details.Valid || details.String == "" {
+		return "{}", nil // Return empty JSON object if no details
+	}
+	return details.String, nil
+}
+
+// GetNodePackageDetails returns the JSON details for a specific node package by ID
+func (db *DB) GetNodePackageDetails(id int64) (string, error) {
+	var details sql.NullString
+	err := db.conn.QueryRow(`
+		SELECT details FROM node_packages WHERE id = ?
+	`, id).Scan(&details)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("package not found")
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to query package details: %w", err)
+	}
+	if !details.Valid || details.String == "" {
+		return "{}", nil // Return empty JSON object if no details
+	}
+	return details.String, nil
 }
 
 // NodeSummaryFilters contains filter options for node summary queries
