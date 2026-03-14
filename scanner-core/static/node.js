@@ -335,8 +335,11 @@ function renderVulnerabilitiesTable() {
         // Risk (score)
         addCellToRow(row, 'right', vuln.score ? vuln.score.toFixed(1) : '-');
 
-        // Exploits (known_exploited)
-        addCellToRow(row, 'left', vuln.known_exploited ? 'Yes' : 'No');
+        // Exploits (known_exploited) - count from CISA KEV catalog
+        addCellToRow(row, 'right', formatNumber(vuln.known_exploited || 0));
+
+        // Count (number of instances of this vulnerability)
+        addCellToRow(row, 'right', formatNumber(vuln.count || 1));
 
         tableBody.appendChild(row);
     });

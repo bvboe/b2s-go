@@ -78,12 +78,14 @@ type NodeVulnerability struct {
 	FixStatus string `json:"fix_status,omitempty"`
 	// FixVersion is the version that fixes this vulnerability
 	FixVersion string `json:"fix_version,omitempty"`
-	// KnownExploited indicates if this vulnerability is in CISA KEV catalog
-	KnownExploited bool `json:"known_exploited"`
+	// KnownExploited is the count of known exploits from CISA KEV catalog
+	KnownExploited int `json:"known_exploited"`
 	// Package information (joined from node_packages)
 	PackageName    string `json:"package_name"`
 	PackageVersion string `json:"package_version"`
 	PackageType    string `json:"package_type"`
+	// Count is the number of duplicate instances of this vulnerability
+	Count int `json:"count"`
 	// Details contains additional vulnerability metadata as JSON
 	Details   string    `json:"details,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -91,16 +93,18 @@ type NodeVulnerability struct {
 
 // NodeSummary provides aggregated vulnerability counts by severity
 type NodeSummary struct {
-	NodeName     string `json:"node_name"`
-	OSRelease    string `json:"os_release"`
-	PackageCount int    `json:"package_count"`
-	Critical     int    `json:"critical"`
-	High         int    `json:"high"`
-	Medium       int    `json:"medium"`
-	Low          int    `json:"low"`
-	Negligible   int    `json:"negligible"`
-	Unknown      int    `json:"unknown"`
-	Total        int    `json:"total"`
+	NodeName          string `json:"node_name"`
+	OSRelease         string `json:"os_release"`
+	Status            string `json:"status"`
+	StatusDescription string `json:"status_description"`
+	PackageCount      int    `json:"package_count"`
+	Critical          int    `json:"critical"`
+	High              int    `json:"high"`
+	Medium            int    `json:"medium"`
+	Low               int    `json:"low"`
+	Negligible        int    `json:"negligible"`
+	Unknown           int    `json:"unknown"`
+	Total             int    `json:"total"`
 }
 
 // NodeDistributionSummary provides averaged vulnerability counts grouped by OS distribution

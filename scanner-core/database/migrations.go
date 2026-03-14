@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 32
+const currentSchemaVersion = 34
 
 type migration struct {
 	version int
@@ -175,6 +175,16 @@ var migrations = []migration{
 		version: 32,
 		name:    "add_node_package_instance_count",
 		up:      migrateToV32,
+	},
+	{
+		version: 33,
+		name:    "add_node_vulnerability_deduplication",
+		up:      migrateToV33,
+	},
+	{
+		version: 34,
+		name:    "add_node_detail_tables",
+		up:      migrateToV34,
 	},
 }
 
@@ -2216,5 +2226,169 @@ func migrateToV32(conn *sql.DB) error {
 	log.Println("Migration v32: Successfully added number_of_instances column to node_packages")
 	log.Println("  - Existing packages default to 1 instance")
 	log.Println("  - Future SBOM imports will count actual instances")
+	return nil
+}
+
+// migrateToV33 adds count column and UNIQUE constraint to node_vulnerabilities for deduplication
+func migrateToV33(conn *sql.DB) error {
+	log.Println("Migration v33: Adding deduplication support to node_vulnerabilities...")
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Step 1: Create new table with count column and UNIQUE constraint
+	_, err = tx.Exec(`
+		CREATE TABLE node_vulnerabilities_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id INTEGER NOT NULL REFERENCES nodes(id),
+			package_id INTEGER NOT NULL REFERENCES node_packages(id),
+			cve_id TEXT NOT NULL,
+			severity TEXT NOT NULL,
+			score REAL,
+			fix_status TEXT,
+			fix_version TEXT,
+			known_exploited BOOLEAN DEFAULT FALSE,
+			count INTEGER DEFAULT 1,
+			details TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(node_id, package_id, cve_id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new node_vulnerabilities table: %w", err)
+	}
+
+	// Step 2: Migrate existing data, aggregating duplicates
+	_, err = tx.Exec(`
+		INSERT INTO node_vulnerabilities_new (node_id, package_id, cve_id, severity, score, fix_status, fix_version, known_exploited, count, details, created_at)
+		SELECT node_id, package_id, cve_id, severity, MAX(score), fix_status, fix_version, MAX(known_exploited), COUNT(*), details, MIN(created_at)
+		FROM node_vulnerabilities
+		GROUP BY node_id, package_id, cve_id
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate node_vulnerabilities data: %w", err)
+	}
+
+	// Step 3: Drop old table and rename new one
+	_, err = tx.Exec(`DROP TABLE node_vulnerabilities`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old node_vulnerabilities table: %w", err)
+	}
+
+	_, err = tx.Exec(`ALTER TABLE node_vulnerabilities_new RENAME TO node_vulnerabilities`)
+	if err != nil {
+		return fmt.Errorf("failed to rename node_vulnerabilities table: %w", err)
+	}
+
+	// Step 4: Recreate indexes
+	_, err = tx.Exec(`
+		CREATE INDEX idx_node_vulnerabilities_node ON node_vulnerabilities(node_id);
+		CREATE INDEX idx_node_vulnerabilities_package ON node_vulnerabilities(package_id);
+		CREATE INDEX idx_node_vulnerabilities_node_severity ON node_vulnerabilities(node_id, severity);
+		CREATE INDEX idx_node_vulnerabilities_fix_status ON node_vulnerabilities(fix_status)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to recreate indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v33: Successfully added deduplication support to node_vulnerabilities")
+	log.Println("  - Added count column (default 1)")
+	log.Println("  - Added UNIQUE constraint on (node_id, package_id, cve_id)")
+	log.Println("  - Existing duplicates aggregated")
+	return nil
+}
+
+// migrateToV34 adds node_vulnerability_details and node_package_details tables
+// This separates heavy JSON details from main tables for better performance
+func migrateToV34(conn *sql.DB) error {
+	log.Println("Migration v34: Creating node detail tables...")
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Create node_vulnerability_details table
+	_, err = tx.Exec(`
+		CREATE TABLE node_vulnerability_details (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_vulnerability_id INTEGER NOT NULL,
+			details TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (node_vulnerability_id) REFERENCES node_vulnerabilities(id) ON DELETE CASCADE,
+			UNIQUE(node_vulnerability_id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerability_details table: %w", err)
+	}
+
+	// Create index for fast lookups
+	_, err = tx.Exec(`
+		CREATE INDEX idx_node_vulnerability_details_vuln ON node_vulnerability_details(node_vulnerability_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerability_details index: %w", err)
+	}
+
+	// Create node_package_details table
+	_, err = tx.Exec(`
+		CREATE TABLE node_package_details (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_package_id INTEGER NOT NULL,
+			details TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (node_package_id) REFERENCES node_packages(id) ON DELETE CASCADE,
+			UNIQUE(node_package_id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_package_details table: %w", err)
+	}
+
+	// Create index for fast lookups
+	_, err = tx.Exec(`
+		CREATE INDEX idx_node_package_details_pkg ON node_package_details(node_package_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_package_details index: %w", err)
+	}
+
+	// Migrate existing details from node_vulnerabilities to node_vulnerability_details
+	_, err = tx.Exec(`
+		INSERT INTO node_vulnerability_details (node_vulnerability_id, details)
+		SELECT id, details FROM node_vulnerabilities
+		WHERE details IS NOT NULL AND details != ''
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate node vulnerability details: %w", err)
+	}
+
+	// Migrate existing details from node_packages to node_package_details
+	_, err = tx.Exec(`
+		INSERT INTO node_package_details (node_package_id, details)
+		SELECT id, details FROM node_packages
+		WHERE details IS NOT NULL AND details != ''
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate node package details: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Migration v34: Successfully created node detail tables")
+	log.Println("  - Created node_vulnerability_details table")
+	log.Println("  - Created node_package_details table")
+	log.Println("  - Migrated existing details data")
 	return nil
 }

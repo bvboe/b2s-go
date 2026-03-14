@@ -758,3 +758,232 @@ func TestRemoveNode_CascadesDeleteToPackagesAndVulns(t *testing.T) {
 		t.Errorf("Expected 0 vulnerabilities after removal, got %d", vulnCount)
 	}
 }
+
+// TestStoreNodeSBOM_StoresDetailsInSeparateTable tests that package details are stored separately
+func TestStoreNodeSBOM_StoresDetailsInSeparateTable(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	node := nodes.Node{Name: "test-node-1"}
+	_, _ = db.AddNode(node)
+
+	sbom := `{"artifacts": [
+		{"name": "openssl", "version": "1.1.1", "type": "deb", "purl": "pkg:deb/ubuntu/openssl@1.1.1"}
+	]}`
+	err := db.StoreNodeSBOM("test-node-1", []byte(sbom))
+	if err != nil {
+		t.Fatalf("StoreNodeSBOM failed: %v", err)
+	}
+
+	// Get the package ID
+	packages, err := db.GetNodePackages("test-node-1")
+	if err != nil {
+		t.Fatalf("GetNodePackages failed: %v", err)
+	}
+	if len(packages) != 1 {
+		t.Fatalf("Expected 1 package, got %d", len(packages))
+	}
+
+	// Retrieve details from separate table
+	details, err := db.GetNodePackageDetails(packages[0].ID)
+	if err != nil {
+		t.Fatalf("GetNodePackageDetails failed: %v", err)
+	}
+
+	// Details should be a JSON array
+	var detailsArr []json.RawMessage
+	if err := json.Unmarshal([]byte(details), &detailsArr); err != nil {
+		t.Fatalf("Details should be valid JSON array: %v", err)
+	}
+
+	if len(detailsArr) != 1 {
+		t.Errorf("Expected 1 detail entry, got %d", len(detailsArr))
+	}
+}
+
+// TestStoreNodeSBOM_AggregatesInstanceDetails tests that multiple instances are aggregated
+func TestStoreNodeSBOM_AggregatesInstanceDetails(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	node := nodes.Node{Name: "test-node-1"}
+	_, _ = db.AddNode(node)
+
+	// Same package appearing in multiple locations
+	sbom := `{"artifacts": [
+		{"name": "lodash", "version": "4.17.21", "type": "npm", "locations": [{"path": "/app/node_modules/lodash"}]},
+		{"name": "lodash", "version": "4.17.21", "type": "npm", "locations": [{"path": "/lib/node_modules/lodash"}]},
+		{"name": "lodash", "version": "4.17.21", "type": "npm", "locations": [{"path": "/other/node_modules/lodash"}]}
+	]}`
+	err := db.StoreNodeSBOM("test-node-1", []byte(sbom))
+	if err != nil {
+		t.Fatalf("StoreNodeSBOM failed: %v", err)
+	}
+
+	// Should have 1 unique package with count=3
+	packages, err := db.GetNodePackages("test-node-1")
+	if err != nil {
+		t.Fatalf("GetNodePackages failed: %v", err)
+	}
+	if len(packages) != 1 {
+		t.Fatalf("Expected 1 unique package, got %d", len(packages))
+	}
+	if packages[0].Count != 3 {
+		t.Errorf("Expected count=3, got %d", packages[0].Count)
+	}
+
+	// Details should contain all 3 instances
+	details, err := db.GetNodePackageDetails(packages[0].ID)
+	if err != nil {
+		t.Fatalf("GetNodePackageDetails failed: %v", err)
+	}
+
+	var detailsArr []json.RawMessage
+	if err := json.Unmarshal([]byte(details), &detailsArr); err != nil {
+		t.Fatalf("Details should be valid JSON array: %v", err)
+	}
+
+	if len(detailsArr) != 3 {
+		t.Errorf("Expected 3 detail entries (all instances), got %d", len(detailsArr))
+	}
+}
+
+// TestStoreNodeVulnerabilities_StoresDetailsInSeparateTable tests that vuln details are stored separately
+func TestStoreNodeVulnerabilities_StoresDetailsInSeparateTable(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	node := nodes.Node{Name: "test-node-1"}
+	_, _ = db.AddNode(node)
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("test-node-1", []byte(sbom))
+
+	vulnReport := `{"matches": [
+		{
+			"vulnerability": {"id": "CVE-2021-1234", "severity": "High", "risk": 7.5},
+			"artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"},
+			"relatedVulnerabilities": [{"id": "CVE-2021-1234"}]
+		}
+	]}`
+	err := db.StoreNodeVulnerabilities("test-node-1", []byte(vulnReport), time.Now())
+	if err != nil {
+		t.Fatalf("StoreNodeVulnerabilities failed: %v", err)
+	}
+
+	vulns, err := db.GetNodeVulnerabilities("test-node-1")
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilities failed: %v", err)
+	}
+	if len(vulns) != 1 {
+		t.Fatalf("Expected 1 vulnerability, got %d", len(vulns))
+	}
+
+	// Retrieve details from separate table
+	details, err := db.GetNodeVulnerabilityDetails(vulns[0].ID)
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilityDetails failed: %v", err)
+	}
+
+	// Details should be a JSON array
+	var detailsArr []json.RawMessage
+	if err := json.Unmarshal([]byte(details), &detailsArr); err != nil {
+		t.Fatalf("Details should be valid JSON array: %v", err)
+	}
+
+	if len(detailsArr) != 1 {
+		t.Errorf("Expected 1 detail entry, got %d", len(detailsArr))
+	}
+}
+
+// TestStoreNodeVulnerabilities_DeduplicatesWithCount tests that duplicate vulns are aggregated
+func TestStoreNodeVulnerabilities_DeduplicatesWithCount(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	node := nodes.Node{Name: "test-node-1"}
+	_, _ = db.AddNode(node)
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("test-node-1", []byte(sbom))
+
+	// Same CVE appearing multiple times for same package (e.g., from different matchers)
+	vulnReport := `{"matches": [
+		{
+			"vulnerability": {"id": "CVE-2021-1234", "severity": "High", "risk": 7.5},
+			"artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"},
+			"matchDetails": [{"type": "exact-direct-match"}]
+		},
+		{
+			"vulnerability": {"id": "CVE-2021-1234", "severity": "High", "risk": 7.5},
+			"artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"},
+			"matchDetails": [{"type": "cpe-match"}]
+		},
+		{
+			"vulnerability": {"id": "CVE-2021-1234", "severity": "High", "risk": 7.5},
+			"artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"},
+			"matchDetails": [{"type": "another-match"}]
+		}
+	]}`
+	err := db.StoreNodeVulnerabilities("test-node-1", []byte(vulnReport), time.Now())
+	if err != nil {
+		t.Fatalf("StoreNodeVulnerabilities failed: %v", err)
+	}
+
+	// Should have 1 unique vulnerability with count=3
+	vulns, err := db.GetNodeVulnerabilities("test-node-1")
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilities failed: %v", err)
+	}
+	if len(vulns) != 1 {
+		t.Fatalf("Expected 1 unique vulnerability (deduplicated), got %d", len(vulns))
+	}
+	if vulns[0].Count != 3 {
+		t.Errorf("Expected count=3, got %d", vulns[0].Count)
+	}
+
+	// Details should contain all 3 instances
+	details, err := db.GetNodeVulnerabilityDetails(vulns[0].ID)
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilityDetails failed: %v", err)
+	}
+
+	var detailsArr []json.RawMessage
+	if err := json.Unmarshal([]byte(details), &detailsArr); err != nil {
+		t.Fatalf("Details should be valid JSON array: %v", err)
+	}
+
+	if len(detailsArr) != 3 {
+		t.Errorf("Expected 3 detail entries (all instances), got %d", len(detailsArr))
+	}
+}
+
+// TestGetNodeVulnerabilityDetails_ReturnsEmptyArrayForMissing tests missing details return empty array
+func TestGetNodeVulnerabilityDetails_ReturnsEmptyArrayForMissing(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// Query for non-existent vulnerability
+	details, err := db.GetNodeVulnerabilityDetails(99999)
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilityDetails should not error for missing: %v", err)
+	}
+	if details != "[]" {
+		t.Errorf("Expected empty array '[]', got %s", details)
+	}
+}
+
+// TestGetNodePackageDetails_ReturnsEmptyArrayForMissing tests missing details return empty array
+func TestGetNodePackageDetails_ReturnsEmptyArrayForMissing(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// Query for non-existent package
+	details, err := db.GetNodePackageDetails(99999)
+	if err != nil {
+		t.Fatalf("GetNodePackageDetails should not error for missing: %v", err)
+	}
+	if details != "[]" {
+		t.Errorf("Expected empty array '[]', got %s", details)
+	}
+}

@@ -431,8 +431,49 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		}
 	}
 
-	// Insert packages with instance counts
+	// Prepare statements for packages and details
+	pkgStmt, err := tx.Prepare(`
+		INSERT INTO node_packages (node_id, name, version, type, language, purl, number_of_instances)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (node_id, name, version, type) DO UPDATE SET
+			language = excluded.language,
+			purl = excluded.purl,
+			number_of_instances = excluded.number_of_instances
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare package statement: %w", err)
+	}
+	defer func() { _ = pkgStmt.Close() }()
+
+	detailsStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO node_package_details (node_package_id, details)
+		VALUES (?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare details statement: %w", err)
+	}
+	defer func() { _ = detailsStmt.Close() }()
+
+	// Insert packages and their details
 	for key, data := range packageGroups {
+		// Insert package (without details)
+		result, err := pkgStmt.Exec(nodeID, key.Name, key.Version, key.Type, data.Language, data.PURL, len(data.Instances))
+		if err != nil {
+			return fmt.Errorf("failed to insert package: %w", err)
+		}
+
+		// Get package ID (either from insert or existing)
+		var packageID int64
+		packageID, err = result.LastInsertId()
+		if err != nil || packageID == 0 {
+			// ON CONFLICT happened, need to query for the ID
+			err = tx.QueryRow(`SELECT id FROM node_packages WHERE node_id = ? AND name = ? AND version = ? AND type = ?`,
+				nodeID, key.Name, key.Version, key.Type).Scan(&packageID)
+			if err != nil {
+				return fmt.Errorf("failed to get package ID: %w", err)
+			}
+		}
+
 		// Serialize all instances as JSON array for details
 		detailsJSON, err := json.Marshal(data.Instances)
 		if err != nil {
@@ -440,17 +481,10 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 			detailsJSON = []byte("[]")
 		}
 
-		_, err = tx.Exec(`
-			INSERT INTO node_packages (node_id, name, version, type, language, purl, details, number_of_instances)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (node_id, name, version, type) DO UPDATE SET
-				language = excluded.language,
-				purl = excluded.purl,
-				details = excluded.details,
-				number_of_instances = excluded.number_of_instances
-		`, nodeID, key.Name, key.Version, key.Type, data.Language, data.PURL, string(detailsJSON), len(data.Instances))
+		// Insert details into separate table
+		_, err = detailsStmt.Exec(packageID, string(detailsJSON))
 		if err != nil {
-			return fmt.Errorf("failed to insert package: %w", err)
+			return fmt.Errorf("failed to insert package details: %w", err)
 		}
 	}
 
@@ -475,10 +509,8 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 }
 
 // StoreNodeVulnerabilities stores vulnerabilities for a node
-// Uses batched inserts to handle large vulnerability counts efficiently
+// Groups duplicates and stores details in separate table
 func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuilt time.Time) error {
-	const batchSize = 500 // Number of vulnerabilities to insert per transaction
-
 	// Get node ID first (outside transaction)
 	var nodeID int64
 	err := db.conn.QueryRow(`SELECT id FROM nodes WHERE name = ?`, name).Scan(&nodeID)
@@ -499,11 +531,12 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	type parsedMatch struct {
 		Raw           json.RawMessage
 		Vulnerability struct {
-			ID       string `json:"id"`
-			Severity string `json:"severity"`
-			CVSS     []struct {
-				Score float64 `json:"score"`
-			} `json:"cvss"`
+			ID             string  `json:"id"`
+			Severity       string  `json:"severity"`
+			Risk           float64 `json:"risk"`
+			KnownExploited []struct {
+				CVE string `json:"cve"`
+			} `json:"knownExploited"`
 			Fix struct {
 				State    string   `json:"state"`
 				Versions []string `json:"versions"`
@@ -514,18 +547,6 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 			Version string `json:"version"`
 			Type    string `json:"type"`
 		} `json:"artifact"`
-	}
-
-	// Parse all matches into a slice of parsedMatch
-	parsedMatches := make([]parsedMatch, 0, len(report.Matches))
-	for _, matchRaw := range report.Matches {
-		var pm parsedMatch
-		if err := json.Unmarshal(matchRaw, &pm); err != nil {
-			log.Printf("Warning: Failed to parse vulnerability match: %v", err)
-			continue
-		}
-		pm.Raw = matchRaw
-		parsedMatches = append(parsedMatches, pm)
 	}
 
 	// Build a map of package name+version+type -> package ID for faster lookups
@@ -546,75 +567,131 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	}
 	_ = rows.Close()
 
-	// Delete existing vulnerabilities in a separate transaction
+	// Group vulnerabilities by (package_id, cve_id) to deduplicate and aggregate details
+	type vulnKey struct {
+		PackageID int64
+		CVEID     string
+	}
+	type vulnData struct {
+		Severity       string
+		Risk           float64
+		FixStatus      string
+		FixVersion     string
+		KnownExploited int
+		Instances      []json.RawMessage
+	}
+	vulnGroups := make(map[vulnKey]*vulnData)
+
+	for _, matchRaw := range report.Matches {
+		var pm parsedMatch
+		if err := json.Unmarshal(matchRaw, &pm); err != nil {
+			log.Printf("Warning: Failed to parse vulnerability match: %v", err)
+			continue
+		}
+		pm.Raw = matchRaw
+
+		// Look up package ID from map
+		pkgKey := pm.Artifact.Name + "|" + pm.Artifact.Version + "|" + pm.Artifact.Type
+		packageID, found := packageMap[pkgKey]
+		if !found {
+			// Package not found, skip this vulnerability
+			continue
+		}
+
+		key := vulnKey{PackageID: packageID, CVEID: pm.Vulnerability.ID}
+		if existing, ok := vulnGroups[key]; ok {
+			// Aggregate: add to instances, keep max values
+			existing.Instances = append(existing.Instances, matchRaw)
+			if pm.Vulnerability.Risk > existing.Risk {
+				existing.Risk = pm.Vulnerability.Risk
+			}
+			knownExploited := len(pm.Vulnerability.KnownExploited)
+			if knownExploited > existing.KnownExploited {
+				existing.KnownExploited = knownExploited
+			}
+		} else {
+			fixVersion := ""
+			if len(pm.Vulnerability.Fix.Versions) > 0 {
+				fixVersion = pm.Vulnerability.Fix.Versions[0]
+			}
+			vulnGroups[key] = &vulnData{
+				Severity:       pm.Vulnerability.Severity,
+				Risk:           pm.Vulnerability.Risk,
+				FixStatus:      pm.Vulnerability.Fix.State,
+				FixVersion:     fixVersion,
+				KnownExploited: len(pm.Vulnerability.KnownExploited),
+				Instances:      []json.RawMessage{matchRaw},
+			}
+		}
+	}
+
+	// Delete existing vulnerabilities
 	if _, err := db.conn.Exec(`DELETE FROM node_vulnerabilities WHERE node_id = ?`, nodeID); err != nil {
 		return fmt.Errorf("failed to delete existing vulnerabilities: %w", err)
 	}
 
-	// Process vulnerabilities in batches
+	// Insert unique vulnerabilities and their details
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	vulnStmt, err := tx.Prepare(`
+		INSERT INTO node_vulnerabilities (node_id, package_id, cve_id, severity, score, fix_status, fix_version, known_exploited, count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare vulnerability statement: %w", err)
+	}
+	defer func() { _ = vulnStmt.Close() }()
+
+	detailsStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO node_vulnerability_details (node_vulnerability_id, details)
+		VALUES (?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare details statement: %w", err)
+	}
+	defer func() { _ = detailsStmt.Close() }()
+
 	totalInserted := 0
-	for i := 0; i < len(parsedMatches); i += batchSize {
-		end := i + batchSize
-		if end > len(parsedMatches) {
-			end = len(parsedMatches)
-		}
-		batch := parsedMatches[i:end]
-
-		tx, err := db.conn.Begin()
+	for key, data := range vulnGroups {
+		// Insert vulnerability (without details column)
+		result, err := vulnStmt.Exec(nodeID, key.PackageID, key.CVEID, data.Severity, data.Risk, data.FixStatus, data.FixVersion, data.KnownExploited, len(data.Instances))
 		if err != nil {
-			return fmt.Errorf("failed to begin transaction for batch %d: %w", i/batchSize, err)
+			log.Printf("Warning: failed to insert vulnerability %s: %v", key.CVEID, err)
+			continue
 		}
 
-		stmt, err := tx.Prepare(`
-			INSERT INTO node_vulnerabilities (node_id, package_id, cve_id, severity, score, fix_status, fix_version, details)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`)
+		vulnID, err := result.LastInsertId()
 		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("failed to prepare statement: %w", err)
+			log.Printf("Warning: failed to get vulnerability ID for %s: %v", key.CVEID, err)
+			continue
 		}
 
-		batchInserted := 0
-		for _, match := range batch {
-			// Look up package ID from map
-			key := match.Artifact.Name + "|" + match.Artifact.Version + "|" + match.Artifact.Type
-			packageID, found := packageMap[key]
-			if !found {
-				// Package not found, skip this vulnerability
-				continue
-			}
-
-			var score float64
-			if len(match.Vulnerability.CVSS) > 0 {
-				score = match.Vulnerability.CVSS[0].Score
-			}
-
-			fixStatus := match.Vulnerability.Fix.State
-			var fixVersion string
-			if len(match.Vulnerability.Fix.Versions) > 0 {
-				fixVersion = match.Vulnerability.Fix.Versions[0]
-			}
-
-			// Store the raw match JSON as details
-			_, err = stmt.Exec(nodeID, packageID, match.Vulnerability.ID, match.Vulnerability.Severity, score, fixStatus, fixVersion, string(match.Raw))
-			if err != nil {
-				log.Printf("Warning: failed to insert vulnerability %s: %v", match.Vulnerability.ID, err)
-				continue
-			}
-			batchInserted++
+		// Serialize all instances as JSON array for details
+		detailsJSON, err := json.Marshal(data.Instances)
+		if err != nil {
+			log.Printf("Warning: Failed to marshal vulnerability details for %s: %v", key.CVEID, err)
+			detailsJSON = []byte("[]")
 		}
 
-		_ = stmt.Close()
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit batch %d: %w", i/batchSize, err)
+		// Insert details into separate table
+		_, err = detailsStmt.Exec(vulnID, string(detailsJSON))
+		if err != nil {
+			log.Printf("Warning: failed to insert vulnerability details for %s: %v", key.CVEID, err)
 		}
 
-		totalInserted += batchInserted
-		log.Printf("Stored vulnerability batch %d/%d (%d vulnerabilities)", i/batchSize+1, (len(parsedMatches)+batchSize-1)/batchSize, batchInserted)
+		totalInserted++
 	}
 
-	// Update node status in a final transaction
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Update node status
 	_, err = db.conn.Exec(`
 		UPDATE nodes SET
 			status = ?,
@@ -627,14 +704,14 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
-	log.Printf("Stored vulnerabilities for node %s: %d total (from %d matches)", name, totalInserted, len(parsedMatches))
+	log.Printf("Stored vulnerabilities for node %s: %d unique (from %d matches)", name, totalInserted, len(report.Matches))
 	return nil
 }
 
 // GetNodePackages retrieves all packages for a node with instance counts
 func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 	rows, err := db.conn.Query(`
-		SELECT np.id, np.node_id, np.name, np.version, np.type, np.language, np.purl, np.details,
+		SELECT np.id, np.node_id, np.name, np.version, np.type, np.language, np.purl,
 			COALESCE(np.number_of_instances, 1) as count
 		FROM node_packages np
 		JOIN nodes n ON np.node_id = n.id
@@ -649,8 +726,8 @@ func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 	packages := []nodes.NodePackage{} // Initialize to empty slice, not nil (JSON: [] not null)
 	for rows.Next() {
 		var pkg nodes.NodePackage
-		var language, purl, details sql.NullString
-		err := rows.Scan(&pkg.ID, &pkg.NodeID, &pkg.Name, &pkg.Version, &pkg.Type, &language, &purl, &details, &pkg.Count)
+		var language, purl sql.NullString
+		err := rows.Scan(&pkg.ID, &pkg.NodeID, &pkg.Name, &pkg.Version, &pkg.Type, &language, &purl, &pkg.Count)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan package row: %w", err)
 		}
@@ -659,9 +736,6 @@ func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 		}
 		if purl.Valid {
 			pkg.PURL = purl.String
-		}
-		if details.Valid {
-			pkg.Details = details.String
 		}
 		packages = append(packages, pkg)
 	}
@@ -673,13 +747,22 @@ func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, error) {
 	rows, err := db.conn.Query(`
 		SELECT nv.id, nv.node_id, nv.package_id, nv.cve_id, nv.severity, nv.score,
-			nv.fix_status, nv.fix_version, nv.known_exploited, nv.details, nv.created_at,
-			np.name, np.version, np.type
+			nv.fix_status, nv.fix_version, nv.known_exploited, nv.created_at,
+			np.name, np.version, np.type, COALESCE(nv.count, 1) as count
 		FROM node_vulnerabilities nv
 		JOIN nodes n ON nv.node_id = n.id
 		JOIN node_packages np ON nv.package_id = np.id
 		WHERE n.name = ?
-		ORDER BY nv.severity DESC, nv.cve_id
+		ORDER BY
+			CASE nv.severity
+				WHEN 'Critical' THEN 1
+				WHEN 'High' THEN 2
+				WHEN 'Medium' THEN 3
+				WHEN 'Low' THEN 4
+				WHEN 'Negligible' THEN 5
+				ELSE 6
+			END ASC,
+			nv.cve_id ASC
 	`, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query node vulnerabilities: %w", err)
@@ -690,10 +773,10 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 	for rows.Next() {
 		var vuln nodes.NodeVulnerability
 		var score sql.NullFloat64
-		var fixStatus, fixVersion, details sql.NullString
+		var fixStatus, fixVersion sql.NullString
 		err := rows.Scan(&vuln.ID, &vuln.NodeID, &vuln.PackageID, &vuln.CVEID, &vuln.Severity, &score,
-			&fixStatus, &fixVersion, &vuln.KnownExploited, &details, &vuln.CreatedAt,
-			&vuln.PackageName, &vuln.PackageVersion, &vuln.PackageType)
+			&fixStatus, &fixVersion, &vuln.KnownExploited, &vuln.CreatedAt,
+			&vuln.PackageName, &vuln.PackageVersion, &vuln.PackageType, &vuln.Count)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan vulnerability row: %w", err)
 		}
@@ -706,9 +789,6 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 		if fixVersion.Valid {
 			vuln.FixVersion = fixVersion.String
 		}
-		if details.Valid {
-			vuln.Details = details.String
-		}
 		vulns = append(vulns, vuln)
 	}
 
@@ -719,16 +799,16 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 func (db *DB) GetNodeVulnerabilityDetails(id int64) (string, error) {
 	var details sql.NullString
 	err := db.conn.QueryRow(`
-		SELECT details FROM node_vulnerabilities WHERE id = ?
+		SELECT details FROM node_vulnerability_details WHERE node_vulnerability_id = ?
 	`, id).Scan(&details)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("vulnerability not found")
+		return "[]", nil // Return empty JSON array if no details
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to query vulnerability details: %w", err)
 	}
 	if !details.Valid || details.String == "" {
-		return "{}", nil // Return empty JSON object if no details
+		return "[]", nil // Return empty JSON array if no details
 	}
 	return details.String, nil
 }
@@ -737,16 +817,16 @@ func (db *DB) GetNodeVulnerabilityDetails(id int64) (string, error) {
 func (db *DB) GetNodePackageDetails(id int64) (string, error) {
 	var details sql.NullString
 	err := db.conn.QueryRow(`
-		SELECT details FROM node_packages WHERE id = ?
+		SELECT details FROM node_package_details WHERE node_package_id = ?
 	`, id).Scan(&details)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("package not found")
+		return "[]", nil // Return empty JSON array if no details
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to query package details: %w", err)
 	}
 	if !details.Valid || details.String == "" {
-		return "{}", nil // Return empty JSON object if no details
+		return "[]", nil // Return empty JSON array if no details
 	}
 	return details.String, nil
 }
@@ -817,6 +897,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 		SELECT
 			n.name,
 			COALESCE(n.os_release, '') as os_release,
+			COALESCE(n.status, 'unknown') as status,
 			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv
 				JOIN node_packages np ON nv.package_id = np.id
@@ -853,6 +934,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 		SELECT
 			n.name,
 			COALESCE(n.os_release, '') as os_release,
+			COALESCE(n.status, 'unknown') as status,
 			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Critical'` + vulnFilter + `) as critical,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'High'` + vulnFilter + `) as high,
@@ -875,6 +957,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 		SELECT
 			n.name,
 			COALESCE(n.os_release, '') as os_release,
+			COALESCE(n.status, 'unknown') as status,
 			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Critical') as critical,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'High') as high,
@@ -899,15 +982,41 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 	summaries := make([]nodes.NodeSummary, 0)
 	for rows.Next() {
 		var summary nodes.NodeSummary
-		err := rows.Scan(&summary.NodeName, &summary.OSRelease, &summary.PackageCount, &summary.Critical, &summary.High,
+		err := rows.Scan(&summary.NodeName, &summary.OSRelease, &summary.Status, &summary.PackageCount, &summary.Critical, &summary.High,
 			&summary.Medium, &summary.Low, &summary.Negligible, &summary.Unknown, &summary.Total)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan summary row: %w", err)
 		}
+		// Calculate status description based on status
+		summary.StatusDescription = getNodeStatusDescription(summary.Status)
 		summaries = append(summaries, summary)
 	}
 
 	return summaries, nil
+}
+
+// getNodeStatusDescription returns a human-readable description for a node scan status
+func getNodeStatusDescription(status string) string {
+	switch status {
+	case "completed":
+		return "Scan complete"
+	case "scanning_vulnerabilities":
+		return "Scanning vulnerabilities"
+	case "generating_sbom":
+		return "Generating SBOM"
+	case "scanning":
+		return "Scanning"
+	case "pending":
+		return "Pending"
+	case "sbom_failed":
+		return "SBOM generation failed"
+	case "vuln_scan_failed":
+		return "Vulnerability scan failed"
+	case "error":
+		return "Error"
+	default:
+		return "Unknown"
+	}
 }
 
 // GetNodeDistributionSummary returns averaged vulnerability counts grouped by OS distribution

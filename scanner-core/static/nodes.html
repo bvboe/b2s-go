@@ -115,16 +115,23 @@
                 // Add OS distribution (from summary, may not have this field)
                 addCellToRow(row, 'left', item.os_release || '-');
 
-                // Show vulnerability counts
-                addCellToRow(row, 'right', formatNumber(item.critical));
-                addCellToRow(row, 'right', formatNumber(item.high));
-                addCellToRow(row, 'right', formatNumber(item.medium));
-                addCellToRow(row, 'right', formatNumber(item.low));
-                addCellToRow(row, 'right', formatNumber(item.negligible));
-                addCellToRow(row, 'right', formatNumber(item.unknown));
+                // Check if scan is complete
+                if (isScanComplete(item.status_description)) {
+                    // Show vulnerability counts
+                    addCellToRow(row, 'right', formatNumber(item.critical));
+                    addCellToRow(row, 'right', formatNumber(item.high));
+                    addCellToRow(row, 'right', formatNumber(item.medium));
+                    addCellToRow(row, 'right', formatNumber(item.low));
+                    addCellToRow(row, 'right', formatNumber(item.negligible));
+                    addCellToRow(row, 'right', formatNumber(item.unknown));
 
-                // Package count
-                addCellToRow(row, 'right', formatNumber(item.package_count));
+                    // Package count
+                    addCellToRow(row, 'right', formatNumber(item.package_count));
+                } else {
+                    // Show status message spanning all vulnerability columns
+                    const cell = addCellToRow(row, 'left', item.status_description || 'Unknown status');
+                    cell.colSpan = 7;
+                }
             }
         });
 
