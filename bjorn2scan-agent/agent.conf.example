@@ -238,3 +238,38 @@ metrics_image_scan_status_enabled=true
 # Format: Go duration string (e.g., "30m", "60m", "1h", "2h")
 # Environment variable: METRICS_STALENESS_WINDOW
 metrics_staleness_window=60m
+
+# ============================================================================
+# NODE METRICS TOGGLES
+# (Only applicable when host scanning is enabled)
+# ============================================================================
+
+# Enable bjorn2scan_node_scanned metric (default: true)
+# This metric reports information about each scanned node
+# Environment variable: METRICS_NODE_SCANNED_ENABLED
+metrics_node_scanned_enabled=true
+
+# Enable bjorn2scan_node_vulnerability metric (default: true)
+# This metric reports vulnerabilities found on each scanned node
+# Environment variable: METRICS_NODE_VULNERABILITIES_ENABLED
+metrics_node_vulnerabilities_enabled=true
+
+# Enable bjorn2scan_node_vulnerability_risk metric (default: true)
+# This metric reports vulnerability risk scores for node packages
+# Environment variable: METRICS_NODE_VULNERABILITY_RISK_ENABLED
+metrics_node_vulnerability_risk_enabled=true
+
+# Enable bjorn2scan_node_vulnerability_exploited metric (default: true)
+# This metric reports known exploited vulnerabilities (CISA KEV) on nodes
+# Environment variable: METRICS_NODE_VULNERABILITY_EXPLOITED_ENABLED
+metrics_node_vulnerability_exploited_enabled=true
+
+# ============================================================================
+# HOST SCANNING CONFIGURATION
+# ============================================================================
+
+# Enable host/node package scanning (default: true)
+# When enabled, scans the host filesystem for installed packages
+# and reports vulnerabilities found in system packages
+# Environment variable: HOST_SCANNING_ENABLED
+host_scanning_enabled=true

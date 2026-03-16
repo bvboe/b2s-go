@@ -77,6 +77,12 @@ type Config struct {
 	HostScanningEnabled  bool          // Enable scanning of host/node packages
 	HostScanningInterval time.Duration // Interval for periodic host SBOM regeneration (default: 24h)
 
+	// Node metrics toggles (only applicable when host scanning is enabled)
+	MetricsNodeScannedEnabled              bool // Enable bjorn2scan_node_scanned metric
+	MetricsNodeVulnerabilitiesEnabled      bool // Enable bjorn2scan_node_vulnerability metric
+	MetricsNodeVulnerabilityRiskEnabled    bool // Enable bjorn2scan_node_vulnerability_risk metric
+	MetricsNodeVulnerabilityExploitedEnabled bool // Enable bjorn2scan_node_vulnerability_exploited metric
+
 	// Rescan nodes job - periodic full rescan with fresh SBOMs
 	JobsRescanNodesEnabled  bool          // Enable periodic node rescanning with fresh SBOMs
 	JobsRescanNodesInterval time.Duration // Interval between rescan-nodes job runs (default: 24h)
@@ -149,6 +155,12 @@ func defaultConfig() *Config {
 		// Host scanning - enabled by default
 		HostScanningEnabled:  true,
 		HostScanningInterval: 24 * time.Hour,
+
+		// Node metrics - enabled by default when host scanning is enabled
+		MetricsNodeScannedEnabled:              true,
+		MetricsNodeVulnerabilitiesEnabled:      true,
+		MetricsNodeVulnerabilityRiskEnabled:    true,
+		MetricsNodeVulnerabilityExploitedEnabled: true,
 
 		// Rescan nodes job - enabled when host scanning is enabled
 		JobsRescanNodesEnabled:  true,
@@ -547,6 +559,24 @@ func LoadConfig(path string) (*Config, error) {
 		if duration, err := time.ParseDuration(hostScanningIntervalEnv); err == nil {
 			cfg.HostScanningInterval = duration
 		}
+	}
+
+	// Node metrics toggles
+	if nodeScannedEnabledEnv := os.Getenv("METRICS_NODE_SCANNED_ENABLED"); nodeScannedEnabledEnv != "" {
+		val := strings.ToLower(nodeScannedEnabledEnv)
+		cfg.MetricsNodeScannedEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if nodeVulnerabilitiesEnabledEnv := os.Getenv("METRICS_NODE_VULNERABILITIES_ENABLED"); nodeVulnerabilitiesEnabledEnv != "" {
+		val := strings.ToLower(nodeVulnerabilitiesEnabledEnv)
+		cfg.MetricsNodeVulnerabilitiesEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if nodeVulnerabilityRiskEnabledEnv := os.Getenv("METRICS_NODE_VULNERABILITY_RISK_ENABLED"); nodeVulnerabilityRiskEnabledEnv != "" {
+		val := strings.ToLower(nodeVulnerabilityRiskEnabledEnv)
+		cfg.MetricsNodeVulnerabilityRiskEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if nodeVulnerabilityExploitedEnabledEnv := os.Getenv("METRICS_NODE_VULNERABILITY_EXPLOITED_ENABLED"); nodeVulnerabilityExploitedEnabledEnv != "" {
+		val := strings.ToLower(nodeVulnerabilityExploitedEnabledEnv)
+		cfg.MetricsNodeVulnerabilityExploitedEnabled = val == "true" || val == "1" || val == "yes"
 	}
 
 	return cfg, nil

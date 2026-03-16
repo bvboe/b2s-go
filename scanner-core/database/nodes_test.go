@@ -987,3 +987,275 @@ func TestGetNodePackageDetails_ReturnsEmptyArrayForMissing(t *testing.T) {
 		t.Errorf("Expected empty array '[]', got %s", details)
 	}
 }
+
+// TestGetScannedNodes tests retrieving completed nodes for metrics
+func TestGetScannedNodes(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// Create nodes with different statuses
+	node1 := nodes.Node{Name: "completed-node", Hostname: "host1.local", OSRelease: "Ubuntu 22.04", KernelVersion: "5.15.0", Architecture: "amd64"}
+	node2 := nodes.Node{Name: "pending-node", Hostname: "host2.local", OSRelease: "Ubuntu 22.04", Architecture: "arm64"}
+	node3 := nodes.Node{Name: "another-completed", Hostname: "host3.local", OSRelease: "Amazon Linux 2023", Architecture: "amd64"}
+
+	_, _ = db.AddNode(node1)
+	_, _ = db.AddNode(node2)
+	_, _ = db.AddNode(node3)
+
+	// Mark node1 and node3 as completed, leave node2 as pending
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("completed-node", []byte(sbom))
+	_ = db.StoreNodeVulnerabilities("completed-node", []byte(`{"matches": []}`), time.Now())
+
+	_ = db.StoreNodeSBOM("another-completed", []byte(sbom))
+	_ = db.StoreNodeVulnerabilities("another-completed", []byte(`{"matches": []}`), time.Now())
+
+	// Get scanned nodes
+	scannedNodes, err := db.GetScannedNodes()
+	if err != nil {
+		t.Fatalf("GetScannedNodes failed: %v", err)
+	}
+
+	// Should only return completed nodes
+	if len(scannedNodes) != 2 {
+		t.Errorf("Expected 2 completed nodes, got %d", len(scannedNodes))
+	}
+
+	// Verify node data is populated correctly
+	for _, n := range scannedNodes {
+		if n.Name == "completed-node" {
+			if n.Hostname != "host1.local" {
+				t.Errorf("Expected hostname host1.local, got %s", n.Hostname)
+			}
+			if n.OSRelease != "Ubuntu 22.04" {
+				t.Errorf("Expected os_release Ubuntu 22.04, got %s", n.OSRelease)
+			}
+			if n.KernelVersion != "5.15.0" {
+				t.Errorf("Expected kernel_version 5.15.0, got %s", n.KernelVersion)
+			}
+			if n.Architecture != "amd64" {
+				t.Errorf("Expected architecture amd64, got %s", n.Architecture)
+			}
+		}
+		if n.Name == "pending-node" {
+			t.Error("pending-node should not be in scanned nodes list")
+		}
+	}
+}
+
+// TestGetScannedNodes_Empty tests that empty result returns empty slice
+func TestGetScannedNodes_Empty(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	scannedNodes, err := db.GetScannedNodes()
+	if err != nil {
+		t.Fatalf("GetScannedNodes failed: %v", err)
+	}
+
+	if scannedNodes == nil {
+		t.Error("Expected empty slice, not nil")
+	}
+	if len(scannedNodes) != 0 {
+		t.Errorf("Expected 0 nodes, got %d", len(scannedNodes))
+	}
+}
+
+// TestGetNodeVulnerabilitiesForMetrics tests retrieving vulnerabilities for metrics export
+func TestGetNodeVulnerabilitiesForMetrics(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	node := nodes.Node{
+		Name:          "test-node",
+		Hostname:      "test-node.local",
+		OSRelease:     "Ubuntu 22.04",
+		KernelVersion: "5.15.0-91-generic",
+		Architecture:  "amd64",
+	}
+	_, _ = db.AddNode(node)
+
+	sbom := `{"artifacts": [
+		{"name": "openssl", "version": "3.0.2", "type": "deb"},
+		{"name": "curl", "version": "7.81.0", "type": "deb"}
+	]}`
+	_ = db.StoreNodeSBOM("test-node", []byte(sbom))
+
+	vulnReport := `{"matches": [
+		{
+			"vulnerability": {
+				"id": "CVE-2024-1234",
+				"severity": "Critical",
+				"risk": 9.8,
+				"fix": {"state": "fixed", "versions": ["3.0.13"]},
+				"knownExploited": [{"cve": "CVE-2024-1234"}]
+			},
+			"artifact": {"name": "openssl", "version": "3.0.2", "type": "deb"}
+		},
+		{
+			"vulnerability": {
+				"id": "CVE-2024-5678",
+				"severity": "High",
+				"risk": 7.5,
+				"fix": {"state": "not-fixed"}
+			},
+			"artifact": {"name": "curl", "version": "7.81.0", "type": "deb"}
+		}
+	]}`
+	_ = db.StoreNodeVulnerabilities("test-node", []byte(vulnReport), time.Now())
+
+	// Get vulnerabilities for metrics
+	vulns, err := db.GetNodeVulnerabilitiesForMetrics()
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilitiesForMetrics failed: %v", err)
+	}
+
+	if len(vulns) != 2 {
+		t.Fatalf("Expected 2 vulnerabilities, got %d", len(vulns))
+	}
+
+	// Verify first vulnerability has all expected fields
+	var criticalVuln *NodeVulnerabilityForMetrics
+	for i := range vulns {
+		if vulns[i].CVEID == "CVE-2024-1234" {
+			criticalVuln = &vulns[i]
+			break
+		}
+	}
+
+	if criticalVuln == nil {
+		t.Fatal("Expected to find CVE-2024-1234")
+	}
+
+	// Verify node info
+	if criticalVuln.NodeName != "test-node" {
+		t.Errorf("NodeName = %s, want test-node", criticalVuln.NodeName)
+	}
+	if criticalVuln.Hostname != "test-node.local" {
+		t.Errorf("Hostname = %s, want test-node.local", criticalVuln.Hostname)
+	}
+	if criticalVuln.OSRelease != "Ubuntu 22.04" {
+		t.Errorf("OSRelease = %s, want Ubuntu 22.04", criticalVuln.OSRelease)
+	}
+	if criticalVuln.KernelVersion != "5.15.0-91-generic" {
+		t.Errorf("KernelVersion = %s, want 5.15.0-91-generic", criticalVuln.KernelVersion)
+	}
+	if criticalVuln.Architecture != "amd64" {
+		t.Errorf("Architecture = %s, want amd64", criticalVuln.Architecture)
+	}
+
+	// Verify vulnerability info
+	if criticalVuln.Severity != "Critical" {
+		t.Errorf("Severity = %s, want Critical", criticalVuln.Severity)
+	}
+	if criticalVuln.Score != 9.8 {
+		t.Errorf("Score = %f, want 9.8", criticalVuln.Score)
+	}
+	if criticalVuln.FixStatus != "fixed" {
+		t.Errorf("FixStatus = %s, want fixed", criticalVuln.FixStatus)
+	}
+	if criticalVuln.FixVersion != "3.0.13" {
+		t.Errorf("FixVersion = %s, want 3.0.13", criticalVuln.FixVersion)
+	}
+	if criticalVuln.KnownExploited != 1 {
+		t.Errorf("KnownExploited = %d, want 1", criticalVuln.KnownExploited)
+	}
+
+	// Verify package info
+	if criticalVuln.PackageName != "openssl" {
+		t.Errorf("PackageName = %s, want openssl", criticalVuln.PackageName)
+	}
+	if criticalVuln.PackageVersion != "3.0.2" {
+		t.Errorf("PackageVersion = %s, want 3.0.2", criticalVuln.PackageVersion)
+	}
+	if criticalVuln.PackageType != "deb" {
+		t.Errorf("PackageType = %s, want deb", criticalVuln.PackageType)
+	}
+}
+
+// TestGetNodeVulnerabilitiesForMetrics_OnlyCompletedNodes tests that only completed nodes are included
+func TestGetNodeVulnerabilitiesForMetrics_OnlyCompletedNodes(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// Create two nodes
+	node1 := nodes.Node{Name: "completed-node"}
+	node2 := nodes.Node{Name: "pending-node"}
+	_, _ = db.AddNode(node1)
+	_, _ = db.AddNode(node2)
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.0", "type": "deb"}]}`
+	vulnReport := `{"matches": [{"vulnerability": {"id": "CVE-2024-0001", "severity": "High"}, "artifact": {"name": "openssl", "version": "1.0", "type": "deb"}}]}`
+
+	// Complete first node
+	_ = db.StoreNodeSBOM("completed-node", []byte(sbom))
+	_ = db.StoreNodeVulnerabilities("completed-node", []byte(vulnReport), time.Now())
+
+	// Only store SBOM for second node (leaves it in scanning_vulnerabilities status)
+	_ = db.StoreNodeSBOM("pending-node", []byte(sbom))
+
+	vulns, err := db.GetNodeVulnerabilitiesForMetrics()
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilitiesForMetrics failed: %v", err)
+	}
+
+	// Should only include vulnerabilities from completed node
+	if len(vulns) != 1 {
+		t.Errorf("Expected 1 vulnerability (from completed node only), got %d", len(vulns))
+	}
+
+	if len(vulns) > 0 && vulns[0].NodeName != "completed-node" {
+		t.Errorf("Expected vulnerability from completed-node, got %s", vulns[0].NodeName)
+	}
+}
+
+// TestGetNodeVulnerabilitiesForMetrics_Empty tests empty result returns empty slice
+func TestGetNodeVulnerabilitiesForMetrics_Empty(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	vulns, err := db.GetNodeVulnerabilitiesForMetrics()
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilitiesForMetrics failed: %v", err)
+	}
+
+	if vulns == nil {
+		t.Error("Expected empty slice, not nil")
+	}
+	if len(vulns) != 0 {
+		t.Errorf("Expected 0 vulnerabilities, got %d", len(vulns))
+	}
+}
+
+// TestGetNodeVulnerabilitiesForMetrics_DeduplicatedCount tests that count is preserved
+func TestGetNodeVulnerabilitiesForMetrics_DeduplicatedCount(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	node := nodes.Node{Name: "test-node"}
+	_, _ = db.AddNode(node)
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.0", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("test-node", []byte(sbom))
+
+	// Same CVE appearing 3 times (e.g., from different matchers)
+	vulnReport := `{"matches": [
+		{"vulnerability": {"id": "CVE-2024-0001", "severity": "High"}, "artifact": {"name": "openssl", "version": "1.0", "type": "deb"}},
+		{"vulnerability": {"id": "CVE-2024-0001", "severity": "High"}, "artifact": {"name": "openssl", "version": "1.0", "type": "deb"}},
+		{"vulnerability": {"id": "CVE-2024-0001", "severity": "High"}, "artifact": {"name": "openssl", "version": "1.0", "type": "deb"}}
+	]}`
+	_ = db.StoreNodeVulnerabilities("test-node", []byte(vulnReport), time.Now())
+
+	vulns, err := db.GetNodeVulnerabilitiesForMetrics()
+	if err != nil {
+		t.Fatalf("GetNodeVulnerabilitiesForMetrics failed: %v", err)
+	}
+
+	if len(vulns) != 1 {
+		t.Fatalf("Expected 1 deduplicated vulnerability, got %d", len(vulns))
+	}
+
+	if vulns[0].Count != 3 {
+		t.Errorf("Expected Count=3, got %d", vulns[0].Count)
+	}
+}

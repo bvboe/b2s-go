@@ -153,7 +153,87 @@ bjorn2scan_image_vulnerability_risk{deployment_uuid="abc-123",namespace="fronten
 - Agent config: `metrics_vulnerability_risk_enabled=true`
 - Environment: `METRICS_VULNERABILITY_RISK_ENABLED=true`
 
-### 3. Aggregated Queries
+### 5. Node Metrics
+
+Node metrics are enabled when host scanning is enabled. They mirror the structure of image metrics but report vulnerabilities found in node/host packages.
+
+#### `bjorn2scan_node_scanned`
+Gauge metric for each scanned node (value always 1 per node). Only includes nodes with completed scans.
+
+**Labels**:
+- `deployment_uuid`: Unique deployment identifier
+- `deployment_name`: Deployment name
+- `node`: Kubernetes node name
+- `hostname`: Node hostname
+- `os_release`: OS version (e.g., "Ubuntu 22.04.3 LTS")
+- `kernel_version`: Kernel version
+- `architecture`: CPU architecture (amd64, arm64)
+- `instance_type`: Type of instance ("NODE")
+
+**Example**:
+```
+bjorn2scan_node_scanned{deployment_uuid="abc-123",deployment_name="prod-cluster",node="node-1",hostname="node-1.local",os_release="Ubuntu 22.04.3 LTS",kernel_version="5.15.0-91-generic",architecture="amd64",instance_type="NODE"} 1
+```
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.nodeScannedEnabled: true`
+- Agent config: `metrics_node_scanned_enabled=true`
+- Environment: `METRICS_NODE_SCANNED_ENABLED=true`
+
+#### `bjorn2scan_node_vulnerability`
+Gauge metric reporting vulnerabilities found in node packages. Value represents the count of vulnerability instances.
+
+**Labels**: All labels from `bjorn2scan_node_scanned` plus:
+- `severity`: Vulnerability severity (Critical, High, Medium, Low, Negligible, Unknown)
+- `vulnerability`: CVE ID (e.g., "CVE-2024-1234")
+- `vulnerability_id`: Unique identifier combining deployment UUID and vulnerability DB ID
+- `package_name`: Affected package name
+- `package_version`: Affected package version
+- `package_type`: Package type (deb, rpm, apk, etc.)
+- `fix_status`: Fix availability ("fixed", "not-fixed", "unknown")
+- `fixed_version`: Version with fix (if available)
+
+**Example**:
+```
+bjorn2scan_node_vulnerability{deployment_uuid="abc-123",deployment_name="prod-cluster",node="node-1",hostname="node-1.local",os_release="Ubuntu 22.04.3 LTS",kernel_version="5.15.0-91-generic",architecture="amd64",instance_type="NODE",severity="Critical",vulnerability="CVE-2024-1234",vulnerability_id="abc-123.42",package_name="openssl",package_version="3.0.2",package_type="deb",fix_status="fixed",fixed_version="3.0.13"} 1
+```
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.nodeVulnerabilitiesEnabled: true`
+- Agent config: `metrics_node_vulnerabilities_enabled=true`
+- Environment: `METRICS_NODE_VULNERABILITIES_ENABLED=true`
+
+#### `bjorn2scan_node_vulnerability_risk`
+Gauge metric reporting vulnerability risk scores for node packages. Value represents the risk score (float) multiplied by count.
+
+**Labels**: Same as `bjorn2scan_node_vulnerability`
+
+**Example**:
+```
+bjorn2scan_node_vulnerability_risk{deployment_uuid="abc-123",deployment_name="prod-cluster",node="node-1",...,severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",...} 9.8
+```
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.nodeVulnerabilityRiskEnabled: true`
+- Agent config: `metrics_node_vulnerability_risk_enabled=true`
+- Environment: `METRICS_NODE_VULNERABILITY_RISK_ENABLED=true`
+
+#### `bjorn2scan_node_vulnerability_exploited`
+Gauge metric reporting known exploited vulnerabilities (CISA KEV catalog) on nodes. Only includes vulnerabilities with known exploits.
+
+**Labels**: Same as `bjorn2scan_node_vulnerability`
+
+**Example**:
+```
+bjorn2scan_node_vulnerability_exploited{deployment_uuid="abc-123",deployment_name="prod-cluster",node="node-1",...,severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",...} 1
+```
+
+**Configuration**:
+- Helm: `scanServer.config.metrics.nodeVulnerabilityExploitedEnabled: true`
+- Agent config: `metrics_node_vulnerability_exploited_enabled=true`
+- Environment: `METRICS_NODE_VULNERABILITY_EXPLOITED_ENABLED=true`
+
+### 6. Aggregated Queries
 
 While there are no dedicated total metrics, you can derive counts using PromQL:
 
@@ -300,6 +380,28 @@ bjorn2scan_deployment{grype_db_built!=""}
 # Extract the grype_db_built label for alerting (use with alertmanager)
 # Example alert: Database older than 7 days
 # This requires parsing the RFC3339 timestamp in your alerting rules
+```
+
+### Node vulnerability queries
+
+```promql
+# Count total scanned nodes
+count(bjorn2scan_node_scanned)
+
+# Count node vulnerabilities by severity
+sum by (severity) (bjorn2scan_node_vulnerability)
+
+# Critical node vulnerabilities
+count(bjorn2scan_node_vulnerability{severity="Critical"})
+
+# Known exploited vulnerabilities on nodes (CISA KEV)
+sum by (node) (bjorn2scan_node_vulnerability_exploited)
+
+# Total risk exposure by node
+sum by (node) (bjorn2scan_node_vulnerability_risk)
+
+# Nodes with high-risk vulnerabilities (risk > 7.0)
+count by (node) (bjorn2scan_node_vulnerability_risk > 7.0)
 ```
 
 ## Grafana Dashboard

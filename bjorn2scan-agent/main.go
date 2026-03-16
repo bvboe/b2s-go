@@ -588,6 +588,14 @@ func main() {
 		ImageScanStatusEnabled:        cfg.MetricsImageScanStatusEnabled,
 	}
 
+	// Create node collector config for metrics (only when host scanning is enabled)
+	nodeCollectorConfig := metrics.NodeCollectorConfig{
+		NodeScannedEnabled:              cfg.MetricsNodeScannedEnabled && cfg.HostScanningEnabled,
+		NodeVulnerabilitiesEnabled:      cfg.MetricsNodeVulnerabilitiesEnabled && cfg.HostScanningEnabled,
+		NodeVulnerabilityRiskEnabled:    cfg.MetricsNodeVulnerabilityRiskEnabled && cfg.HostScanningEnabled,
+		NodeVulnerabilityExploitedEnabled: cfg.MetricsNodeVulnerabilityExploitedEnabled && cfg.HostScanningEnabled,
+	}
+
 	// Create metric tracker for staleness detection (shared between /metrics and OTEL)
 	metricTracker := metrics.NewMetricTracker(metrics.MetricTrackerConfig{
 		StalenessWindow: cfg.MetricsStalenessWindow,
@@ -596,8 +604,8 @@ func main() {
 	})
 	log.Printf("Metric staleness tracking enabled (window: %v)", cfg.MetricsStalenessWindow)
 
-	// Register Prometheus metrics endpoint with staleness tracking
-	metrics.RegisterMetricsHandlerWithTracker(mux, infoProvider, deploymentUUID.String(), db, collectorConfig, metricTracker)
+	// Register Prometheus metrics endpoint with node metrics support
+	metrics.RegisterMetricsHandlerWithNodes(mux, infoProvider, deploymentUUID.String(), db, collectorConfig, db, nodeCollectorConfig, metricTracker)
 
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter

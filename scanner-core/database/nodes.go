@@ -1112,6 +1112,143 @@ type NodeFilterOptions struct {
 	PackageTypes []string `json:"packageTypes"`
 }
 
+// NodeVulnerabilityForMetrics contains vulnerability data for metrics export
+// This struct combines node, package, and vulnerability data in a single row
+type NodeVulnerabilityForMetrics struct {
+	// Node info
+	NodeName      string
+	Hostname      string
+	OSRelease     string
+	KernelVersion string
+	Architecture  string
+	// Vulnerability info
+	VulnID         int64
+	CVEID          string
+	Severity       string
+	Score          float64
+	FixStatus      string
+	FixVersion     string
+	KnownExploited int
+	// Package info
+	PackageName    string
+	PackageVersion string
+	PackageType    string
+	Count          int
+}
+
+// GetNodeVulnerabilitiesForMetrics retrieves all node vulnerabilities with full context for metrics export
+// Returns a denormalized view joining nodes, node_packages, and node_vulnerabilities
+// Uses existing indexes: idx_nodes_status, idx_node_vulnerabilities_node, idx_node_vulnerabilities_package
+func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics, error) {
+	rows, err := db.conn.Query(`
+		SELECT
+			n.name,
+			COALESCE(n.hostname, '') as hostname,
+			COALESCE(n.os_release, '') as os_release,
+			COALESCE(n.kernel_version, '') as kernel_version,
+			COALESCE(n.architecture, '') as architecture,
+			nv.id as vuln_id,
+			nv.cve_id,
+			COALESCE(nv.severity, 'Unknown') as severity,
+			COALESCE(nv.score, 0) as score,
+			COALESCE(nv.fix_status, 'unknown') as fix_status,
+			COALESCE(nv.fix_version, '') as fix_version,
+			COALESCE(nv.known_exploited, 0) as known_exploited,
+			np.name as package_name,
+			np.version as package_version,
+			COALESCE(np.type, '') as package_type,
+			COALESCE(nv.count, 1) as count
+		FROM node_vulnerabilities nv
+		JOIN nodes n ON nv.node_id = n.id
+		JOIN node_packages np ON nv.package_id = np.id
+		WHERE n.status = 'completed'
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query node vulnerabilities for metrics: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
+	result := make([]NodeVulnerabilityForMetrics, 0)
+	for rows.Next() {
+		var v NodeVulnerabilityForMetrics
+		err := rows.Scan(
+			&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
+			&v.VulnID, &v.CVEID, &v.Severity, &v.Score, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
+			&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan node vulnerability row: %w", err)
+		}
+		result = append(result, v)
+	}
+
+	return result, nil
+}
+
+// GetScannedNodes retrieves all completed nodes for the bjorn2scan_node_scanned metric
+func (db *DB) GetScannedNodes() ([]nodes.NodeWithStatus, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, name, hostname, os_release, kernel_version, architecture,
+			container_runtime, kubelet_version, status, status_error,
+			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at
+		FROM nodes
+		WHERE status = 'completed'
+		ORDER BY name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query scanned nodes: %w", err)
+	}
+
+	// Collect all rows first before making additional queries
+	var nodeRows []NodeRow
+	for rows.Next() {
+		var row NodeRow
+		err := rows.Scan(
+			&row.ID, &row.Name, &row.Hostname, &row.OSRelease, &row.KernelVersion,
+			&row.Architecture, &row.ContainerRuntime, &row.KubeletVersion,
+			&row.Status, &row.StatusError, &row.SBOMScannedAt, &row.VulnsScannedAt,
+			&row.GrypeDBBuilt, &row.CreatedAt, &row.UpdatedAt,
+		)
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("failed to scan node row: %w", err)
+		}
+		nodeRows = append(nodeRows, row)
+	}
+	_ = rows.Close()
+
+	// Convert rows to NodeWithStatus (skips the additional queries for counts since we don't need them for metrics)
+	result := make([]nodes.NodeWithStatus, 0, len(nodeRows))
+	for _, row := range nodeRows {
+		node := nodes.NodeWithStatus{
+			Node: nodes.Node{
+				Name: row.Name,
+			},
+			NodeScanStatus: nodes.NodeScanStatus{
+				Status: "completed",
+			},
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+		}
+		if row.Hostname.Valid {
+			node.Hostname = row.Hostname.String
+		}
+		if row.OSRelease.Valid {
+			node.OSRelease = row.OSRelease.String
+		}
+		if row.KernelVersion.Valid {
+			node.KernelVersion = row.KernelVersion.String
+		}
+		if row.Architecture.Valid {
+			node.Architecture = row.Architecture.String
+		}
+		result = append(result, node)
+	}
+
+	return result, nil
+}
+
 // GetNodeFilterOptions returns distinct values for node filter dropdowns
 func (db *DB) GetNodeFilterOptions() (*NodeFilterOptions, error) {
 	options := &NodeFilterOptions{

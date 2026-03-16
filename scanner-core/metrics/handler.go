@@ -70,6 +70,57 @@ func HandlerWithTracker(infoProvider InfoProvider, deploymentUUID string, databa
 	}
 }
 
+// HandlerWithNodes returns an HTTP handler for the /metrics endpoint with node metrics support
+func HandlerWithNodes(infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, nodeDatabase NodeDatabaseProvider, nodeConfig NodeCollectorConfig, tracker *MetricTracker) http.HandlerFunc {
+	collector := NewCollector(infoProvider, deploymentUUID, database, config)
+	if tracker != nil {
+		collector.SetTracker(tracker)
+	}
+
+	var nodeCollector *NodeCollector
+	if nodeDatabase != nil {
+		nodeCollector = NewNodeCollector(deploymentUUID, infoProvider.GetDeploymentName(), nodeDatabase, nodeConfig)
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Only accept GET requests
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Collect image/container metrics
+		data, err := collector.Collect()
+		if err != nil {
+			log.Printf("Error collecting metrics: %v", err)
+			http.Error(w, "Failed to collect metrics", http.StatusInternalServerError)
+			return
+		}
+
+		// Collect node metrics if enabled
+		if nodeCollector != nil {
+			nodeData, err := nodeCollector.Collect()
+			if err != nil {
+				log.Printf("Error collecting node metrics: %v", err)
+				// Continue with image metrics even if node metrics fail
+			} else {
+				// Merge node metrics into the main data
+				data.Families = append(data.Families, nodeData.Families...)
+			}
+		}
+
+		// Format as Prometheus text
+		metricsText := FormatPrometheus(data)
+
+		// Write response
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte(metricsText)); err != nil {
+			log.Printf("Error writing metrics response: %v", err)
+		}
+	}
+}
+
 // RegisterMetricsHandler registers the /metrics endpoint on the provided mux
 func RegisterMetricsHandler(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig) {
 	mux.HandleFunc("/metrics", Handler(infoProvider, deploymentUUID, database, config))
@@ -80,4 +131,10 @@ func RegisterMetricsHandler(mux *http.ServeMux, infoProvider InfoProvider, deplo
 func RegisterMetricsHandlerWithTracker(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, tracker *MetricTracker) {
 	mux.HandleFunc("/metrics", HandlerWithTracker(infoProvider, deploymentUUID, database, config, tracker))
 	log.Println("Metrics handler registered at /metrics (with staleness tracking)")
+}
+
+// RegisterMetricsHandlerWithNodes registers the /metrics endpoint with node metrics support
+func RegisterMetricsHandlerWithNodes(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, nodeDatabase NodeDatabaseProvider, nodeConfig NodeCollectorConfig, tracker *MetricTracker) {
+	mux.HandleFunc("/metrics", HandlerWithNodes(infoProvider, deploymentUUID, database, config, nodeDatabase, nodeConfig, tracker))
+	log.Println("Metrics handler registered at /metrics (with node metrics)")
 }

@@ -91,6 +91,14 @@ spec:
           value: {{ .Values.scanServer.config.metrics.imageScanStatusEnabled | quote }}
         - name: METRICS_STALENESS_WINDOW
           value: {{ .Values.scanServer.config.metrics.stalenessWindow | quote }}
+        - name: METRICS_NODE_SCANNED_ENABLED
+          value: {{ .Values.scanServer.config.metrics.nodeScannedEnabled | quote }}
+        - name: METRICS_NODE_VULNERABILITIES_ENABLED
+          value: {{ .Values.scanServer.config.metrics.nodeVulnerabilitiesEnabled | quote }}
+        - name: METRICS_NODE_VULNERABILITY_RISK_ENABLED
+          value: {{ .Values.scanServer.config.metrics.nodeVulnerabilityRiskEnabled | quote }}
+        - name: METRICS_NODE_VULNERABILITY_EXPLOITED_ENABLED
+          value: {{ .Values.scanServer.config.metrics.nodeVulnerabilityExploitedEnabled | quote }}
         - name: JOBS_RESCAN_DATABASE_ENABLED
           value: {{ .Values.scanServer.config.jobs.rescanDatabase.enabled | quote }}
         - name: JOBS_RESCAN_DATABASE_INTERVAL
