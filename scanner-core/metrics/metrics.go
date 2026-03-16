@@ -308,8 +308,8 @@ func (c *Collector) collectScannedContainerMetrics() (MetricFamily, error) {
 	}
 
 	return MetricFamily{
-		Name:    "bjorn2scan_scanned_container",
-		Help:    "Bjorn2scan scanned container information",
+		Name:    "bjorn2scan_image_scanned",
+		Help:    "Bjorn2scan scanned container image information",
 		Type:    "gauge",
 		Metrics: metrics,
 	}, nil
@@ -327,8 +327,8 @@ func (c *Collector) collectVulnerabilityMetrics(vulns []database.ContainerVulner
 	}
 
 	return MetricFamily{
-		Name:    "bjorn2scan_vulnerability",
-		Help:    "Bjorn2scan vulnerability information for running containers",
+		Name:    "bjorn2scan_image_vulnerability",
+		Help:    "Bjorn2scan vulnerability information for container images",
 		Type:    "gauge",
 		Metrics: metrics,
 	}
@@ -352,8 +352,8 @@ func (c *Collector) collectVulnerabilityExploitedMetrics(vulns []database.Contai
 	}
 
 	return MetricFamily{
-		Name:    "bjorn2scan_vulnerability_exploited",
-		Help:    "Bjorn2scan known exploited vulnerabilities (CISA KEV) in running containers",
+		Name:    "bjorn2scan_image_vulnerability_exploited",
+		Help:    "Bjorn2scan known exploited vulnerabilities (CISA KEV) in container images",
 		Type:    "gauge",
 		Metrics: metrics,
 	}
@@ -372,8 +372,8 @@ func (c *Collector) collectVulnerabilityRiskMetrics(vulns []database.ContainerVu
 	}
 
 	return MetricFamily{
-		Name:    "bjorn2scan_vulnerability_risk",
-		Help:    "Bjorn2scan vulnerability risk scores for running containers",
+		Name:    "bjorn2scan_image_vulnerability_risk",
+		Help:    "Bjorn2scan vulnerability risk scores for container images",
 		Type:    "gauge",
 		Metrics: metrics,
 	}

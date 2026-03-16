@@ -96,8 +96,8 @@ bjorn2scan_scanned_instance{deployment_uuid="abc-123",host_name="node-1",namespa
 
 ### 4. Vulnerability Metrics
 
-#### `bjorn2scan_vulnerability`
-Gauge metric reporting all vulnerabilities found in running container instances. Value represents the number of vulnerability instances.
+#### `bjorn2scan_image_vulnerability`
+Gauge metric reporting all vulnerabilities found in running container images. Value represents the number of vulnerability instances.
 
 **Labels**:
 - All labels from `bjorn2scan_scanned_instance` plus:
@@ -111,7 +111,7 @@ Gauge metric reporting all vulnerabilities found in running container instances.
 
 **Example**:
 ```
-bjorn2scan_vulnerability{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 2
+bjorn2scan_image_vulnerability{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 2
 ```
 
 **Configuration**:
@@ -119,14 +119,14 @@ bjorn2scan_vulnerability{deployment_uuid="abc-123",namespace="frontend",pod="web
 - Agent config: `metrics_vulnerabilities_enabled=true`
 - Environment: `METRICS_VULNERABILITIES_ENABLED=true`
 
-#### `bjorn2scan_vulnerability_exploited`
-Gauge metric reporting known exploited vulnerabilities (CISA KEV catalog) in running container instances. Only includes vulnerabilities with known exploits. Value is always 1 (presence indicates exploitation).
+#### `bjorn2scan_image_vulnerability_exploited`
+Gauge metric reporting known exploited vulnerabilities (CISA KEV catalog) in running container images. Only includes vulnerabilities with known exploits. Value is always 1 (presence indicates exploitation).
 
-**Labels**: Same as `bjorn2scan_vulnerability`
+**Labels**: Same as `bjorn2scan_image_vulnerability`
 
 **Example**:
 ```
-bjorn2scan_vulnerability_exploited{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 1
+bjorn2scan_image_vulnerability_exploited{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 1
 ```
 
 **Use Case**: This metric helps prioritize remediation by highlighting vulnerabilities that are actively being exploited in the wild according to CISA's Known Exploited Vulnerabilities catalog.
@@ -136,14 +136,14 @@ bjorn2scan_vulnerability_exploited{deployment_uuid="abc-123",namespace="frontend
 - Agent config: `metrics_vulnerability_exploited_enabled=true`
 - Environment: `METRICS_VULNERABILITY_EXPLOITED_ENABLED=true`
 
-#### `bjorn2scan_vulnerability_risk`
-Gauge metric reporting vulnerability risk scores for running container instances. Value represents the risk score (float) for each vulnerability. Includes all vulnerabilities regardless of risk value.
+#### `bjorn2scan_image_vulnerability_risk`
+Gauge metric reporting vulnerability risk scores for running container images. Value represents the risk score (float) for each vulnerability. Includes all vulnerabilities regardless of risk value.
 
-**Labels**: Same as `bjorn2scan_vulnerability`
+**Labels**: Same as `bjorn2scan_image_vulnerability`
 
 **Example**:
 ```
-bjorn2scan_vulnerability_risk{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 7.5
+bjorn2scan_image_vulnerability_risk{deployment_uuid="abc-123",namespace="frontend",pod="web-app",container="nginx",severity="Critical",vulnerability="CVE-2024-1234",package_name="openssl",package_version="3.0.0",fix_status="fixed",fixed_version="3.0.13"} 7.5
 ```
 
 **Use Case**: This metric provides granular risk assessment based on multiple factors (CVSS, EPSS, exploitability). The risk score helps prioritize remediation efforts with more nuance than severity alone.
@@ -239,12 +239,12 @@ scrape_configs:
 
 ### Count vulnerabilities by severity
 ```promql
-sum by (severity) (bjorn2scan_vulnerability)
+sum by (severity) (bjorn2scan_image_vulnerability)
 ```
 
 ### Count containers with critical vulnerabilities
 ```promql
-count(bjorn2scan_vulnerability{severity="Critical"})
+count(bjorn2scan_image_vulnerability{severity="Critical"})
 ```
 
 ### Container instances by namespace
@@ -254,37 +254,37 @@ count by (namespace) (bjorn2scan_scanned_instance)
 
 ### Known exploited vulnerabilities (CISA KEV) by severity
 ```promql
-sum by (severity) (bjorn2scan_vulnerability_exploited > 0)
+sum by (severity) (bjorn2scan_image_vulnerability_exploited > 0)
 ```
 
 ### Containers with actively exploited CVEs
 ```promql
-count by (namespace, pod, container) (bjorn2scan_vulnerability_exploited > 0)
+count by (namespace, pod, container) (bjorn2scan_image_vulnerability_exploited > 0)
 ```
 
 ### Top 10 most critical exploited vulnerabilities
 ```promql
-topk(10, sum by (vulnerability, severity) (bjorn2scan_vulnerability_exploited{severity="Critical"}))
+topk(10, sum by (vulnerability, severity) (bjorn2scan_image_vulnerability_exploited{severity="Critical"}))
 ```
 
 ### Average risk score by severity
 ```promql
-avg by (severity) (bjorn2scan_vulnerability_risk)
+avg by (severity) (bjorn2scan_image_vulnerability_risk)
 ```
 
 ### Highest risk vulnerabilities across all containers
 ```promql
-topk(10, max by (vulnerability, severity) (bjorn2scan_vulnerability_risk))
+topk(10, max by (vulnerability, severity) (bjorn2scan_image_vulnerability_risk))
 ```
 
 ### Containers with high-risk vulnerabilities (risk > 7.0)
 ```promql
-count by (namespace, pod, container) (bjorn2scan_vulnerability_risk > 7.0)
+count by (namespace, pod, container) (bjorn2scan_image_vulnerability_risk > 7.0)
 ```
 
 ### Total risk exposure by namespace
 ```promql
-sum by (namespace) (bjorn2scan_vulnerability_risk)
+sum by (namespace) (bjorn2scan_image_vulnerability_risk)
 ```
 
 ### Deployment info

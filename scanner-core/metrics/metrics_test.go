@@ -300,8 +300,8 @@ func TestCollector_CollectScannedContainers(t *testing.T) {
 	}
 
 	// Verify scanned container metric is present
-	if !strings.Contains(metrics, "bjorn2scan_scanned_container{") {
-		t.Error("Expected bjorn2scan_scanned_container metric")
+	if !strings.Contains(metrics, "bjorn2scan_image_scanned{") {
+		t.Error("Expected bjorn2scan_image_scanned metric")
 	}
 
 	// Verify first instance
@@ -338,7 +338,7 @@ func TestCollector_CollectScannedContainers(t *testing.T) {
 	}
 
 	// Count the number of scanned container metrics (should be 2)
-	count := strings.Count(metrics, "bjorn2scan_scanned_container{")
+	count := strings.Count(metrics, "bjorn2scan_image_scanned{")
 	if count != 2 {
 		t.Errorf("Expected 2 scanned container metrics, got %d", count)
 	}
@@ -487,7 +487,7 @@ func TestCollector_ConfigToggles(t *testing.T) {
 			metrics := FormatPrometheus(data)
 
 			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
-			hasScannedContainer := strings.Contains(metrics, "bjorn2scan_scanned_container{")
+			hasScannedContainer := strings.Contains(metrics, "bjorn2scan_image_scanned{")
 
 			if hasDeployment != tc.expectDeployment {
 				t.Errorf("Expected deployment metric present=%v, got=%v", tc.expectDeployment, hasDeployment)
@@ -578,8 +578,8 @@ func TestCollector_ScannedContainersWithNilDatabase(t *testing.T) {
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
 		t.Error("Expected bjorn2scan_deployment metric")
 	}
-	if strings.Contains(metrics, "bjorn2scan_scanned_container{") {
-		t.Error("Expected no bjorn2scan_scanned_container metric with nil database")
+	if strings.Contains(metrics, "bjorn2scan_image_scanned{") {
+		t.Error("Expected no bjorn2scan_image_scanned metric with nil database")
 	}
 }
 
@@ -644,8 +644,8 @@ func TestCollector_CollectVulnerabilities(t *testing.T) {
 	metrics := FormatPrometheus(data)
 
 	// Verify vulnerability metric is present
-	if !strings.Contains(metrics, "bjorn2scan_vulnerability{") {
-		t.Error("Expected bjorn2scan_vulnerability metric")
+	if !strings.Contains(metrics, "bjorn2scan_image_vulnerability{") {
+		t.Error("Expected bjorn2scan_image_vulnerability metric")
 	}
 
 	// Verify first vulnerability labels
@@ -687,7 +687,7 @@ func TestCollector_CollectVulnerabilities(t *testing.T) {
 	}
 
 	// Count occurrences - should have 2 total metrics
-	vulnCount := strings.Count(metrics, "bjorn2scan_vulnerability{")
+	vulnCount := strings.Count(metrics, "bjorn2scan_image_vulnerability{")
 	if vulnCount != 2 {
 		t.Errorf("Expected 2 vulnerabilities, got %d", vulnCount)
 	}
@@ -879,8 +879,8 @@ func TestCollector_ConfigTogglesWithVulnerabilities(t *testing.T) {
 			metrics := FormatPrometheus(data)
 
 			hasDeployment := strings.Contains(metrics, "bjorn2scan_deployment{")
-			hasScannedContainer := strings.Contains(metrics, "bjorn2scan_scanned_container{")
-			hasVulnerability := strings.Contains(metrics, "bjorn2scan_vulnerability{")
+			hasScannedContainer := strings.Contains(metrics, "bjorn2scan_image_scanned{")
+			hasVulnerability := strings.Contains(metrics, "bjorn2scan_image_vulnerability{")
 
 			if hasDeployment != tc.expectDeployment {
 				t.Errorf("Expected deployment metric present=%v, got=%v", tc.expectDeployment, hasDeployment)
@@ -923,8 +923,8 @@ func TestCollector_VulnerabilitiesWithNilDatabase(t *testing.T) {
 	if !strings.Contains(metrics, "bjorn2scan_deployment{") {
 		t.Error("Expected bjorn2scan_deployment metric")
 	}
-	if strings.Contains(metrics, "bjorn2scan_vulnerability{") {
-		t.Error("Expected no bjorn2scan_vulnerability metric with nil database")
+	if strings.Contains(metrics, "bjorn2scan_image_vulnerability{") {
+		t.Error("Expected no bjorn2scan_image_vulnerability metric with nil database")
 	}
 }
 
@@ -1087,8 +1087,8 @@ func TestCollector_CollectVulnerabilityRisk(t *testing.T) {
 	metrics := FormatPrometheus(data)
 
 	// Verify vulnerability risk metric is present
-	if !strings.Contains(metrics, "bjorn2scan_vulnerability_risk{") {
-		t.Error("Expected bjorn2scan_vulnerability_risk metric")
+	if !strings.Contains(metrics, "bjorn2scan_image_vulnerability_risk{") {
+		t.Error("Expected bjorn2scan_image_vulnerability_risk metric")
 	}
 
 	// Verify all three vulnerabilities are included (no filtering)
@@ -1246,7 +1246,7 @@ func TestCollector_ConfigTogglesWithVulnerabilityRisk(t *testing.T) {
 			}
 
 			metrics := FormatPrometheus(data)
-			hasMetric := strings.Contains(metrics, "bjorn2scan_vulnerability_risk")
+			hasMetric := strings.Contains(metrics, "bjorn2scan_image_vulnerability_risk")
 
 			if hasMetric != tt.expectMetric {
 				t.Errorf("Expected metric presence: %v, got: %v", tt.expectMetric, hasMetric)
@@ -1345,7 +1345,7 @@ func TestCollector_VulnerabilityRiskFloatValues(t *testing.T) {
 	// Verify Prometheus format is valid (should use %g which produces valid float format)
 	lines := strings.Split(metrics, "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "bjorn2scan_vulnerability_risk{") {
+		if strings.Contains(line, "bjorn2scan_image_vulnerability_risk{") {
 			// Line should end with a valid float
 			parts := strings.Split(line, "} ")
 			if len(parts) != 2 {
@@ -1376,7 +1376,7 @@ func TestCollector_VulnerabilityRiskWithNilDatabase(t *testing.T) {
 	metrics := FormatPrometheus(data)
 
 	// Should not contain vulnerability risk metric when database is nil
-	if strings.Contains(metrics, "bjorn2scan_vulnerability_risk") {
+	if strings.Contains(metrics, "bjorn2scan_image_vulnerability_risk") {
 		t.Error("Should not have vulnerability risk metric with nil database")
 	}
 }
