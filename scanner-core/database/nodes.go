@@ -1187,61 +1187,32 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 }
 
 // GetScannedNodes retrieves all completed nodes for the bjorn2scan_node_scanned metric
+// Only selects columns needed for metrics labels to minimize overhead
 func (db *DB) GetScannedNodes() ([]nodes.NodeWithStatus, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, name, hostname, os_release, kernel_version, architecture,
-			container_runtime, kubelet_version, status, status_error,
-			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at
+		SELECT
+			name,
+			COALESCE(hostname, '') as hostname,
+			COALESCE(os_release, '') as os_release,
+			COALESCE(kernel_version, '') as kernel_version,
+			COALESCE(architecture, '') as architecture
 		FROM nodes
 		WHERE status = 'completed'
-		ORDER BY name
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query scanned nodes: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
 
-	// Collect all rows first before making additional queries
-	var nodeRows []NodeRow
+	result := make([]nodes.NodeWithStatus, 0)
 	for rows.Next() {
-		var row NodeRow
+		var node nodes.NodeWithStatus
 		err := rows.Scan(
-			&row.ID, &row.Name, &row.Hostname, &row.OSRelease, &row.KernelVersion,
-			&row.Architecture, &row.ContainerRuntime, &row.KubeletVersion,
-			&row.Status, &row.StatusError, &row.SBOMScannedAt, &row.VulnsScannedAt,
-			&row.GrypeDBBuilt, &row.CreatedAt, &row.UpdatedAt,
+			&node.Name, &node.Hostname, &node.OSRelease,
+			&node.KernelVersion, &node.Architecture,
 		)
 		if err != nil {
-			_ = rows.Close()
 			return nil, fmt.Errorf("failed to scan node row: %w", err)
-		}
-		nodeRows = append(nodeRows, row)
-	}
-	_ = rows.Close()
-
-	// Convert rows to NodeWithStatus (skips the additional queries for counts since we don't need them for metrics)
-	result := make([]nodes.NodeWithStatus, 0, len(nodeRows))
-	for _, row := range nodeRows {
-		node := nodes.NodeWithStatus{
-			Node: nodes.Node{
-				Name: row.Name,
-			},
-			NodeScanStatus: nodes.NodeScanStatus{
-				Status: "completed",
-			},
-			CreatedAt: row.CreatedAt,
-			UpdatedAt: row.UpdatedAt,
-		}
-		if row.Hostname.Valid {
-			node.Hostname = row.Hostname.String
-		}
-		if row.OSRelease.Valid {
-			node.OSRelease = row.OSRelease.String
-		}
-		if row.KernelVersion.Valid {
-			node.KernelVersion = row.KernelVersion.String
-		}
-		if row.Architecture.Valid {
-			node.Architecture = row.Architecture.String
 		}
 		result = append(result, node)
 	}
