@@ -483,6 +483,23 @@ func main() {
 			log.Printf("Scheduled cleanup-orphaned-images job (interval: %v, timeout: %v)", cfg.JobsCleanupInterval, cfg.JobsCleanupTimeout)
 		}
 
+		// Add rescan-nodes job - periodic full rescan with fresh SBOMs
+		// Only enabled when both host scanning and the job are enabled
+		if cfg.HostScanningEnabled && cfg.JobsRescanNodesEnabled {
+			rescanNodesJob := jobs.NewRescanNodesJob(db, scanQueue)
+			if err := sched.AddJob(
+				rescanNodesJob,
+				scheduler.NewIntervalSchedule(cfg.JobsRescanNodesInterval),
+				scheduler.JobConfig{
+					Enabled: true,
+					Timeout: cfg.JobsRescanNodesTimeout,
+				},
+			); err != nil {
+				log.Fatalf("Failed to add rescan-nodes job: %v", err)
+			}
+			log.Printf("Scheduled rescan-nodes job (interval: %v, timeout: %v)", cfg.JobsRescanNodesInterval, cfg.JobsRescanNodesTimeout)
+		}
+
 		// Start scheduler
 		if err := sched.Start(ctx); err != nil {
 			log.Fatalf("Failed to start scheduler: %v", err)

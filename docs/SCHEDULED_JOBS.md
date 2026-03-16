@@ -44,6 +44,52 @@ Cleanup complete: removed 5 images, 123 packages, 456 vulnerabilities
 [cleanup] Cleanup job completed successfully
 ```
 
+### 3. Rescan Database Job
+
+**Purpose**: Re-scans images when the Grype vulnerability database updates
+
+**How it works**:
+- Checks for Grype database updates
+- Identifies images scanned with an older database version
+- Re-runs vulnerability scan using existing SBOMs (no SBOM regeneration)
+- Also triggers node rescans when host scanning is enabled
+
+**Default schedule**: Every 30 minutes
+
+**Log example**:
+```
+[rescan-database] Checking for vulnerability database updates...
+[rescan-database] Current grype DB: built=2026-01-15T08:20:13Z
+[rescan-database] Found 42 images scanned with older grype DB, triggering rescan
+[rescan-database] Enqueued 42 images for rescanning
+```
+
+### 4. Rescan Nodes Job
+
+**Purpose**: Periodically rescans all nodes with fresh SBOMs to detect package changes
+
+**How it works**:
+- Gets all completed nodes
+- Enqueues full rescan for each (regenerates SBOM + vulnerability scan)
+- Unlike rescan-database, this always retrieves a fresh SBOM because node packages change over time
+- Only runs when host scanning is enabled
+
+**Default schedule**: Daily (24 hours)
+
+**Log example**:
+```
+[rescan-nodes] Starting periodic node rescan with fresh SBOMs...
+[rescan-nodes] Found 3 completed nodes, triggering full rescan with fresh SBOMs
+[rescan-nodes] Enqueued 3 nodes for full rescan
+```
+
+**Key difference from rescan-database**:
+| Aspect | rescan-database | rescan-nodes |
+|--------|-----------------|--------------|
+| Trigger | Grype DB updates | Scheduled interval |
+| SBOM | Reuses existing | Always fresh |
+| Purpose | New CVE detection | Detect package changes |
+
 ## Kubernetes Configuration (Helm)
 
 Jobs are configured in the Helm chart's `values.yaml` under `scanServer.config.jobs`:
@@ -63,6 +109,19 @@ scanServer:
         enabled: true
         interval: "24h"
         timeout: "1h"
+
+      # Rescan Database Job - rescans when Grype DB updates
+      rescanDatabase:
+        enabled: true
+        interval: "30m"    # How often to check for updates
+        timeout: "30m"
+
+      # Rescan Nodes Job - periodic full rescan with fresh SBOMs
+      # Only runs when hostScanning.enabled is true
+      rescanNodes:
+        enabled: true
+        interval: "24h"    # How often to rescan nodes
+        timeout: "2h"      # SBOM generation can be slow
 ```
 
 ### Customizing via Helm Install/Upgrade
@@ -126,6 +185,19 @@ jobs_refresh_images_timeout=10m
 jobs_cleanup_enabled=true
 jobs_cleanup_interval=24h
 jobs_cleanup_timeout=1h
+
+# --- Rescan Database Job ---
+# Rescans images when Grype vulnerability database updates
+jobs_rescan_database_enabled=true
+jobs_rescan_database_interval=30m
+jobs_rescan_database_timeout=30m
+
+# --- Rescan Nodes Job ---
+# Periodic full rescan of nodes with fresh SBOMs
+# Only runs when host_scanning_enabled=true
+jobs_rescan_nodes_enabled=true
+jobs_rescan_nodes_interval=24h
+jobs_rescan_nodes_timeout=2h
 ```
 
 ### Configuration via Environment Variables
@@ -141,6 +213,15 @@ export JOBS_CLEANUP_ENABLED=false
 
 # Change cleanup interval
 export JOBS_CLEANUP_INTERVAL=48h
+
+# Rescan database job
+export JOBS_RESCAN_DATABASE_ENABLED=true
+export JOBS_RESCAN_DATABASE_INTERVAL=1h
+
+# Rescan nodes job (requires HOST_SCANNING_ENABLED=true)
+export JOBS_RESCAN_NODES_ENABLED=true
+export JOBS_RESCAN_NODES_INTERVAL=12h
+export JOBS_RESCAN_NODES_TIMEOUT=3h
 ```
 
 ### Systemd Service
@@ -309,10 +390,5 @@ cleanup:
 
 The following jobs are planned for future releases:
 
-### Rescan Database Job
-Automatically rescans images when the Grype vulnerability database is updated.
-
 ### Telemetry Job
 Sends usage metrics and statistics to OpenTelemetry collector.
-
-Configuration placeholders are already present in the config files for these future jobs.

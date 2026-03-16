@@ -129,6 +129,15 @@ scanServer:
         interval: "30m"   # How often to check for database updates
         timeout: "30m"    # Maximum execution time for rescanning all images
 
+      # Rescan Nodes Job - Periodic full rescan of nodes with fresh SBOMs
+      # Unlike rescanDatabase (which reuses existing SBOMs), this job always
+      # retrieves a fresh SBOM because node packages can change over time.
+      # Only runs when hostScanning.enabled is true.
+      rescanNodes:
+        enabled: true
+        interval: "24h"   # How often to rescan nodes (e.g., 24h, 12h)
+        timeout: "2h"     # Maximum execution time (SBOM generation can be slow)
+
     # Host/Node Scanning Configuration
     # Scans Kubernetes node host filesystems for packages and vulnerabilities
     hostScanning:

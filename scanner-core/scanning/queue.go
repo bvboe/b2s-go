@@ -21,8 +21,9 @@ type ScanJob struct {
 
 // HostScanJob represents a request to scan a node's host filesystem
 type HostScanJob struct {
-	NodeName  string // K8s node name to scan
-	ForceScan bool   // If true, regenerate SBOM even if one exists
+	NodeName   string // K8s node name to scan
+	ForceScan  bool   // If true, rescan vulns using existing SBOM (skip SBOM regeneration)
+	FullRescan bool   // If true, always regenerate SBOM (node packages may have changed)
 }
 
 // SBOMRetriever is a callback function that retrieves an SBOM for an image
@@ -231,15 +232,24 @@ func (q *JobQueue) EnqueueHostScan(nodeName string) {
 	})
 }
 
-// EnqueueHostForceScan adds a host scan job that forces SBOM regeneration
-// This is useful for:
-// - Retrying failed scans
-// - Periodic rescanning (host packages change over time)
-// - Rescanning when Grype database updates
+// EnqueueHostForceScan adds a host scan job that forces vulnerability rescan
+// This reuses the existing SBOM (skips SBOM regeneration), only reruns Grype.
+// Used when the Grype database updates to detect newly-discovered vulnerabilities.
 func (q *JobQueue) EnqueueHostForceScan(nodeName string) {
 	q.enqueueHostJob(HostScanJob{
 		NodeName:  nodeName,
 		ForceScan: true,
+	})
+}
+
+// EnqueueHostFullRescan adds a host scan job that regenerates both SBOM and vulnerabilities
+// This always retrieves a fresh SBOM because node packages can change over time.
+// Used by the periodic rescan-nodes job to detect package drift.
+func (q *JobQueue) EnqueueHostFullRescan(nodeName string) {
+	q.enqueueHostJob(HostScanJob{
+		NodeName:   nodeName,
+		ForceScan:  true,
+		FullRescan: true,
 	})
 }
 
@@ -590,8 +600,9 @@ func (q *JobQueue) processHostJob(job HostScanJob) {
 		log.Printf("Error checking status for node %s: %v", job.NodeName, err)
 	}
 
-	// If ForceScan and we have SBOM data, skip to vulnerability scan
-	if job.ForceScan && (status == "completed" || status == "scanned") {
+	// If ForceScan (but not FullRescan) and we have SBOM data, skip to vulnerability scan
+	// FullRescan always regenerates the SBOM because node packages may have changed
+	if job.ForceScan && !job.FullRescan && (status == "completed" || status == "scanned") {
 		// Check if we have SBOM data
 		packages, err := q.db.GetNodePackages(job.NodeName)
 		if err == nil && len(packages) > 0 {

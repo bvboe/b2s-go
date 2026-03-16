@@ -76,6 +76,11 @@ type Config struct {
 	// Host scanning configuration
 	HostScanningEnabled  bool          // Enable scanning of host/node packages
 	HostScanningInterval time.Duration // Interval for periodic host SBOM regeneration (default: 24h)
+
+	// Rescan nodes job - periodic full rescan with fresh SBOMs
+	JobsRescanNodesEnabled  bool          // Enable periodic node rescanning with fresh SBOMs
+	JobsRescanNodesInterval time.Duration // Interval between rescan-nodes job runs (default: 24h)
+	JobsRescanNodesTimeout  time.Duration // Timeout for rescan-nodes job (default: 2h)
 }
 
 // defaultConfig returns a Config with hardcoded defaults.
@@ -144,6 +149,11 @@ func defaultConfig() *Config {
 		// Host scanning - enabled by default
 		HostScanningEnabled:  true,
 		HostScanningInterval: 24 * time.Hour,
+
+		// Rescan nodes job - enabled when host scanning is enabled
+		JobsRescanNodesEnabled:  true,
+		JobsRescanNodesInterval: 24 * time.Hour,
+		JobsRescanNodesTimeout:  2 * time.Hour,
 	}
 }
 
@@ -359,6 +369,22 @@ func LoadConfig(path string) (*Config, error) {
 					cfg.MetricsStalenessWindow = duration
 				}
 			}
+
+			// Rescan nodes job
+			if section.HasKey("jobs_rescan_nodes_enabled") {
+				val := strings.ToLower(section.Key("jobs_rescan_nodes_enabled").String())
+				cfg.JobsRescanNodesEnabled = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("jobs_rescan_nodes_interval") {
+				if duration, err := time.ParseDuration(section.Key("jobs_rescan_nodes_interval").String()); err == nil {
+					cfg.JobsRescanNodesInterval = duration
+				}
+			}
+			if section.HasKey("jobs_rescan_nodes_timeout") {
+				if duration, err := time.ParseDuration(section.Key("jobs_rescan_nodes_timeout").String()); err == nil {
+					cfg.JobsRescanNodesTimeout = duration
+				}
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -436,6 +462,22 @@ func LoadConfig(path string) (*Config, error) {
 	if timeoutEnv := os.Getenv("JOBS_CLEANUP_TIMEOUT"); timeoutEnv != "" {
 		if duration, err := time.ParseDuration(timeoutEnv); err == nil {
 			cfg.JobsCleanupTimeout = duration
+		}
+	}
+
+	// Rescan nodes job
+	if enabledEnv := os.Getenv("JOBS_RESCAN_NODES_ENABLED"); enabledEnv != "" {
+		val := strings.ToLower(enabledEnv)
+		cfg.JobsRescanNodesEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if intervalEnv := os.Getenv("JOBS_RESCAN_NODES_INTERVAL"); intervalEnv != "" {
+		if duration, err := time.ParseDuration(intervalEnv); err == nil {
+			cfg.JobsRescanNodesInterval = duration
+		}
+	}
+	if timeoutEnv := os.Getenv("JOBS_RESCAN_NODES_TIMEOUT"); timeoutEnv != "" {
+		if duration, err := time.ParseDuration(timeoutEnv); err == nil {
+			cfg.JobsRescanNodesTimeout = duration
 		}
 	}
 
