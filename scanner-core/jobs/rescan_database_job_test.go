@@ -8,6 +8,7 @@ import (
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
 
@@ -445,4 +446,170 @@ func TestNewRescanDatabaseJob_NilDependencies(t *testing.T) {
 		}
 	}()
 	NewRescanDatabaseJob(mockDBUpdater, mockDB, nil)
+}
+
+// Mock implementations for node rescanning tests
+
+type MockNodeDatabase struct {
+	nodesNeedingRescan []nodes.NodeWithStatus
+	err                error
+}
+
+func (m *MockNodeDatabase) GetAllNodes() ([]nodes.NodeWithStatus, error) {
+	return nil, m.err
+}
+
+func (m *MockNodeDatabase) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.NodeWithStatus, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.nodesNeedingRescan, nil
+}
+
+type MockNodeScanQueue struct {
+	enqueuedNodes []string
+}
+
+func (m *MockNodeScanQueue) EnqueueHostForceScan(nodeName string) {
+	m.enqueuedNodes = append(m.enqueuedNodes, nodeName)
+}
+
+// Test: SetNodeScanning enables node rescanning on grype DB update
+func TestRescanDatabaseJob_WithNodeScanning(t *testing.T) {
+	// Setup: mock database updater with a new grype DB version
+	grypeDBBuilt := time.Date(2026, 3, 17, 6, 0, 0, 0, time.UTC)
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         grypeDBBuilt,
+			SchemaVersion: "v6.1.4",
+			Path:          "/test/path",
+		},
+	}
+
+	// Setup: mock image database (no images need rescan)
+	mockDB := &MockDatabase{
+		imagesNeedingRescan: []database.ContainerImage{},
+		instances:           map[string]*database.ContainerRow{},
+	}
+
+	// Setup: mock image scan queue
+	mockQueue := &MockScanQueue{}
+
+	// Setup: mock node database with nodes needing rescan
+	mockNodeDB := &MockNodeDatabase{
+		nodesNeedingRescan: []nodes.NodeWithStatus{
+			{Node: nodes.Node{Name: "node-1"}},
+			{Node: nodes.Node{Name: "node-2"}},
+		},
+	}
+
+	// Setup: mock node scan queue
+	mockNodeQueue := &MockNodeScanQueue{}
+
+	// Create job and configure node scanning
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
+	job.SetNodeScanning(mockNodeDB, mockNodeQueue)
+
+	// Run job
+	err := job.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Job failed: %v", err)
+	}
+
+	// Verify: both nodes were enqueued for rescan
+	if len(mockNodeQueue.enqueuedNodes) != 2 {
+		t.Errorf("Expected 2 nodes enqueued, got %d", len(mockNodeQueue.enqueuedNodes))
+	}
+
+	// Verify: correct nodes were enqueued
+	expectedNodes := map[string]bool{"node-1": true, "node-2": true}
+	for _, nodeName := range mockNodeQueue.enqueuedNodes {
+		if !expectedNodes[nodeName] {
+			t.Errorf("Unexpected node enqueued: %s", nodeName)
+		}
+		delete(expectedNodes, nodeName)
+	}
+	if len(expectedNodes) > 0 {
+		t.Errorf("Some expected nodes were not enqueued: %v", expectedNodes)
+	}
+}
+
+// Test: Without SetNodeScanning, nodes are not rescanned
+func TestRescanDatabaseJob_WithoutNodeScanning(t *testing.T) {
+	// Setup: mock database updater with a new grype DB version
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 3, 17, 6, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.4",
+			Path:          "/test/path",
+		},
+	}
+
+	// Setup: mock image database (no images need rescan)
+	mockDB := &MockDatabase{
+		imagesNeedingRescan: []database.ContainerImage{},
+		instances:           map[string]*database.ContainerRow{},
+	}
+
+	// Setup: mock image scan queue
+	mockQueue := &MockScanQueue{}
+
+	// Create job WITHOUT calling SetNodeScanning
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
+
+	// Run job
+	err := job.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Job failed: %v", err)
+	}
+
+	// Verify: job completes successfully without node scanning
+	// (nodeDB and nodeScanQueue are nil, so RescanNodesOnDBUpdate is skipped)
+}
+
+// Test: Node database error doesn't fail the job (nodes are optional)
+func TestRescanDatabaseJob_NodeDatabaseError(t *testing.T) {
+	// Setup: mock database updater with a new grype DB version
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 3, 17, 6, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.4",
+			Path:          "/test/path",
+		},
+	}
+
+	// Setup: mock image database (no images need rescan)
+	mockDB := &MockDatabase{
+		imagesNeedingRescan: []database.ContainerImage{},
+		instances:           map[string]*database.ContainerRow{},
+	}
+
+	// Setup: mock image scan queue
+	mockQueue := &MockScanQueue{}
+
+	// Setup: mock node database that returns an error
+	mockNodeDB := &MockNodeDatabase{
+		err: fmt.Errorf("node database error"),
+	}
+
+	// Setup: mock node scan queue
+	mockNodeQueue := &MockNodeScanQueue{}
+
+	// Create job and configure node scanning
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, mockQueue)
+	job.SetNodeScanning(mockNodeDB, mockNodeQueue)
+
+	// Run job - should succeed even though node DB fails
+	err := job.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Job should not fail due to node database error: %v", err)
+	}
+
+	// Verify: no nodes were enqueued (due to error)
+	if len(mockNodeQueue.enqueuedNodes) != 0 {
+		t.Errorf("Expected 0 nodes enqueued on error, got %d", len(mockNodeQueue.enqueuedNodes))
+	}
 }

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -214,93 +213,5 @@ func TestLoadConfigWithDefaults(t *testing.T) {
 
 	if !cfg.DebugEnabled {
 		t.Error("Expected debug enabled from env")
-	}
-}
-
-func TestRescanNodesJobDefaults(t *testing.T) {
-	cfg := defaultConfig()
-
-	if !cfg.JobsRescanNodesEnabled {
-		t.Error("Expected JobsRescanNodesEnabled true by default")
-	}
-
-	if cfg.JobsRescanNodesInterval != 24*time.Hour {
-		t.Errorf("Expected JobsRescanNodesInterval 24h, got %v", cfg.JobsRescanNodesInterval)
-	}
-
-	if cfg.JobsRescanNodesTimeout != 2*time.Hour {
-		t.Errorf("Expected JobsRescanNodesTimeout 2h, got %v", cfg.JobsRescanNodesTimeout)
-	}
-}
-
-func TestRescanNodesJobFromFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "test.conf")
-
-	configContent := `jobs_rescan_nodes_enabled=false
-jobs_rescan_nodes_interval=12h
-jobs_rescan_nodes_timeout=1h
-`
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test config file: %v", err)
-	}
-
-	cfg, err := LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
-
-	if cfg.JobsRescanNodesEnabled {
-		t.Error("Expected JobsRescanNodesEnabled false from file")
-	}
-
-	if cfg.JobsRescanNodesInterval != 12*time.Hour {
-		t.Errorf("Expected JobsRescanNodesInterval 12h, got %v", cfg.JobsRescanNodesInterval)
-	}
-
-	if cfg.JobsRescanNodesTimeout != 1*time.Hour {
-		t.Errorf("Expected JobsRescanNodesTimeout 1h, got %v", cfg.JobsRescanNodesTimeout)
-	}
-}
-
-func TestRescanNodesJobFromEnv(t *testing.T) {
-	// Save original env vars
-	origEnabled := os.Getenv("JOBS_RESCAN_NODES_ENABLED")
-	origInterval := os.Getenv("JOBS_RESCAN_NODES_INTERVAL")
-	origTimeout := os.Getenv("JOBS_RESCAN_NODES_TIMEOUT")
-
-	// Set env vars for testing
-	if err := os.Setenv("JOBS_RESCAN_NODES_ENABLED", "false"); err != nil {
-		t.Fatalf("Failed to set env var: %v", err)
-	}
-	if err := os.Setenv("JOBS_RESCAN_NODES_INTERVAL", "6h"); err != nil {
-		t.Fatalf("Failed to set env var: %v", err)
-	}
-	if err := os.Setenv("JOBS_RESCAN_NODES_TIMEOUT", "30m"); err != nil {
-		t.Fatalf("Failed to set env var: %v", err)
-	}
-
-	defer func() {
-		_ = os.Setenv("JOBS_RESCAN_NODES_ENABLED", origEnabled)
-		_ = os.Setenv("JOBS_RESCAN_NODES_INTERVAL", origInterval)
-		_ = os.Setenv("JOBS_RESCAN_NODES_TIMEOUT", origTimeout)
-	}()
-
-	cfg, err := LoadConfig("")
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
-
-	if cfg.JobsRescanNodesEnabled {
-		t.Error("Expected JobsRescanNodesEnabled false from env")
-	}
-
-	if cfg.JobsRescanNodesInterval != 6*time.Hour {
-		t.Errorf("Expected JobsRescanNodesInterval 6h from env, got %v", cfg.JobsRescanNodesInterval)
-	}
-
-	if cfg.JobsRescanNodesTimeout != 30*time.Minute {
-		t.Errorf("Expected JobsRescanNodesTimeout 30m from env, got %v", cfg.JobsRescanNodesTimeout)
 	}
 }

@@ -119,36 +119,36 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 
 	if len(images) == 0 {
 		log.Printf("[rescan-database] All images are up-to-date with current grype DB, nothing to rescan")
-		return nil
-	}
+	} else {
+		log.Printf("[rescan-database] Found %d images scanned with older grype DB, triggering rescan", len(images))
 
-	log.Printf("[rescan-database] Found %d images scanned with older grype DB, triggering rescan", len(images))
+		// Enqueue force scan for each image
+		rescanned := 0
+		for _, img := range images {
+			// Get the first container to determine node and runtime
+			instance, err := j.db.GetFirstContainerForImage(img.Digest)
+			if err != nil {
+				log.Printf("[rescan-database] Warning: could not find instance for image %s: %v", img.Digest, err)
+				continue
+			}
 
-	// Enqueue force scan for each image
-	rescanned := 0
-	for _, img := range images {
-		// Get the first container to determine node and runtime
-		instance, err := j.db.GetFirstContainerForImage(img.Digest)
-		if err != nil {
-			log.Printf("[rescan-database] Warning: could not find instance for image %s: %v", img.Digest, err)
-			continue
+			// Enqueue force scan (ForceScan=true skips SBOM generation, only runs Grype)
+			j.scanQueue.EnqueueForceScan(
+				containers.ImageID{
+					Digest:    img.Digest,
+					Reference: instance.Reference,
+				},
+				instance.NodeName,
+				instance.ContainerRuntime,
+			)
+			rescanned++
 		}
 
-		// Enqueue force scan (ForceScan=true skips SBOM generation, only runs Grype)
-		j.scanQueue.EnqueueForceScan(
-			containers.ImageID{
-				Digest:    img.Digest,
-				Reference: instance.Reference,
-			},
-			instance.NodeName,
-			instance.ContainerRuntime,
-		)
-		rescanned++
+		log.Printf("[rescan-database] Enqueued %d images for rescanning", rescanned)
 	}
 
-	log.Printf("[rescan-database] Enqueued %d images for rescanning", rescanned)
-
 	// Also rescan nodes if node scanning is configured
+	// This runs regardless of whether images needed rescan
 	if j.nodeDB != nil && j.nodeScanQueue != nil {
 		if err := RescanNodesOnDBUpdate(j.nodeDB, j.nodeScanQueue, currentVersion.Built); err != nil {
 			log.Printf("[rescan-database] Warning: failed to rescan nodes: %v", err)

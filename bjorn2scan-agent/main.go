@@ -484,6 +484,10 @@ func main() {
 		// Add rescan database job - uses grype's native update mechanism
 		if cfg.JobsRescanDatabaseEnabled && dbUpdater != nil {
 			rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
+			// Enable node rescanning on grype DB updates if host scanning is enabled
+			if cfg.HostScanningEnabled {
+				rescanJob.SetNodeScanning(db, scanQueue)
+			}
 			if err := sched.AddJob(
 				rescanJob,
 				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
@@ -511,23 +515,6 @@ func main() {
 				log.Fatalf("Failed to add cleanup job: %v", err)
 			}
 			log.Printf("Scheduled cleanup-orphaned-images job (interval: %v, timeout: %v)", cfg.JobsCleanupInterval, cfg.JobsCleanupTimeout)
-		}
-
-		// Add rescan-nodes job - periodic full rescan with fresh SBOMs
-		// Only enabled when both host scanning and the job are enabled
-		if cfg.HostScanningEnabled && cfg.JobsRescanNodesEnabled {
-			rescanNodesJob := jobs.NewRescanNodesJob(db, scanQueue)
-			if err := sched.AddJob(
-				rescanNodesJob,
-				scheduler.NewIntervalSchedule(cfg.JobsRescanNodesInterval),
-				scheduler.JobConfig{
-					Enabled: true,
-					Timeout: cfg.JobsRescanNodesTimeout,
-				},
-			); err != nil {
-				log.Fatalf("Failed to add rescan-nodes job: %v", err)
-			}
-			log.Printf("Scheduled rescan-nodes job (interval: %v, timeout: %v)", cfg.JobsRescanNodesInterval, cfg.JobsRescanNodesTimeout)
 		}
 
 		// Start scheduler
