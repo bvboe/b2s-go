@@ -66,6 +66,8 @@
                             <th rowspan="2" class="sortable" data-sort-field="node_name" onclick="sortByColumn('node_name')"><b>Node Name</b></th>
                             <th rowspan="2" class="sortable" data-sort-field="os_release" onclick="sortByColumn('os_release')"><b>OS Distribution</b></th>
                             <th colspan="6"><b>Vulnerabilities</b></th>
+                            <th rowspan="2" class="sortable" data-sort-field="total_risk" onclick="sortByColumn('total_risk')"><b>Risk Score</b></th>
+                            <th rowspan="2" class="sortable" data-sort-field="exploit_count" onclick="sortByColumn('exploit_count')"><b>Known Exploits</b></th>
                             <th rowspan="2" class="sortable" data-sort-field="package_count" onclick="sortByColumn('package_count')"><b># Packages</b></th>
                         </tr>
                         <tr>
@@ -101,7 +103,7 @@
             pageTitle: 'Nodes',
             currentPageUrl: 'nodes.html',
             defaultSortBy: 'node_name',
-            columnCount: 9,
+            columnCount: 11,
             renderRow: function(row, item) {
                 // Make row clickable to navigate to node detail page
                 row.onclick = function() {
@@ -125,12 +127,16 @@
                     addCellToRow(row, 'right', formatNumber(item.negligible));
                     addCellToRow(row, 'right', formatNumber(item.unknown));
 
+                    // Risk score and exploit count
+                    addCellToRow(row, 'right', formatRiskNumber(item.total_risk));
+                    addCellToRow(row, 'right', formatNumber(item.exploit_count));
+
                     // Package count
                     addCellToRow(row, 'right', formatNumber(item.package_count));
                 } else {
                     // Show status message spanning all vulnerability columns
                     const cell = addCellToRow(row, 'left', item.status_description || 'Unknown status');
-                    cell.colSpan = 7;
+                    cell.colSpan = 9;
                 }
             }
         });

@@ -93,18 +93,20 @@ type NodeVulnerability struct {
 
 // NodeSummary provides aggregated vulnerability counts by severity
 type NodeSummary struct {
-	NodeName          string `json:"node_name"`
-	OSRelease         string `json:"os_release"`
-	Status            string `json:"status"`
-	StatusDescription string `json:"status_description"`
-	PackageCount      int    `json:"package_count"`
-	Critical          int    `json:"critical"`
-	High              int    `json:"high"`
-	Medium            int    `json:"medium"`
-	Low               int    `json:"low"`
-	Negligible        int    `json:"negligible"`
-	Unknown           int    `json:"unknown"`
-	Total             int    `json:"total"`
+	NodeName          string  `json:"node_name"`
+	OSRelease         string  `json:"os_release"`
+	Status            string  `json:"status"`
+	StatusDescription string  `json:"status_description"`
+	PackageCount      int     `json:"package_count"`
+	Critical          int     `json:"critical"`
+	High              int     `json:"high"`
+	Medium            int     `json:"medium"`
+	Low               int     `json:"low"`
+	Negligible        int     `json:"negligible"`
+	Unknown           int     `json:"unknown"`
+	Total             int     `json:"total"`
+	TotalRisk         float64 `json:"total_risk"`
+	ExploitCount      int     `json:"exploit_count"`
 }
 
 // NodeDistributionSummary provides averaged vulnerability counts grouped by OS distribution

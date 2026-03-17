@@ -963,12 +963,18 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 				WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv
 				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id` + vulnFilter + `) as total
+				WHERE nv.node_id = n.id` + vulnFilter + `) as total,
+			(SELECT COALESCE(SUM(nv.score * COALESCE(nv.count, 1)), 0) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id` + vulnFilter + `) as total_risk,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv
+				JOIN node_packages np ON nv.package_id = np.id
+				WHERE nv.node_id = n.id AND nv.known_exploited > 0` + vulnFilter + `) as exploit_count
 		FROM nodes n` + nodeFilter + `
 		ORDER BY n.name`
 
-		// Add args for each subquery (7 severity counts + total = 8 subqueries)
-		for i := 0; i < 8; i++ {
+		// Add args for each subquery (7 severity counts + total + total_risk + exploit_count = 10 subqueries)
+		for i := 0; i < 10; i++ {
 			args = append(args, vulnFilterArgs...)
 		}
 		args = append(args, nodeFilterArgs...)
@@ -986,12 +992,14 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low'` + vulnFilter + `) as low,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible'` + vulnFilter + `) as negligible,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total,
+			(SELECT COALESCE(SUM(nv.score * COALESCE(nv.count, 1)), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total_risk,
+			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.known_exploited > 0` + vulnFilter + `) as exploit_count
 		FROM nodes n` + nodeFilter + `
 		ORDER BY n.name`
 
-		// Add args for each subquery (7 severity counts + total = 8 subqueries)
-		for i := 0; i < 8; i++ {
+		// Add args for each subquery (7 severity counts + total + total_risk + exploit_count = 10 subqueries)
+		for i := 0; i < 10; i++ {
 			args = append(args, vulnFilterArgs...)
 		}
 		args = append(args, nodeFilterArgs...)
@@ -1009,7 +1017,9 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Low') as low,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Negligible') as negligible,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')) as unknown,
-			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id) as total
+			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id) as total,
+			(SELECT COALESCE(SUM(score * COALESCE(count, 1)), 0) FROM node_vulnerabilities WHERE node_id = n.id) as total_risk,
+			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND known_exploited > 0) as exploit_count
 		FROM nodes n` + nodeFilter + `
 		ORDER BY n.name`
 
@@ -1027,7 +1037,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 	for rows.Next() {
 		var summary nodes.NodeSummary
 		err := rows.Scan(&summary.NodeName, &summary.OSRelease, &summary.Status, &summary.PackageCount, &summary.Critical, &summary.High,
-			&summary.Medium, &summary.Low, &summary.Negligible, &summary.Unknown, &summary.Total)
+			&summary.Medium, &summary.Low, &summary.Negligible, &summary.Unknown, &summary.Total, &summary.TotalRisk, &summary.ExploitCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan summary row: %w", err)
 		}

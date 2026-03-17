@@ -221,6 +221,7 @@ func parseCommaSeparated(value string) []string {
 
 // NodeSummaryHandler returns a handler that provides vulnerability summary by node
 // Supports filters: osNames, vulnStatuses, packageTypes (comma-separated)
+// Supports format=csv for CSV export
 func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -243,6 +244,40 @@ func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
+		// Handle CSV export
+		if params.Get("format") == "csv" {
+			w.Header().Set("Content-Type", "text/csv")
+			w.Header().Set("Content-Disposition", "attachment; filename=node_summary.csv")
+
+			writer := csv.NewWriter(w)
+			defer writer.Flush()
+
+			// Write header
+			_ = writer.Write([]string{
+				"Node Name", "OS Distribution", "Critical", "High", "Medium",
+				"Low", "Negligible", "Unknown", "Total", "Risk Score", "Known Exploits", "Packages",
+			})
+
+			// Write data
+			for _, s := range summaries {
+				_ = writer.Write([]string{
+					s.NodeName,
+					s.OSRelease,
+					fmt.Sprintf("%d", s.Critical),
+					fmt.Sprintf("%d", s.High),
+					fmt.Sprintf("%d", s.Medium),
+					fmt.Sprintf("%d", s.Low),
+					fmt.Sprintf("%d", s.Negligible),
+					fmt.Sprintf("%d", s.Unknown),
+					fmt.Sprintf("%d", s.Total),
+					fmt.Sprintf("%.1f", s.TotalRisk),
+					fmt.Sprintf("%d", s.ExploitCount),
+					fmt.Sprintf("%d", s.PackageCount),
+				})
+			}
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(summaries); err != nil {
 			log.Printf("Error encoding node summaries response: %v", err)
@@ -251,6 +286,7 @@ func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 }
 
 // NodeDistributionSummaryHandler returns a handler that provides averaged vulnerability summary by node OS distribution
+// Supports format=csv for CSV export
 func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -262,6 +298,37 @@ func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
 		if err != nil {
 			log.Printf("Error getting node distribution summary: %v", err)
 			http.Error(w, "Failed to get node distribution summary", http.StatusInternalServerError)
+			return
+		}
+
+		// Handle CSV export
+		if r.URL.Query().Get("format") == "csv" {
+			w.Header().Set("Content-Type", "text/csv")
+			w.Header().Set("Content-Disposition", "attachment; filename=node_distribution_summary.csv")
+
+			writer := csv.NewWriter(w)
+			defer writer.Flush()
+
+			// Write header
+			_ = writer.Write([]string{
+				"OS Distribution", "Node Count", "Avg Critical", "Avg High", "Avg Medium",
+				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Packages",
+			})
+
+			// Write data
+			for _, s := range summaries {
+				_ = writer.Write([]string{
+					s.OSName,
+					fmt.Sprintf("%d", s.NodeCount),
+					fmt.Sprintf("%.1f", s.AvgCritical),
+					fmt.Sprintf("%.1f", s.AvgHigh),
+					fmt.Sprintf("%.1f", s.AvgMedium),
+					fmt.Sprintf("%.1f", s.AvgLow),
+					fmt.Sprintf("%.1f", s.AvgNegligible),
+					fmt.Sprintf("%.1f", s.AvgUnknown),
+					fmt.Sprintf("%.1f", s.AvgPackages),
+				})
+			}
 			return
 		}
 

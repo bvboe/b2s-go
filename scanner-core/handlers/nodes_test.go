@@ -630,3 +630,204 @@ func TestRegisterNodeHandlers_RegistersAllRoutes(t *testing.T) {
 		}
 	}
 }
+
+// TestNodeSummaryHandler_ReturnsTotalRiskAndExploitCount tests that summaries include risk and exploit fields
+func TestNodeSummaryHandler_ReturnsTotalRiskAndExploitCount(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "node-1"})
+
+	// Add packages and vulns with score and known_exploited
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("node-1", []byte(sbom))
+
+	// Vulnerability with risk score and known_exploited (risk field is used, not cvss)
+	vulnReport := `{"matches": [
+		{"vulnerability": {"id": "CVE-2021-0001", "severity": "Critical", "risk": 9.8, "knownExploited": [{"cve": "CVE-2021-0001"}]}, "artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"}, "matchDetails": [{"found": {"versionConstraint": "<1.2"}}]}
+	]}`
+	_ = db.StoreNodeVulnerabilities("node-1", []byte(vulnReport), time.Now())
+
+	handler := NodeSummaryHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/summary/by-node", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var result []nodes.NodeSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("Expected 1 summary, got %d", len(result))
+	}
+
+	// Check that TotalRisk and ExploitCount are present
+	if result[0].TotalRisk == 0 {
+		t.Error("Expected TotalRisk > 0")
+	}
+	if result[0].ExploitCount != 1 {
+		t.Errorf("Expected ExploitCount=1, got %d", result[0].ExploitCount)
+	}
+}
+
+// TestNodeSummaryHandler_FormatCSV tests CSV export
+func TestNodeSummaryHandler_FormatCSV(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "node-1", OSRelease: "Ubuntu 22.04"})
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("node-1", []byte(sbom))
+
+	vulnReport := `{"matches": [
+		{"vulnerability": {"id": "CVE-2021-0001", "severity": "Critical"}, "artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"}, "matchDetails": [{"found": {"versionConstraint": "<1.2"}}]}
+	]}`
+	_ = db.StoreNodeVulnerabilities("node-1", []byte(vulnReport), time.Now())
+
+	handler := NodeSummaryHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/summary/by-node?format=csv", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/csv" {
+		t.Errorf("Expected Content-Type text/csv, got %s", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if contentDisp != "attachment; filename=node_summary.csv" {
+		t.Errorf("Unexpected Content-Disposition: %s", contentDisp)
+	}
+
+	body := w.Body.String()
+	// Check header row
+	if !contains(body, "Node Name") || !contains(body, "Risk Score") || !contains(body, "Known Exploits") {
+		t.Error("CSV header missing expected columns")
+	}
+	// Check data row
+	if !contains(body, "node-1") || !contains(body, "Ubuntu 22.04") {
+		t.Error("CSV data missing expected values")
+	}
+}
+
+// TestNodeDistributionSummaryHandler_ReturnsData tests basic functionality
+func TestNodeDistributionSummaryHandler_ReturnsData(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	// Add nodes with different OS releases
+	_, _ = db.AddNode(nodes.Node{Name: "node-1", OSRelease: "Ubuntu 22.04"})
+	_, _ = db.AddNode(nodes.Node{Name: "node-2", OSRelease: "Ubuntu 22.04"})
+
+	// Complete the scan for these nodes
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("node-1", []byte(sbom))
+	_ = db.StoreNodeSBOM("node-2", []byte(sbom))
+
+	vulnReport := `{"matches": []}`
+	_ = db.StoreNodeVulnerabilities("node-1", []byte(vulnReport), time.Now())
+	_ = db.StoreNodeVulnerabilities("node-2", []byte(vulnReport), time.Now())
+
+	handler := NodeDistributionSummaryHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/summary/by-node-distro", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var result []nodes.NodeDistributionSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("Expected 1 distribution, got %d", len(result))
+	}
+
+	if result[0].OSName != "Ubuntu 22.04" {
+		t.Errorf("Expected OSName='Ubuntu 22.04', got '%s'", result[0].OSName)
+	}
+	if result[0].NodeCount != 2 {
+		t.Errorf("Expected NodeCount=2, got %d", result[0].NodeCount)
+	}
+}
+
+// TestNodeDistributionSummaryHandler_FormatCSV tests CSV export
+func TestNodeDistributionSummaryHandler_FormatCSV(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "node-1", OSRelease: "Ubuntu 22.04"})
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("node-1", []byte(sbom))
+
+	vulnReport := `{"matches": []}`
+	_ = db.StoreNodeVulnerabilities("node-1", []byte(vulnReport), time.Now())
+
+	handler := NodeDistributionSummaryHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/summary/by-node-distro?format=csv", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/csv" {
+		t.Errorf("Expected Content-Type text/csv, got %s", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if contentDisp != "attachment; filename=node_distribution_summary.csv" {
+		t.Errorf("Unexpected Content-Disposition: %s", contentDisp)
+	}
+
+	body := w.Body.String()
+	// Check header row
+	if !contains(body, "OS Distribution") || !contains(body, "Node Count") || !contains(body, "Avg Critical") {
+		t.Error("CSV header missing expected columns")
+	}
+	// Check data row
+	if !contains(body, "Ubuntu 22.04") {
+		t.Error("CSV data missing expected values")
+	}
+}
+
+// TestNodeDistributionSummaryHandler_RejectsNonGet tests that non-GET methods are rejected
+func TestNodeDistributionSummaryHandler_RejectsNonGet(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	handler := NodeDistributionSummaryHandler(db)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/summary/by-node-distro", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status 405, got %d", w.Code)
+	}
+}
