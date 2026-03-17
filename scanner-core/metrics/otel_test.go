@@ -2,12 +2,16 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/nodes"
 )
+
+var errMockError = errors.New("mock database error")
 
 func TestCreateExporter_GRPC(t *testing.T) {
 	ctx := context.Background()
@@ -534,4 +538,199 @@ func TestOTELExporter_ScannedContainersDisabled(t *testing.T) {
 	exporter.recordMetrics()
 
 	// If we got here without panic, the test passes
+}
+
+func TestOTELExporter_SetNodeCollector(t *testing.T) {
+	ctx := context.Background()
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test-cluster",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
+
+	collectorConfig := CollectorConfig{
+		DeploymentEnabled: true,
+	}
+
+	config := OTELConfig{
+		Endpoint:     "localhost:4317",
+		Protocol:     OTELProtocolGRPC,
+		PushInterval: 1 * time.Minute,
+		Insecure:     true,
+	}
+
+	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+	defer func() { _ = exporter.Shutdown() }()
+
+	// Initially nodeCollector should be nil
+	if exporter.nodeCollector != nil {
+		t.Error("Expected nodeCollector to be nil initially")
+	}
+
+	// Create a node collector with mock data
+	mockNodeDB := &MockNodeDatabaseProvider{
+		vulnerabilities: []database.NodeVulnerabilityForMetrics{
+			{
+				NodeName: "node-1",
+				CVEID:    "CVE-2024-1234",
+				Severity: "Critical",
+				Score:    9.8,
+				Count:    1,
+			},
+		},
+	}
+
+	nodeConfig := NodeCollectorConfig{
+		NodeVulnerabilitiesEnabled: true,
+	}
+
+	nodeCollector := NewNodeCollector(deploymentUUID, "test-cluster", mockNodeDB, nodeConfig)
+
+	// Set the node collector
+	exporter.SetNodeCollector(nodeCollector)
+
+	// Verify nodeCollector is set
+	if exporter.nodeCollector == nil {
+		t.Error("Expected nodeCollector to be set after SetNodeCollector")
+	}
+
+	// Call recordMetrics - should include node metrics without panic
+	exporter.recordMetrics()
+
+	// If we got here without panic, the test passes
+}
+
+func TestOTELExporter_RecordMetricsWithNodeCollector(t *testing.T) {
+	ctx := context.Background()
+	infoProvider := &MockInfoProvider{
+		deploymentName: "prod-cluster",
+		deploymentType: "kubernetes",
+		version:        "2.0.0",
+	}
+	deploymentUUID := "prod-uuid-123"
+
+	// Mock image database
+	mockDB := &MockDatabaseProvider{
+		instances: []database.ScannedContainer{
+			{
+				Namespace:  "default",
+				Pod:        "app-pod",
+				Name:       "app",
+				NodeName:   "node-1",
+				Reference:  "app:v1",
+				Digest:     "sha256:abc",
+				OSName:     "alpine",
+			},
+		},
+	}
+
+	// Mock node database
+	mockNodeDB := &MockNodeDatabaseProvider{
+		scannedNodes: []nodes.NodeWithStatus{
+			{
+				Node: nodes.Node{
+					Name:         "node-1",
+					Hostname:     "node-1.local",
+					OSRelease:    "Ubuntu 22.04",
+					Architecture: "amd64",
+				},
+			},
+		},
+		vulnerabilities: []database.NodeVulnerabilityForMetrics{
+			{
+				NodeName:       "node-1",
+				CVEID:          "CVE-2024-5678",
+				Severity:       "High",
+				Score:          7.5,
+				KnownExploited: 1,
+				Count:          2,
+			},
+		},
+	}
+
+	collectorConfig := CollectorConfig{
+		DeploymentEnabled:        true,
+		ScannedContainersEnabled: true,
+	}
+
+	nodeConfig := NodeCollectorConfig{
+		NodeScannedEnabled:                true,
+		NodeVulnerabilitiesEnabled:        true,
+		NodeVulnerabilityRiskEnabled:      true,
+		NodeVulnerabilityExploitedEnabled: true,
+	}
+
+	config := OTELConfig{
+		Endpoint:     "localhost:4317",
+		Protocol:     OTELProtocolGRPC,
+		PushInterval: 1 * time.Minute,
+		Insecure:     true,
+	}
+
+	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, mockDB, collectorConfig, config)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+	defer func() { _ = exporter.Shutdown() }()
+
+	// Set node collector
+	nodeCollector := NewNodeCollector(deploymentUUID, "prod-cluster", mockNodeDB, nodeConfig)
+	exporter.SetNodeCollector(nodeCollector)
+
+	// Call recordMetrics multiple times - should handle both image and node metrics
+	exporter.recordMetrics()
+	exporter.recordMetrics()
+
+	// Verify gauges were created for both image and node metrics
+	// The exact gauge names depend on what metrics are enabled
+	if len(exporter.gauges) == 0 {
+		t.Error("Expected gauges to be created after recording metrics")
+	}
+}
+
+func TestOTELExporter_NodeCollectorError(t *testing.T) {
+	ctx := context.Background()
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "agent",
+		version:        "1.0.0",
+	}
+
+	collectorConfig := CollectorConfig{
+		DeploymentEnabled: true,
+	}
+
+	config := OTELConfig{
+		Endpoint:     "localhost:4317",
+		Protocol:     OTELProtocolGRPC,
+		PushInterval: 1 * time.Minute,
+		Insecure:     true,
+	}
+
+	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+	defer func() { _ = exporter.Shutdown() }()
+
+	// Create a node collector that will return an error
+	mockNodeDB := &MockNodeDatabaseProvider{
+		err: errMockError,
+	}
+
+	nodeConfig := NodeCollectorConfig{
+		NodeScannedEnabled: true,
+	}
+
+	nodeCollector := NewNodeCollector("test-uuid", "test", mockNodeDB, nodeConfig)
+	exporter.SetNodeCollector(nodeCollector)
+
+	// Call recordMetrics - should handle node collector error gracefully without panic
+	exporter.recordMetrics()
+
+	// If we got here without panic, the test passes - errors are logged but don't stop image metrics
 }

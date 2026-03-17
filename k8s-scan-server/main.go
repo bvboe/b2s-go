@@ -603,6 +603,14 @@ func main() {
 		} else {
 			// Set the same tracker for consistent staleness detection
 			otelExporter.SetTracker(metricTracker)
+
+			// Add node metrics to OTEL push if host scanning is enabled
+			if cfg.HostScanningEnabled {
+				nodeCollector := metrics.NewNodeCollector(deploymentUUID.String(), infoProvider.GetDeploymentName(), db, nodeCollectorConfig)
+				otelExporter.SetNodeCollector(nodeCollector)
+				log.Println("Node metrics added to OpenTelemetry exporter")
+			}
+
 			otelExporter.Start()
 			log.Println("OpenTelemetry metrics exporter started")
 		}

@@ -40,6 +40,7 @@ type OTELConfig struct {
 // OTELExporter exports metrics to an OpenTelemetry collector
 type OTELExporter struct {
 	collector     *Collector
+	nodeCollector *NodeCollector
 	config        OTELConfig
 	meterProvider *sdkmetric.MeterProvider
 	meter         metric.Meter
@@ -133,6 +134,11 @@ func (e *OTELExporter) SetTracker(tracker *MetricTracker) {
 	e.collector.SetTracker(tracker)
 }
 
+// SetNodeCollector sets the node collector for pushing node metrics via OTEL
+func (e *OTELExporter) SetNodeCollector(nodeCollector *NodeCollector) {
+	e.nodeCollector = nodeCollector
+}
+
 // Start begins pushing metrics to the OTEL collector
 func (e *OTELExporter) Start() {
 	go e.pushMetrics()
@@ -158,15 +164,30 @@ func (e *OTELExporter) pushMetrics() {
 
 // recordMetrics records all metrics by collecting structured data and converting to OTLP
 func (e *OTELExporter) recordMetrics() {
-	// Collect metrics using the same method as /metrics endpoint
+	// Collect image metrics using the same method as /metrics endpoint
 	data, err := e.collector.Collect()
 	if err != nil {
 		log.Printf("Error collecting metrics for OTEL: %v", err)
 		return
 	}
 
-	// Record each metric family
-	for _, family := range data.Families {
+	// Record each image metric family
+	e.recordMetricFamilies(data.Families)
+
+	// Collect and record node metrics if node collector is configured
+	if e.nodeCollector != nil {
+		nodeData, err := e.nodeCollector.Collect()
+		if err != nil {
+			log.Printf("Error collecting node metrics for OTEL: %v", err)
+		} else {
+			e.recordMetricFamilies(nodeData.Families)
+		}
+	}
+}
+
+// recordMetricFamilies records a slice of metric families to OTEL
+func (e *OTELExporter) recordMetricFamilies(families []MetricFamily) {
+	for _, family := range families {
 		// Get or create gauge for this metric
 		gauge, err := e.getOrCreateGauge(family.Name, family.Help)
 		if err != nil {

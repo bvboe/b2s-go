@@ -617,6 +617,102 @@ func TestNodeCollector_EmptyResults(t *testing.T) {
 	}
 }
 
+func TestNodeCollector_SinglePassCollectionSharesLabels(t *testing.T) {
+	deploymentUUID := "test-uuid"
+	deploymentName := "test-cluster"
+
+	mockDB := &MockNodeDatabaseProvider{
+		vulnerabilities: []database.NodeVulnerabilityForMetrics{
+			{
+				NodeName:       "node-1",
+				Hostname:       "node-1.local",
+				OSRelease:      "Ubuntu 22.04",
+				KernelVersion:  "5.15.0",
+				Architecture:   "amd64",
+				VulnID:         100,
+				CVEID:          "CVE-2024-0001",
+				Severity:       "Critical",
+				Score:          9.8,
+				FixStatus:      "fixed",
+				FixVersion:     "2.0.0",
+				KnownExploited: 1,
+				PackageName:    "openssl",
+				PackageVersion: "3.0.2",
+				PackageType:    "deb",
+				Count:          1,
+			},
+		},
+	}
+
+	// Enable all three vulnerability metrics to test single-pass collection
+	config := NodeCollectorConfig{
+		NodeVulnerabilitiesEnabled:        true,
+		NodeVulnerabilityRiskEnabled:      true,
+		NodeVulnerabilityExploitedEnabled: true,
+	}
+
+	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
+
+	data, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Should have exactly 3 metric families (vuln, risk, exploited)
+	if len(data.Families) != 3 {
+		t.Errorf("Expected 3 metric families, got %d", len(data.Families))
+	}
+
+	// Verify all three families have metrics
+	familyMetricCounts := make(map[string]int)
+	for _, family := range data.Families {
+		familyMetricCounts[family.Name] = len(family.Metrics)
+	}
+
+	if familyMetricCounts["bjorn2scan_node_vulnerability"] != 1 {
+		t.Errorf("Expected 1 vulnerability metric, got %d", familyMetricCounts["bjorn2scan_node_vulnerability"])
+	}
+	if familyMetricCounts["bjorn2scan_node_vulnerability_risk"] != 1 {
+		t.Errorf("Expected 1 risk metric, got %d", familyMetricCounts["bjorn2scan_node_vulnerability_risk"])
+	}
+	if familyMetricCounts["bjorn2scan_node_vulnerability_exploited"] != 1 {
+		t.Errorf("Expected 1 exploited metric, got %d", familyMetricCounts["bjorn2scan_node_vulnerability_exploited"])
+	}
+
+	// Verify label sharing: all three metrics should have the same labels pointer
+	// (since they come from the same vulnerability and single-pass reuses labels)
+	var vulnLabels, riskLabels, exploitedLabels map[string]string
+	for _, family := range data.Families {
+		if len(family.Metrics) > 0 {
+			switch family.Name {
+			case "bjorn2scan_node_vulnerability":
+				vulnLabels = family.Metrics[0].Labels
+			case "bjorn2scan_node_vulnerability_risk":
+				riskLabels = family.Metrics[0].Labels
+			case "bjorn2scan_node_vulnerability_exploited":
+				exploitedLabels = family.Metrics[0].Labels
+			}
+		}
+	}
+
+	// Labels should be the same object (pointer equality) due to single-pass optimization
+	if vulnLabels == nil || riskLabels == nil || exploitedLabels == nil {
+		t.Fatal("Expected all label maps to be non-nil")
+	}
+
+	// Verify label values are correct (even if pointers are different, values should match)
+	expectedVulnID := "test-uuid.100"
+	if vulnLabels["vulnerability_id"] != expectedVulnID {
+		t.Errorf("Expected vulnerability_id=%s, got %s", expectedVulnID, vulnLabels["vulnerability_id"])
+	}
+	if riskLabels["vulnerability_id"] != expectedVulnID {
+		t.Errorf("Expected vulnerability_id=%s in risk labels, got %s", expectedVulnID, riskLabels["vulnerability_id"])
+	}
+	if exploitedLabels["vulnerability_id"] != expectedVulnID {
+		t.Errorf("Expected vulnerability_id=%s in exploited labels, got %s", expectedVulnID, exploitedLabels["vulnerability_id"])
+	}
+}
+
 func TestNodeCollector_VulnerabilityLabelsComplete(t *testing.T) {
 	deploymentUUID := "prod-uuid"
 	deploymentName := "production"

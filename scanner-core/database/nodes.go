@@ -1222,8 +1222,9 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 	}
 	defer func() { _ = rows.Close() }()
 
-	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
-	result := make([]NodeVulnerabilityForMetrics, 0)
+	// Pre-allocate with estimated capacity to avoid exponential reallocation on each append
+	// This is critical for performance with large vulnerability datasets (can have 6000+ entries)
+	result := make([]NodeVulnerabilityForMetrics, 0, 10000)
 	for rows.Next() {
 		var v NodeVulnerabilityForMetrics
 		err := rows.Scan(
