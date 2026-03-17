@@ -312,7 +312,7 @@ func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
 			// Write header
 			_ = writer.Write([]string{
 				"OS Distribution", "Node Count", "Avg Critical", "Avg High", "Avg Medium",
-				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Packages",
+				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
 			})
 
 			// Write data
@@ -326,6 +326,8 @@ func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
 					fmt.Sprintf("%.1f", s.AvgLow),
 					fmt.Sprintf("%.1f", s.AvgNegligible),
 					fmt.Sprintf("%.1f", s.AvgUnknown),
+					fmt.Sprintf("%.1f", s.AvgRisk),
+					fmt.Sprintf("%.1f", s.AvgExploits),
 					fmt.Sprintf("%.1f", s.AvgPackages),
 				})
 			}

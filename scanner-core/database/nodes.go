@@ -1086,6 +1086,8 @@ func (db *DB) GetNodeDistributionSummary() ([]nodes.NodeDistributionSummary, err
 			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low')), 0) as avg_low,
 			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible')), 0) as avg_negligible,
 			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible'))), 0) as avg_unknown,
+			COALESCE(AVG((SELECT COALESCE(SUM(nv.score * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_risk,
+			COALESCE(AVG((SELECT COALESCE(SUM(nv.known_exploited * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_exploits,
 			COALESCE(AVG((SELECT COUNT(*) FROM node_packages np WHERE np.node_id = n.id)), 0) as avg_packages
 		FROM nodes n
 		WHERE n.status = 'completed'
@@ -1102,7 +1104,8 @@ func (db *DB) GetNodeDistributionSummary() ([]nodes.NodeDistributionSummary, err
 	for rows.Next() {
 		var summary nodes.NodeDistributionSummary
 		err := rows.Scan(&summary.OSName, &summary.NodeCount, &summary.AvgCritical, &summary.AvgHigh,
-			&summary.AvgMedium, &summary.AvgLow, &summary.AvgNegligible, &summary.AvgUnknown, &summary.AvgPackages)
+			&summary.AvgMedium, &summary.AvgLow, &summary.AvgNegligible, &summary.AvgUnknown,
+			&summary.AvgRisk, &summary.AvgExploits, &summary.AvgPackages)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan distribution summary row: %w", err)
 		}

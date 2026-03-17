@@ -124,6 +124,8 @@
                                 <th rowspan="2"><b>OS Distribution</b></th>
                                 <th rowspan="2"><b># Nodes</b></th>
                                 <th colspan="6"><b>Avg Vulnerabilities per Node</b></th>
+                                <th rowspan="2"><b>Avg Risk Score</b></th>
+                                <th rowspan="2"><b>Avg Exploits</b></th>
                                 <th rowspan="2"><b>Avg Packages</b></th>
                             </tr>
                             <tr>
@@ -633,7 +635,7 @@
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
                 cell.innerHTML = '⚠️ Error loading data: ' + error.message;
-                cell.colSpan = 9;
+                cell.colSpan = 11;
                 cell.style.color = 'red';
                 row.appendChild(cell);
                 tbody.appendChild(row);
@@ -649,7 +651,7 @@
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
                 cell.innerHTML = 'No data available';
-                cell.colSpan = 9;
+                cell.colSpan = 11;
                 row.appendChild(cell);
                 tbody.appendChild(row);
                 return;
@@ -670,6 +672,8 @@
                 addCellToRow(row, 'right', formatAverage(dist.avg_low));
                 addCellToRow(row, 'right', formatAverage(dist.avg_negligible));
                 addCellToRow(row, 'right', formatAverage(dist.avg_unknown));
+                addCellToRow(row, 'right', formatAverage(dist.avg_risk));
+                addCellToRow(row, 'right', formatAverage(dist.avg_exploits));
                 addCellToRow(row, 'right', formatAverage(dist.avg_packages));
 
                 tbody.appendChild(row);

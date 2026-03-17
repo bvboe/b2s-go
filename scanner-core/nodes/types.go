@@ -119,5 +119,7 @@ type NodeDistributionSummary struct {
 	AvgLow        float64 `json:"avg_low"`
 	AvgNegligible float64 `json:"avg_negligible"`
 	AvgUnknown    float64 `json:"avg_unknown"`
+	AvgRisk       float64 `json:"avg_risk"`
+	AvgExploits   float64 `json:"avg_exploits"`
 	AvgPackages   float64 `json:"avg_packages"`
 }
