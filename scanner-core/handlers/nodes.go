@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -111,6 +112,24 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				}
 				return
 			}
+			if format == "csv" {
+				// Export packages as CSV
+				packages, csvErr := db.GetNodePackages(nodeName)
+				if csvErr != nil {
+					log.Printf("Error getting node packages for %s: %v", nodeName, csvErr)
+					http.Error(w, "Failed to get node packages", http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "text/csv")
+				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"packages-%s.csv\"", nodeName))
+				writer := csv.NewWriter(w)
+				defer writer.Flush()
+				_ = writer.Write([]string{"name", "version", "type", "purl", "count"})
+				for _, pkg := range packages {
+					_ = writer.Write([]string{pkg.Name, pkg.Version, pkg.Type, pkg.PURL, fmt.Sprintf("%d", pkg.Count)})
+				}
+				return
+			}
 			result, err = db.GetNodePackages(nodeName)
 
 		case "vulnerabilities":
@@ -132,6 +151,35 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"grype-vulnerabilities-%s.json\"", nodeName))
 				if _, writeErr := w.Write(vulns); writeErr != nil {
 					log.Printf("Error writing node vulnerabilities response: %v", writeErr)
+				}
+				return
+			}
+			if format == "csv" {
+				// Export vulnerabilities as CSV
+				vulns, csvErr := db.GetNodeVulnerabilities(nodeName)
+				if csvErr != nil {
+					log.Printf("Error getting node vulnerabilities for %s: %v", nodeName, csvErr)
+					http.Error(w, "Failed to get node vulnerabilities", http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "text/csv")
+				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"vulnerabilities-%s.csv\"", nodeName))
+				writer := csv.NewWriter(w)
+				defer writer.Flush()
+				_ = writer.Write([]string{"cve_id", "severity", "score", "package_name", "package_version", "package_type", "fix_status", "fix_version", "known_exploited", "count"})
+				for _, v := range vulns {
+					_ = writer.Write([]string{
+						v.CVEID,
+						v.Severity,
+						fmt.Sprintf("%.1f", v.Score),
+						v.PackageName,
+						v.PackageVersion,
+						v.PackageType,
+						v.FixStatus,
+						v.FixVersion,
+						fmt.Sprintf("%d", v.KnownExploited),
+						fmt.Sprintf("%d", v.Count),
+					})
 				}
 				return
 			}

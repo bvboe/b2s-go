@@ -383,6 +383,136 @@ func TestNodeDetailHandler_VulnerabilitiesFormatJSON_NotFound(t *testing.T) {
 	}
 }
 
+// TestNodeDetailHandler_PackagesFormatCSV tests getting packages as CSV
+func TestNodeDetailHandler_PackagesFormatCSV(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "test-node"})
+
+	sbom := `{"artifacts": [
+		{"name": "openssl", "version": "1.1.1", "type": "deb", "purl": "pkg:deb/openssl@1.1.1"},
+		{"name": "curl", "version": "7.68.0", "type": "deb", "purl": "pkg:deb/curl@7.68.0"}
+	]}`
+	_ = db.StoreNodeSBOM("test-node", []byte(sbom))
+
+	handler := NodeDetailHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/test-node/packages?format=csv", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/csv" {
+		t.Errorf("Expected Content-Type text/csv, got %s", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if contentDisp == "" {
+		t.Error("Expected Content-Disposition header to be set")
+	}
+	if contentDisp != `attachment; filename="packages-test-node.csv"` {
+		t.Errorf("Unexpected Content-Disposition: %s", contentDisp)
+	}
+
+	// Check CSV content
+	body := w.Body.String()
+	if body == "" {
+		t.Error("Expected CSV body, got empty")
+	}
+	// Should contain header row
+	if !contains(body, "name,version,type,purl,count") {
+		t.Error("Expected CSV header row with name,version,type,purl,count")
+	}
+	// Should contain data rows
+	if !contains(body, "openssl") {
+		t.Error("Expected CSV to contain 'openssl'")
+	}
+	if !contains(body, "curl") {
+		t.Error("Expected CSV to contain 'curl'")
+	}
+}
+
+// TestNodeDetailHandler_VulnerabilitiesFormatCSV tests getting vulnerabilities as CSV
+func TestNodeDetailHandler_VulnerabilitiesFormatCSV(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "test-node"})
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("test-node", []byte(sbom))
+
+	vulnReport := `{"matches": [
+		{"vulnerability": {"id": "CVE-2021-1234", "severity": "High", "cvss": [{"metrics": {"baseScore": 7.5}}]}, "artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"}, "matchDetails": [{"found": {"versionConstraint": "<1.1.2"}}]},
+		{"vulnerability": {"id": "CVE-2021-5678", "severity": "Critical", "cvss": [{"metrics": {"baseScore": 9.8}}]}, "artifact": {"name": "openssl", "version": "1.1.1", "type": "deb"}, "matchDetails": [{"found": {"versionConstraint": "<1.2.0"}}]}
+	]}`
+	_ = db.StoreNodeVulnerabilities("test-node", []byte(vulnReport), time.Now())
+
+	handler := NodeDetailHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/test-node/vulnerabilities?format=csv", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/csv" {
+		t.Errorf("Expected Content-Type text/csv, got %s", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if contentDisp == "" {
+		t.Error("Expected Content-Disposition header to be set")
+	}
+	if contentDisp != `attachment; filename="vulnerabilities-test-node.csv"` {
+		t.Errorf("Unexpected Content-Disposition: %s", contentDisp)
+	}
+
+	// Check CSV content
+	body := w.Body.String()
+	if body == "" {
+		t.Error("Expected CSV body, got empty")
+	}
+	// Should contain header row
+	if !contains(body, "cve_id,severity,score,package_name,package_version,package_type,fix_status,fix_version,known_exploited,count") {
+		t.Error("Expected CSV header row")
+	}
+	// Should contain data rows
+	if !contains(body, "CVE-2021-1234") {
+		t.Error("Expected CSV to contain 'CVE-2021-1234'")
+	}
+	if !contains(body, "CVE-2021-5678") {
+		t.Error("Expected CSV to contain 'CVE-2021-5678'")
+	}
+	if !contains(body, "Critical") {
+		t.Error("Expected CSV to contain 'Critical'")
+	}
+}
+
+// contains checks if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 // TestNodeDetailHandler_UnknownSubresource tests 404 for unknown subresource
 func TestNodeDetailHandler_UnknownSubresource(t *testing.T) {
 	db, cleanup := createTestDBForHandlers(t)
