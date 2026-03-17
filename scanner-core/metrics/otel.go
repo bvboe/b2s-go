@@ -176,13 +176,43 @@ func (e *OTELExporter) recordMetrics() {
 
 	// Collect and record node metrics if node collector is configured
 	if e.nodeCollector != nil {
-		nodeData, err := e.nodeCollector.Collect()
+		// First, collect node_scanned metrics (small dataset)
+		nodeScannedData, err := e.nodeCollector.CollectNodeScannedOnly()
 		if err != nil {
-			log.Printf("Error collecting node metrics for OTEL: %v", err)
+			log.Printf("Error collecting node scanned metrics for OTEL: %v", err)
 		} else {
-			e.recordMetricFamilies(nodeData.Families)
+			e.recordMetricFamilies(nodeScannedData.Families)
+		}
+
+		// Then stream vulnerability metrics directly to OTEL (memory efficient)
+		if err := e.streamNodeVulnerabilityMetrics(); err != nil {
+			log.Printf("Error streaming node vulnerability metrics for OTEL: %v", err)
 		}
 	}
+}
+
+// streamNodeVulnerabilityMetrics streams node vulnerability metrics to OTEL gauges
+func (e *OTELExporter) streamNodeVulnerabilityMetrics() error {
+	// Get or create gauges for each metric type
+	vulnGauge, err := e.getOrCreateGauge("bjorn2scan_node_vulnerability", "Bjorn2scan vulnerability information for nodes")
+	if err != nil {
+		return fmt.Errorf("failed to create vuln gauge: %w", err)
+	}
+	riskGauge, err := e.getOrCreateGauge("bjorn2scan_node_vulnerability_risk", "Bjorn2scan vulnerability risk scores for nodes")
+	if err != nil {
+		return fmt.Errorf("failed to create risk gauge: %w", err)
+	}
+	exploitedGauge, err := e.getOrCreateGauge("bjorn2scan_node_vulnerability_exploited", "Bjorn2scan known exploited vulnerabilities (CISA KEV) on nodes")
+	if err != nil {
+		return fmt.Errorf("failed to create exploited gauge: %w", err)
+	}
+
+	return e.nodeCollector.StreamVulnerabilityMetricsToOTEL(OTELGauges{
+		Vuln:      vulnGauge,
+		Risk:      riskGauge,
+		Exploited: exploitedGauge,
+		Ctx:       e.ctx,
+	})
 }
 
 // recordMetricFamilies records a slice of metric families to OTEL

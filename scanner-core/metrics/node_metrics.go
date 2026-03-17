@@ -2,11 +2,14 @@ package metrics
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // NodeDatabaseProvider provides access to node data for metrics
@@ -336,4 +339,41 @@ func (c *NodeCollector) CollectNodeScannedOnly() (*MetricsData, error) {
 	data.Families = append(data.Families, family)
 
 	return data, nil
+}
+
+// OTELGauges holds the OTEL gauges for node vulnerability metrics
+type OTELGauges struct {
+	Vuln      metric.Float64Gauge
+	Risk      metric.Float64Gauge
+	Exploited metric.Float64Gauge
+	Ctx       context.Context
+}
+
+// StreamVulnerabilityMetricsToOTEL streams node vulnerability metrics directly to OTEL gauges.
+// This processes one row at a time to avoid OOM with large datasets.
+func (c *NodeCollector) StreamVulnerabilityMetricsToOTEL(gauges OTELGauges) error {
+	streamingDB, ok := c.database.(StreamingNodeDatabaseProvider)
+	if !ok {
+		return fmt.Errorf("database does not support streaming")
+	}
+
+	return streamingDB.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
+		labels := c.buildNodeVulnerabilityLabels(v)
+		attrs := make([]attribute.KeyValue, 0, len(labels))
+		for k, val := range labels {
+			attrs = append(attrs, attribute.String(k, val))
+		}
+		opt := metric.WithAttributes(attrs...)
+
+		if c.config.NodeVulnerabilitiesEnabled && gauges.Vuln != nil {
+			gauges.Vuln.Record(gauges.Ctx, float64(v.Count), opt)
+		}
+		if c.config.NodeVulnerabilityRiskEnabled && gauges.Risk != nil {
+			gauges.Risk.Record(gauges.Ctx, v.Score*float64(v.Count), opt)
+		}
+		if c.config.NodeVulnerabilityExploitedEnabled && gauges.Exploited != nil && v.KnownExploited > 0 {
+			gauges.Exploited.Record(gauges.Ctx, float64(v.KnownExploited*v.Count), opt)
+		}
+		return nil
+	})
 }
