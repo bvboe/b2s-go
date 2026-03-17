@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const currentSchemaVersion = 34
+const currentSchemaVersion = 35
 
 type migration struct {
 	version int
@@ -185,6 +185,11 @@ var migrations = []migration{
 		version: 34,
 		name:    "add_node_detail_tables",
 		up:      migrateToV34,
+	},
+	{
+		version: 35,
+		name:    "add_node_sbom_column",
+		up:      migrateToV35,
 	},
 }
 
@@ -2390,5 +2395,27 @@ func migrateToV34(conn *sql.DB) error {
 	log.Println("  - Created node_vulnerability_details table")
 	log.Println("  - Created node_package_details table")
 	log.Println("  - Migrated existing details data")
+	return nil
+}
+
+// migrateToV35 adds sbom and vulnerabilities columns to nodes table for storing raw JSON
+// This enables the /api/nodes/{name}/sbom and /api/nodes/{name}/vulnerabilities endpoints
+// to return the full Syft and Grype output respectively
+func migrateToV35(conn *sql.DB) error {
+	log.Println("Migration v35: Adding sbom and vulnerabilities columns to nodes table...")
+
+	_, err := conn.Exec(`ALTER TABLE nodes ADD COLUMN sbom TEXT`)
+	if err != nil {
+		return fmt.Errorf("failed to add sbom column to nodes: %w", err)
+	}
+
+	_, err = conn.Exec(`ALTER TABLE nodes ADD COLUMN vulnerabilities TEXT`)
+	if err != nil {
+		return fmt.Errorf("failed to add vulnerabilities column to nodes: %w", err)
+	}
+
+	log.Println("Migration v35: Successfully added sbom and vulnerabilities columns to nodes table")
+	log.Println("  - sbom: Stores raw SBOM JSON from Syft")
+	log.Println("  - vulnerabilities: Stores raw vulnerability JSON from Grype")
 	return nil
 }

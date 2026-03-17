@@ -213,6 +213,71 @@ func TestNodeDetailHandler_Packages(t *testing.T) {
 	}
 }
 
+// TestNodeDetailHandler_PackagesFormatJSON tests getting raw SBOM with format=json
+func TestNodeDetailHandler_PackagesFormatJSON(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "test-node"})
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}], "source": {"type": "image"}}`
+	_ = db.StoreNodeSBOM("test-node", []byte(sbom))
+
+	handler := NodeDetailHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/test-node/packages?format=json", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %s", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if contentDisp == "" {
+		t.Error("Expected Content-Disposition header to be set")
+	}
+
+	// Should return raw SBOM, not parsed packages
+	var rawSBOM map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &rawSBOM); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if _, ok := rawSBOM["artifacts"]; !ok {
+		t.Error("Expected raw SBOM with 'artifacts' key")
+	}
+	if _, ok := rawSBOM["source"]; !ok {
+		t.Error("Expected raw SBOM with 'source' key")
+	}
+}
+
+// TestNodeDetailHandler_PackagesFormatJSON_NotFound tests 404 when SBOM doesn't exist
+func TestNodeDetailHandler_PackagesFormatJSON_NotFound(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "test-node"})
+	// Don't store SBOM
+
+	handler := NodeDetailHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/test-node/packages?format=json", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
 // TestNodeDetailHandler_Vulnerabilities tests getting node vulnerabilities
 func TestNodeDetailHandler_Vulnerabilities(t *testing.T) {
 	db, cleanup := createTestDBForHandlers(t)
@@ -247,6 +312,74 @@ func TestNodeDetailHandler_Vulnerabilities(t *testing.T) {
 
 	if len(result) != 2 {
 		t.Errorf("Expected 2 vulnerabilities, got %d", len(result))
+	}
+}
+
+// TestNodeDetailHandler_VulnerabilitiesFormatJSON tests getting raw vulnerabilities with format=json
+func TestNodeDetailHandler_VulnerabilitiesFormatJSON(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "test-node"})
+
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("test-node", []byte(sbom))
+
+	vulnReport := `{"matches": [{"vulnerability": {"id": "CVE-2021-1234", "severity": "High"}, "artifact": {"name": "openssl"}}], "source": {"type": "sbom"}}`
+	_ = db.StoreNodeVulnerabilities("test-node", []byte(vulnReport), time.Now())
+
+	handler := NodeDetailHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/test-node/vulnerabilities?format=json", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %s", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if contentDisp == "" {
+		t.Error("Expected Content-Disposition header to be set")
+	}
+
+	// Should return raw Grype output, not parsed vulnerabilities
+	var rawVulns map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &rawVulns); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if _, ok := rawVulns["matches"]; !ok {
+		t.Error("Expected raw vulnerabilities with 'matches' key")
+	}
+	if _, ok := rawVulns["source"]; !ok {
+		t.Error("Expected raw vulnerabilities with 'source' key")
+	}
+}
+
+// TestNodeDetailHandler_VulnerabilitiesFormatJSON_NotFound tests 404 when vulnerabilities don't exist
+func TestNodeDetailHandler_VulnerabilitiesFormatJSON_NotFound(t *testing.T) {
+	db, cleanup := createTestDBForHandlers(t)
+	defer cleanup()
+
+	_, _ = db.AddNode(nodes.Node{Name: "test-node"})
+	// Don't store vulnerabilities
+
+	handler := NodeDetailHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/test-node/vulnerabilities?format=json", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
 	}
 }
 

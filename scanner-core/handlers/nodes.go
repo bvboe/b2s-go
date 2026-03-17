@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -90,10 +91,50 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 
 		case "packages":
 			// GET /api/nodes/{name}/packages - Get node packages
+			format := r.URL.Query().Get("format")
+			if format == "json" {
+				// Export raw SBOM JSON (Syft output)
+				sbom, sbomErr := db.GetNodeSBOM(nodeName)
+				if sbomErr != nil {
+					log.Printf("Error getting node SBOM for %s: %v", nodeName, sbomErr)
+					http.Error(w, "Failed to get node SBOM", http.StatusInternalServerError)
+					return
+				}
+				if sbom == nil {
+					http.Error(w, "SBOM not found", http.StatusNotFound)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"syft-sbom-%s.json\"", nodeName))
+				if _, writeErr := w.Write(sbom); writeErr != nil {
+					log.Printf("Error writing node SBOM response: %v", writeErr)
+				}
+				return
+			}
 			result, err = db.GetNodePackages(nodeName)
 
 		case "vulnerabilities":
 			// GET /api/nodes/{name}/vulnerabilities - Get node vulnerabilities
+			format := r.URL.Query().Get("format")
+			if format == "json" {
+				// Export raw vulnerability JSON (Grype output)
+				vulns, vulnErr := db.GetNodeVulnerabilitiesRaw(nodeName)
+				if vulnErr != nil {
+					log.Printf("Error getting node vulnerabilities for %s: %v", nodeName, vulnErr)
+					http.Error(w, "Failed to get node vulnerabilities", http.StatusInternalServerError)
+					return
+				}
+				if vulns == nil {
+					http.Error(w, "Vulnerabilities not found", http.StatusNotFound)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"grype-vulnerabilities-%s.json\"", nodeName))
+				if _, writeErr := w.Write(vulns); writeErr != nil {
+					log.Printf("Error writing node vulnerabilities response: %v", writeErr)
+				}
+				return
+			}
 			result, err = db.GetNodeVulnerabilities(nodeName)
 
 		default:

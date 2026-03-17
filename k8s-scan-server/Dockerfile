@@ -28,7 +28,6 @@ WORKDIR /workspace/k8s-scan-server
 COPY k8s-scan-server/main.go ./
 COPY k8s-scan-server/k8s/ ./k8s/
 COPY k8s-scan-server/podscanner/ ./podscanner/
-COPY k8s-scan-server/handlers/ ./handlers/
 
 # Build the binary
 RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \

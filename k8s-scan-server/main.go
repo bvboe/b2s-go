@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bvboe/b2s-go/k8s-scan-server/handlers"
 	"github.com/bvboe/b2s-go/k8s-scan-server/k8s"
 	"github.com/bvboe/b2s-go/k8s-scan-server/podscanner"
 	scannerconfig "github.com/bvboe/b2s-go/scanner-core/config"
@@ -535,12 +534,8 @@ func main() {
 	// Register database readiness handlers (/ready, /api/db/status, /api/debug/db/reinit)
 	corehandlers.RegisterDatabaseReadinessHandlers(mux, dbReadinessState)
 
-	// Register database handlers with SBOM routing override
-	// The k8s-scan-server routes SBOM requests to pod-scanner on the appropriate node
-	dbHandlerOverrides := &corehandlers.HandlerOverrides{
-		SBOMHandler: handlers.SBOMDownloadWithRoutingHandler(db, clientset, podScannerClient),
-	}
-	corehandlers.RegisterDatabaseHandlers(mux, db, dbHandlerOverrides)
+	// Register database handlers (use all default handlers)
+	corehandlers.RegisterDatabaseHandlers(mux, db, nil)
 
 	// Register static file handlers (web UI) only if enabled
 	if cfg.WebUIEnabled {
@@ -555,7 +550,7 @@ func main() {
 
 	// Register node API handlers (if host scanning is enabled)
 	if cfg.HostScanningEnabled {
-		handlers.RegisterNodeHandlers(mux, db)
+		corehandlers.RegisterNodeHandlers(mux, db)
 		log.Println("Node API endpoints registered: /api/nodes, /api/nodes/{name}, /api/summary/by-node")
 	}
 

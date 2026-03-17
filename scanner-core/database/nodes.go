@@ -369,6 +369,12 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		return fmt.Errorf("failed to get node ID: %w", err)
 	}
 
+	// Store raw SBOM JSON for API retrieval
+	_, err = tx.Exec(`UPDATE nodes SET sbom = ? WHERE id = ?`, string(sbomJSON), nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to store raw SBOM: %w", err)
+	}
+
 	// Delete existing packages for this node
 	_, err = tx.Exec(`DELETE FROM node_packages WHERE node_id = ?`, nodeID)
 	if err != nil {
@@ -516,6 +522,12 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	err := db.conn.QueryRow(`SELECT id FROM nodes WHERE name = ?`, name).Scan(&nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to get node ID: %w", err)
+	}
+
+	// Store raw vulnerability JSON for API retrieval
+	_, err = db.conn.Exec(`UPDATE nodes SET vulnerabilities = ? WHERE id = ?`, string(vulnJSON), nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to store raw vulnerabilities: %w", err)
 	}
 
 	// Parse vulnerability report using json.RawMessage to preserve full match details
@@ -706,6 +718,38 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 
 	log.Printf("Stored vulnerabilities for node %s: %d unique (from %d matches)", name, totalInserted, len(report.Matches))
 	return nil
+}
+
+// GetNodeSBOM retrieves the raw SBOM JSON for a node
+func (db *DB) GetNodeSBOM(name string) ([]byte, error) {
+	var sbom sql.NullString
+	err := db.conn.QueryRow(`SELECT sbom FROM nodes WHERE name = ?`, name).Scan(&sbom)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node SBOM: %w", err)
+	}
+	if !sbom.Valid || sbom.String == "" {
+		return nil, nil
+	}
+	return []byte(sbom.String), nil
+}
+
+// GetNodeVulnerabilitiesRaw retrieves the raw vulnerability JSON for a node
+func (db *DB) GetNodeVulnerabilitiesRaw(name string) ([]byte, error) {
+	var vulns sql.NullString
+	err := db.conn.QueryRow(`SELECT vulnerabilities FROM nodes WHERE name = ?`, name).Scan(&vulns)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node vulnerabilities: %w", err)
+	}
+	if !vulns.Valid || vulns.String == "" {
+		return nil, nil
+	}
+	return []byte(vulns.String), nil
 }
 
 // GetNodePackages retrieves all packages for a node with instance counts
