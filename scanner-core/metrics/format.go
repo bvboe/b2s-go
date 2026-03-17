@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -25,6 +27,43 @@ func FormatPrometheus(data *MetricsData) string {
 	}
 
 	return output.String()
+}
+
+// WritePrometheus streams metrics data directly to a writer in Prometheus text format.
+// This avoids buffering the entire output in memory, which is critical for large datasets.
+func WritePrometheus(w io.Writer, data *MetricsData) error {
+	bw := bufio.NewWriterSize(w, 64*1024) // 64KB buffer for efficient writes
+
+	for _, family := range data.Families {
+		if err := WritePrometheusFamily(bw, family); err != nil {
+			return err
+		}
+	}
+
+	return bw.Flush()
+}
+
+// WritePrometheusFamily writes a single metric family to a writer.
+// This allows streaming one family at a time to minimize memory usage.
+func WritePrometheusFamily(w io.Writer, family MetricFamily) error {
+	// Write HELP line
+	if _, err := fmt.Fprintf(w, "# HELP %s %s\n", family.Name, family.Help); err != nil {
+		return err
+	}
+	// Write TYPE line
+	if _, err := fmt.Fprintf(w, "# TYPE %s %s\n", family.Name, family.Type); err != nil {
+		return err
+	}
+
+	// Write each metric
+	for _, metric := range family.Metrics {
+		labels := formatLabels(metric.Labels)
+		if _, err := fmt.Fprintf(w, "%s{%s} %g\n", family.Name, labels, metric.Value); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // formatLabels converts a label map to Prometheus label string format

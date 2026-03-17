@@ -1244,6 +1244,56 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 	return result, nil
 }
 
+// StreamNodeVulnerabilitiesForMetrics iterates over all node vulnerabilities for metrics,
+// calling the callback for each row. This avoids loading all data into memory, which is
+// critical for large datasets (e.g., 174,000+ vulnerabilities across multiple nodes).
+func (db *DB) StreamNodeVulnerabilitiesForMetrics(callback func(v NodeVulnerabilityForMetrics) error) error {
+	rows, err := db.conn.Query(`
+		SELECT
+			n.name,
+			COALESCE(n.hostname, '') as hostname,
+			COALESCE(n.os_release, '') as os_release,
+			COALESCE(n.kernel_version, '') as kernel_version,
+			COALESCE(n.architecture, '') as architecture,
+			nv.id as vuln_id,
+			nv.cve_id,
+			COALESCE(nv.severity, 'Unknown') as severity,
+			COALESCE(nv.score, 0) as score,
+			COALESCE(nv.fix_status, 'unknown') as fix_status,
+			COALESCE(nv.fix_version, '') as fix_version,
+			COALESCE(nv.known_exploited, 0) as known_exploited,
+			np.name as package_name,
+			np.version as package_version,
+			COALESCE(np.type, '') as package_type,
+			COALESCE(nv.count, 1) as count
+		FROM node_vulnerabilities nv
+		JOIN nodes n ON nv.node_id = n.id
+		JOIN node_packages np ON nv.package_id = np.id
+		WHERE n.status = 'completed'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query node vulnerabilities for metrics: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var v NodeVulnerabilityForMetrics
+		err := rows.Scan(
+			&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
+			&v.VulnID, &v.CVEID, &v.Severity, &v.Score, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
+			&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to scan node vulnerability row: %w", err)
+		}
+		if err := callback(v); err != nil {
+			return err
+		}
+	}
+
+	return rows.Err()
+}
+
 // GetScannedNodes retrieves all completed nodes for the bjorn2scan_node_scanned metric
 // Only selects columns needed for metrics labels to minimize overhead
 func (db *DB) GetScannedNodes() ([]nodes.NodeWithStatus, error) {

@@ -89,7 +89,10 @@ func HandlerWithNodes(infoProvider InfoProvider, deploymentUUID string, database
 			return
 		}
 
-		// Collect image/container metrics
+		// Set headers before streaming
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+		// Collect and stream image/container metrics
 		data, err := collector.Collect()
 		if err != nil {
 			log.Printf("Error collecting metrics: %v", err)
@@ -97,26 +100,42 @@ func HandlerWithNodes(infoProvider InfoProvider, deploymentUUID string, database
 			return
 		}
 
-		// Collect node metrics if enabled
-		if nodeCollector != nil {
-			nodeData, err := nodeCollector.Collect()
-			if err != nil {
-				log.Printf("Error collecting node metrics: %v", err)
-				// Continue with image metrics even if node metrics fail
-			} else {
-				// Merge node metrics into the main data
-				data.Families = append(data.Families, nodeData.Families...)
-			}
+		// Stream image metrics directly to response
+		if err := WritePrometheus(w, data); err != nil {
+			log.Printf("Error writing image metrics: %v", err)
+			return
 		}
 
-		// Format as Prometheus text
-		metricsText := FormatPrometheus(data)
+		// Stream node metrics if enabled
+		if nodeCollector != nil {
+			// First, write node_scanned metrics (small dataset, use standard collection)
+			nodeScannedData, err := nodeCollector.CollectNodeScannedOnly()
+			if err != nil {
+				log.Printf("Error collecting node scanned metrics: %v", err)
+			} else if len(nodeScannedData.Families) > 0 {
+				if err := WritePrometheus(w, nodeScannedData); err != nil {
+					log.Printf("Error writing node scanned metrics: %v", err)
+				}
+			}
 
-		// Write response
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte(metricsText)); err != nil {
-			log.Printf("Error writing metrics response: %v", err)
+			// Then stream vulnerability metrics directly from database to response
+			// This avoids loading 100k+ vulnerabilities into memory
+			streamed, err := nodeCollector.StreamVulnerabilityMetrics(w)
+			if err != nil {
+				log.Printf("Error streaming node vulnerability metrics: %v", err)
+			}
+
+			// Fall back to standard collection if streaming not supported
+			if !streamed {
+				nodeData, err := nodeCollector.Collect()
+				if err != nil {
+					log.Printf("Error collecting node metrics: %v", err)
+				} else {
+					if err := WritePrometheus(w, nodeData); err != nil {
+						log.Printf("Error writing node metrics: %v", err)
+					}
+				}
+			}
 		}
 	}
 }

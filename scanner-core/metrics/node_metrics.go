@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
@@ -11,6 +13,15 @@ import (
 type NodeDatabaseProvider interface {
 	GetScannedNodes() ([]nodes.NodeWithStatus, error)
 	GetNodeVulnerabilitiesForMetrics() ([]database.NodeVulnerabilityForMetrics, error)
+}
+
+// StreamingNodeDatabaseProvider extends NodeDatabaseProvider with streaming capability
+// for large datasets that would cause OOM if loaded entirely into memory.
+type StreamingNodeDatabaseProvider interface {
+	NodeDatabaseProvider
+	// StreamNodeVulnerabilitiesForMetrics iterates over all node vulnerabilities,
+	// calling the callback for each row. This avoids loading all data into memory.
+	StreamNodeVulnerabilitiesForMetrics(callback func(v database.NodeVulnerabilityForMetrics) error) error
 }
 
 // NodeCollectorConfig holds configuration for which node metrics to collect
@@ -225,4 +236,104 @@ func (c *NodeCollector) collectAllVulnerabilityMetrics(
 	}
 
 	return vulnFamily, riskFamily, exploitedFamily
+}
+
+// StreamVulnerabilityMetrics streams node vulnerability metrics directly to a writer.
+// This is memory-efficient for large datasets (100k+ vulnerabilities) as it processes
+// one row at a time instead of loading all data into memory.
+// Returns true if streaming was used, false if the database doesn't support streaming.
+func (c *NodeCollector) StreamVulnerabilityMetrics(w io.Writer) (bool, error) {
+	// Check if database supports streaming
+	streamingDB, ok := c.database.(StreamingNodeDatabaseProvider)
+	if !ok {
+		return false, nil // Fall back to non-streaming collection
+	}
+
+	bw := bufio.NewWriterSize(w, 64*1024) // 64KB buffer
+
+	// Track whether we've written headers for each metric family
+	vulnHeaderWritten := false
+	riskHeaderWritten := false
+	exploitedHeaderWritten := false
+
+	err := streamingDB.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
+		labels := c.buildNodeVulnerabilityLabels(v)
+		labelsStr := formatLabels(labels)
+
+		// Write vulnerability metric
+		if c.config.NodeVulnerabilitiesEnabled {
+			if !vulnHeaderWritten {
+				if _, err := fmt.Fprintf(bw, "# HELP bjorn2scan_node_vulnerability Bjorn2scan vulnerability information for nodes\n"); err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(bw, "# TYPE bjorn2scan_node_vulnerability gauge\n"); err != nil {
+					return err
+				}
+				vulnHeaderWritten = true
+			}
+			if _, err := fmt.Fprintf(bw, "bjorn2scan_node_vulnerability{%s} %g\n", labelsStr, float64(v.Count)); err != nil {
+				return err
+			}
+		}
+
+		// Write risk metric
+		if c.config.NodeVulnerabilityRiskEnabled {
+			if !riskHeaderWritten {
+				if _, err := fmt.Fprintf(bw, "# HELP bjorn2scan_node_vulnerability_risk Bjorn2scan vulnerability risk scores for nodes\n"); err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(bw, "# TYPE bjorn2scan_node_vulnerability_risk gauge\n"); err != nil {
+					return err
+				}
+				riskHeaderWritten = true
+			}
+			if _, err := fmt.Fprintf(bw, "bjorn2scan_node_vulnerability_risk{%s} %g\n", labelsStr, v.Score*float64(v.Count)); err != nil {
+				return err
+			}
+		}
+
+		// Write exploited metric (only if known exploited)
+		if c.config.NodeVulnerabilityExploitedEnabled && v.KnownExploited > 0 {
+			if !exploitedHeaderWritten {
+				if _, err := fmt.Fprintf(bw, "# HELP bjorn2scan_node_vulnerability_exploited Bjorn2scan known exploited vulnerabilities (CISA KEV) on nodes\n"); err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(bw, "# TYPE bjorn2scan_node_vulnerability_exploited gauge\n"); err != nil {
+					return err
+				}
+				exploitedHeaderWritten = true
+			}
+			if _, err := fmt.Fprintf(bw, "bjorn2scan_node_vulnerability_exploited{%s} %g\n", labelsStr, float64(v.KnownExploited*v.Count)); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return true, err
+	}
+
+	return true, bw.Flush()
+}
+
+// CollectNodeScannedOnly collects only the node scanned metrics (small dataset).
+// Use this with StreamVulnerabilityMetrics for memory-efficient metrics collection.
+func (c *NodeCollector) CollectNodeScannedOnly() (*MetricsData, error) {
+	data := &MetricsData{
+		Families: make([]MetricFamily, 0, 1),
+	}
+
+	if c.database == nil || !c.config.NodeScannedEnabled {
+		return data, nil
+	}
+
+	family, err := c.collectNodeScannedMetrics()
+	if err != nil {
+		return nil, err
+	}
+	data.Families = append(data.Families, family)
+
+	return data, nil
 }
