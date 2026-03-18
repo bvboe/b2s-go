@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/bvboe/b2s-go/pod-scanner/handlers"
 	"github.com/bvboe/b2s-go/pod-scanner/runtime"
@@ -13,6 +14,22 @@ import (
 
 // version is set at build time via ldflags
 var version = "dev"
+
+// parseCommaSeparated splits a comma-separated string into a slice of trimmed strings.
+func parseCommaSeparated(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
 
 type InfoResponse struct {
 	Component string `json:"component"`
@@ -74,6 +91,21 @@ func main() {
 	// Register host SBOM endpoint for host-level scanning
 	// This scans the host filesystem (mounted at /host) for packages
 	hostSBOMCfg := handlers.DefaultHostSBOMConfig()
+
+	// Apply configuration from environment variables
+	if extraExclusions := os.Getenv("HOST_SCANNING_EXTRA_EXCLUSIONS"); extraExclusions != "" {
+		hostSBOMCfg.ExtraExclusions = parseCommaSeparated(extraExclusions)
+		log.Printf("Host scanning extra exclusions: %v", hostSBOMCfg.ExtraExclusions)
+	}
+	if autoDetectNFS := os.Getenv("HOST_SCANNING_AUTO_DETECT_NFS"); autoDetectNFS != "" {
+		val := strings.ToLower(autoDetectNFS)
+		hostSBOMCfg.AutoDetectNFS = val == "true" || val == "1" || val == "yes"
+	}
+	if extraNetworkFSTypes := os.Getenv("HOST_SCANNING_EXTRA_NETWORK_FS_TYPES"); extraNetworkFSTypes != "" {
+		hostSBOMCfg.ExtraNetworkFSTypes = parseCommaSeparated(extraNetworkFSTypes)
+		log.Printf("Host scanning extra network FS types: %v", hostSBOMCfg.ExtraNetworkFSTypes)
+	}
+
 	http.HandleFunc("/host-sbom", handlers.HostSBOMHandler(hostSBOMCfg))
 
 	log.Printf("pod-scanner v%s starting on port %s (node: %s)", version, port, os.Getenv("NODE_NAME"))

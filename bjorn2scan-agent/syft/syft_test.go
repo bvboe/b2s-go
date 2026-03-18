@@ -3,6 +3,8 @@ package syft
 import (
 	"strings"
 	"testing"
+
+	"github.com/bvboe/b2s-go/sbom-generator-shared/exclusions"
 )
 
 // TestDefaultHostExclusions_ContainsContainerPaths tests that container paths are excluded
@@ -18,7 +20,7 @@ func TestDefaultHostExclusions_ContainsContainerPaths(t *testing.T) {
 
 	for _, pattern := range requiredPatterns {
 		found := false
-		for _, excl := range DefaultHostExclusions {
+		for _, excl := range exclusions.DefaultHostExclusions {
 			if excl == pattern {
 				found = true
 				break
@@ -42,7 +44,7 @@ func TestDefaultHostExclusions_ContainsSystemPaths(t *testing.T) {
 
 	for _, pattern := range requiredPatterns {
 		found := false
-		for _, excl := range DefaultHostExclusions {
+		for _, excl := range exclusions.DefaultHostExclusions {
 			if excl == pattern {
 				found = true
 				break
@@ -58,14 +60,14 @@ func TestDefaultHostExclusions_ContainsSystemPaths(t *testing.T) {
 func TestDefaultHostExclusions_HasMinimumCount(t *testing.T) {
 	// We expect at least 10 exclusion patterns for container and system paths
 	minCount := 10
-	if len(DefaultHostExclusions) < minCount {
-		t.Errorf("Expected at least %d exclusion patterns, got %d", minCount, len(DefaultHostExclusions))
+	if len(exclusions.DefaultHostExclusions) < minCount {
+		t.Errorf("Expected at least %d exclusion patterns, got %d", minCount, len(exclusions.DefaultHostExclusions))
 	}
 }
 
 // TestDefaultHostExclusions_AllAreGlobPatterns tests that all patterns are valid globs
 func TestDefaultHostExclusions_AllAreGlobPatterns(t *testing.T) {
-	for _, pattern := range DefaultHostExclusions {
+	for _, pattern := range exclusions.DefaultHostExclusions {
 		// All patterns should contain ** for recursive matching
 		if !strings.Contains(pattern, "**") {
 			t.Errorf("Pattern %q doesn't appear to be a recursive glob (missing **)", pattern)
@@ -79,7 +81,7 @@ func TestDefaultHostExclusions_AllAreGlobPatterns(t *testing.T) {
 
 // TestDefaultHostExclusions_NoAbsolutePaths tests that patterns use relative globs
 func TestDefaultHostExclusions_NoAbsolutePaths(t *testing.T) {
-	for _, pattern := range DefaultHostExclusions {
+	for _, pattern := range exclusions.DefaultHostExclusions {
 		// Patterns should start with ** not with /
 		if strings.HasPrefix(pattern, "/") {
 			t.Errorf("Pattern %q starts with / but should use ** for portability", pattern)
@@ -90,7 +92,7 @@ func TestDefaultHostExclusions_NoAbsolutePaths(t *testing.T) {
 // TestDefaultHostExclusions_IncludesRancherForK3s tests K3s/Rancher exclusion
 func TestDefaultHostExclusions_IncludesRancherForK3s(t *testing.T) {
 	found := false
-	for _, excl := range DefaultHostExclusions {
+	for _, excl := range exclusions.DefaultHostExclusions {
 		if strings.Contains(excl, "rancher") {
 			found = true
 			break
@@ -98,5 +100,33 @@ func TestDefaultHostExclusions_IncludesRancherForK3s(t *testing.T) {
 	}
 	if !found {
 		t.Error("Expected rancher exclusion pattern for K3s support")
+	}
+}
+
+// TestHostScanConfig tests the host scan configuration
+func TestHostScanConfig(t *testing.T) {
+	// Test default config
+	defaultCfg := DefaultHostScanConfig()
+	if !defaultCfg.AutoDetectNFS {
+		t.Error("Expected AutoDetectNFS to be true by default")
+	}
+	if defaultCfg.ExtraExclusions != nil {
+		t.Error("Expected ExtraExclusions to be nil by default")
+	}
+	if defaultCfg.ExtraNetworkFSTypes != nil {
+		t.Error("Expected ExtraNetworkFSTypes to be nil by default")
+	}
+
+	// Test SetHostScanConfig
+	customCfg := HostScanConfig{
+		ExtraExclusions:     []string{"**/custom/**"},
+		AutoDetectNFS:       false,
+		ExtraNetworkFSTypes: []string{"fuse.gdrive"},
+	}
+	SetHostScanConfig(customCfg)
+
+	// Verify the config was set (we can't directly access it, so this is just a smoke test)
+	if hostScanConfig.AutoDetectNFS != false {
+		t.Error("Expected AutoDetectNFS to be false after SetHostScanConfig")
 	}
 }

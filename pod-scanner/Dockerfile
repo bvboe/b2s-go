@@ -5,6 +5,9 @@ ARG VERSION=dev
 
 WORKDIR /workspace/pod-scanner
 
+# Copy sbom-generator-shared module (needed for build due to replace directive)
+COPY sbom-generator-shared/ ../sbom-generator-shared/
+
 # Copy go.mod and go.sum files first for better layer caching
 # This layer will only be invalidated when dependencies change
 COPY pod-scanner/go.mod pod-scanner/go.sum* ./

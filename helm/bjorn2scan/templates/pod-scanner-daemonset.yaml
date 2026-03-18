@@ -56,6 +56,18 @@ spec:
         - name: CONTAINERD_SOCKET
           value: {{ .Values.podScanner.config.containerdSocket | quote }}
         {{- end }}
+        {{- if .Values.scanServer.config.hostScanning.enabled }}
+        - name: HOST_SCANNING_AUTO_DETECT_NFS
+          value: {{ .Values.scanServer.config.hostScanning.autoDetectNFS | default true | quote }}
+        {{- if .Values.scanServer.config.hostScanning.extraExclusions }}
+        - name: HOST_SCANNING_EXTRA_EXCLUSIONS
+          value: {{ .Values.scanServer.config.hostScanning.extraExclusions | join "," | quote }}
+        {{- end }}
+        {{- if .Values.scanServer.config.hostScanning.extraNetworkFSTypes }}
+        - name: HOST_SCANNING_EXTRA_NETWORK_FS_TYPES
+          value: {{ .Values.scanServer.config.hostScanning.extraNetworkFSTypes | join "," | quote }}
+        {{- end }}
+        {{- end }}
         livenessProbe:
           {{- toYaml .Values.podScanner.livenessProbe | nindent 10 }}
         readinessProbe:

@@ -11,48 +11,63 @@ import (
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/syftjson"
 	"github.com/anchore/syft/syft/source"
+	"github.com/bvboe/b2s-go/sbom-generator-shared/exclusions"
 )
-
-// DefaultHostExclusions are the paths to exclude when scanning the host filesystem.
-// These exclude container filesystems to avoid double-counting packages that
-// are already scanned via container image scanning.
-var DefaultHostExclusions = []string{
-	"**/snapshots/**",            // containerd snapshots
-	"**/rootfs/**",               // containerd rootfs
-	"**/overlay2/**",             // docker overlay
-	"**/var/lib/kubelet/pods/**", // pod volumes
-	"**/var/lib/containerd/**",   // containerd data
-	"**/var/lib/docker/**",       // docker data
-	"**/var/lib/rancher/**",      // k3s/rancher data
-	"**/proc/**",                 // proc filesystem
-	"**/sys/**",                  // sys filesystem
-	"**/dev/**",                  // device files
-	"**/run/**",                  // runtime data
-	"**/tmp/**",                  // temporary files
-}
 
 // HostSBOMConfig configures the host SBOM handler
 type HostSBOMConfig struct {
 	// HostPath is the path to the host filesystem (typically /host)
 	HostPath string
-	// Exclusions are glob patterns to exclude from scanning
-	Exclusions []string
 	// Timeout is the maximum duration for SBOM generation
 	Timeout time.Duration
+	// ExtraExclusions are additional exclusion patterns to add to defaults
+	ExtraExclusions []string
+	// AutoDetectNFS enables auto-detection of network filesystem mounts
+	AutoDetectNFS bool
+	// ExtraNetworkFSTypes are additional network FS types to detect
+	ExtraNetworkFSTypes []string
 }
 
 // DefaultHostSBOMConfig returns a default configuration for host scanning
 func DefaultHostSBOMConfig() HostSBOMConfig {
 	return HostSBOMConfig{
-		HostPath:   "/host",
-		Exclusions: DefaultHostExclusions,
-		Timeout:    10 * time.Minute, // Host scans take longer than container scans
+		HostPath:            "/host",
+		Timeout:             10 * time.Minute, // Host scans take longer than container scans
+		ExtraExclusions:     nil,
+		AutoDetectNFS:       true,
+		ExtraNetworkFSTypes: nil,
 	}
+}
+
+// BuildExclusions builds the complete list of exclusions based on config.
+func (cfg *HostSBOMConfig) BuildExclusions() []string {
+	excCfg := exclusions.HostExclusionConfig{
+		ExtraExclusions:     cfg.ExtraExclusions,
+		AutoDetectNFS:       cfg.AutoDetectNFS,
+		ExtraNetworkFSTypes: cfg.ExtraNetworkFSTypes,
+		HostPrefix:          cfg.HostPath,
+	}
+	result, err := exclusions.BuildExclusions(excCfg)
+	if err != nil {
+		log.Printf("Warning: failed to detect network mounts: %v", err)
+	}
+	return result
 }
 
 // HostSBOMHandler creates an HTTP handler for /host-sbom endpoint
 // Generates SBOM for the host filesystem (mounted at /host)
 func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
+	// Build exclusions once at handler creation time
+	exclusionPatterns := cfg.BuildExclusions()
+
+	// Log exclusion configuration for debugging
+	log.Printf("Host SBOM exclusion config: autoDetectNFS=%v, extraExclusions=%d, extraNetworkFSTypes=%d",
+		cfg.AutoDetectNFS, len(cfg.ExtraExclusions), len(cfg.ExtraNetworkFSTypes))
+	log.Printf("Host SBOM handler configured with %d exclusion patterns:", len(exclusionPatterns))
+	for _, pattern := range exclusionPatterns {
+		log.Printf("  - %s", pattern)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Host SBOM request received")
 
@@ -63,11 +78,11 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 		// Configure source with exclusions for container filesystems
 		sourceCfg := syft.DefaultGetSourceConfig().
 			WithExcludeConfig(source.ExcludeConfig{
-				Paths: cfg.Exclusions,
+				Paths: exclusionPatterns,
 			})
 
 		// Get source for the host filesystem
-		log.Printf("Scanning host filesystem: %s (excluding %d patterns)", cfg.HostPath, len(cfg.Exclusions))
+		log.Printf("Scanning host filesystem: %s (excluding %d patterns)", cfg.HostPath, len(exclusionPatterns))
 		src, err := syft.GetSource(ctx, cfg.HostPath, sourceCfg)
 		if err != nil {
 			log.Printf("Error getting source for host filesystem: %v", err)

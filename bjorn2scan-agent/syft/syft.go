@@ -9,6 +9,7 @@ import (
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/syftjson"
 	"github.com/anchore/syft/syft/source"
+	"github.com/bvboe/b2s-go/sbom-generator-shared/exclusions"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 )
 
@@ -77,21 +78,29 @@ func GenerateSBOMFromImageSource(ctx context.Context, src source.Source) ([]byte
 	return sbomBytes, nil
 }
 
-// DefaultHostExclusions are the paths to exclude when scanning the host filesystem.
-// These exclude container filesystems to avoid double-counting packages.
-var DefaultHostExclusions = []string{
-	"**/snapshots/**",            // containerd snapshots
-	"**/rootfs/**",               // containerd rootfs
-	"**/overlay2/**",             // docker overlay
-	"**/var/lib/kubelet/pods/**", // pod volumes
-	"**/var/lib/containerd/**",   // containerd data
-	"**/var/lib/docker/**",       // docker data
-	"**/var/lib/rancher/**",      // k3s/rancher data
-	"**/proc/**",                 // proc filesystem
-	"**/sys/**",                  // sys filesystem
-	"**/dev/**",                  // device files
-	"**/run/**",                  // runtime data
-	"**/tmp/**",                  // temporary files
+// HostScanConfig holds configuration for host filesystem scanning.
+type HostScanConfig struct {
+	ExtraExclusions     []string
+	AutoDetectNFS       bool
+	ExtraNetworkFSTypes []string
+}
+
+// DefaultHostScanConfig returns the default host scan configuration.
+func DefaultHostScanConfig() HostScanConfig {
+	return HostScanConfig{
+		ExtraExclusions:     nil,
+		AutoDetectNFS:       true,
+		ExtraNetworkFSTypes: nil,
+	}
+}
+
+// hostScanConfig holds the global host scan configuration.
+// Set via SetHostScanConfig before calling GenerateHostSBOM.
+var hostScanConfig = DefaultHostScanConfig()
+
+// SetHostScanConfig sets the global host scan configuration.
+func SetHostScanConfig(cfg HostScanConfig) {
+	hostScanConfig = cfg
 }
 
 // GenerateHostSBOM generates an SBOM for the host filesystem
@@ -99,12 +108,30 @@ var DefaultHostExclusions = []string{
 func GenerateHostSBOM(ctx context.Context) ([]byte, error) {
 	hostPath := "/"
 
-	log.Printf("Generating SBOM for host filesystem: %s (excluding %d patterns)", hostPath, len(DefaultHostExclusions))
+	// Build exclusions using the shared package
+	excCfg := exclusions.HostExclusionConfig{
+		ExtraExclusions:     hostScanConfig.ExtraExclusions,
+		AutoDetectNFS:       hostScanConfig.AutoDetectNFS,
+		ExtraNetworkFSTypes: hostScanConfig.ExtraNetworkFSTypes,
+		HostPrefix:          "", // Agent scans root directly, not /host
+	}
+	exclusionPatterns, err := exclusions.BuildExclusions(excCfg)
+	if err != nil {
+		log.Printf("Warning: failed to detect network mounts: %v", err)
+	}
+
+	// Log exclusion configuration for debugging
+	log.Printf("Host SBOM exclusion config: autoDetectNFS=%v, extraExclusions=%d, extraNetworkFSTypes=%d",
+		hostScanConfig.AutoDetectNFS, len(hostScanConfig.ExtraExclusions), len(hostScanConfig.ExtraNetworkFSTypes))
+	log.Printf("Generating SBOM for host filesystem: %s (excluding %d patterns):", hostPath, len(exclusionPatterns))
+	for _, pattern := range exclusionPatterns {
+		log.Printf("  - %s", pattern)
+	}
 
 	// Configure source with exclusions for container filesystems
 	cfg := syft.DefaultGetSourceConfig().
 		WithExcludeConfig(source.ExcludeConfig{
-			Paths: DefaultHostExclusions,
+			Paths: exclusionPatterns,
 		})
 
 	// Get source for the host filesystem

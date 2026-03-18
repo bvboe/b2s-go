@@ -31,6 +31,7 @@ build-all: ## Build all Go binaries
 
 test-all: ## Run tests for all components
 	@echo "Running tests for all components..."
+	$(MAKE) -C sbom-generator-shared test
 	$(MAKE) -C scanner-core test
 	$(MAKE) -C k8s-scan-server test
 	$(MAKE) -C pod-scanner test
@@ -49,6 +50,7 @@ docker-build-all: ## Build all Docker images
 
 clean-all: ## Clean all build artifacts
 	@echo "Cleaning all build artifacts..."
+	$(MAKE) -C sbom-generator-shared clean
 	$(MAKE) -C scanner-core clean
 	$(MAKE) -C k8s-scan-server clean
 	$(MAKE) -C pod-scanner clean

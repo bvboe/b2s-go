@@ -352,6 +352,20 @@ func main() {
 	if cfg.HostScanningEnabled {
 		log.Println("Host scanning enabled, configuring host SBOM retriever")
 
+		// Configure host scan exclusions
+		hostScanCfg := syft.HostScanConfig{
+			ExtraExclusions:     cfg.HostScanningExtraExclusions,
+			AutoDetectNFS:       cfg.HostScanningAutoDetectNFS,
+			ExtraNetworkFSTypes: cfg.HostScanningExtraNetworkFSTypes,
+		}
+		syft.SetHostScanConfig(hostScanCfg)
+		if len(cfg.HostScanningExtraExclusions) > 0 {
+			log.Printf("Host scanning extra exclusions: %v", cfg.HostScanningExtraExclusions)
+		}
+		if len(cfg.HostScanningExtraNetworkFSTypes) > 0 {
+			log.Printf("Host scanning extra network FS types: %v", cfg.HostScanningExtraNetworkFSTypes)
+		}
+
 		// Create host SBOM retriever that uses syft to scan local filesystem
 		hostSBOMRetriever := func(ctx context.Context, nodeName string) ([]byte, error) {
 			return syft.GenerateHostSBOM(ctx)

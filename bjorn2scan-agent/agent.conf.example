@@ -285,3 +285,29 @@ metrics_node_vulnerability_exploited_enabled=true
 # and reports vulnerabilities found in system packages
 # Environment variable: HOST_SCANNING_ENABLED
 host_scanning_enabled=true
+
+# Host scanning interval (default: 24h)
+# How often to rescan the host filesystem for package changes
+# Format: Go duration string (e.g., "12h", "24h", "48h")
+# Environment variable: HOST_SCANNING_INTERVAL
+host_scanning_interval=24h
+
+# Additional exclusion patterns for host scanning (default: empty)
+# Comma-separated list of glob patterns to exclude from scanning
+# These are added to the default exclusions (container runtimes, virtual filesystems, etc.)
+# Example: /home/**,/backup/**,/data/**
+# Environment variable: HOST_SCANNING_EXTRA_EXCLUSIONS
+host_scanning_extra_exclusions=
+
+# Auto-detect network filesystem mounts (default: true)
+# When enabled, automatically detects and excludes NFS, CIFS, and other network mounts
+# This prevents slow scans on network filesystems and avoids scanning remote data
+# Environment variable: HOST_SCANNING_AUTO_DETECT_NFS
+host_scanning_auto_detect_nfs=true
+
+# Additional network filesystem types to detect (default: empty)
+# Comma-separated list of filesystem types to add to the default detection
+# Default types: nfs, nfs4, cifs, smbfs, fuse.sshfs, fuse.rclone, fuse.s3fs, afs, gfs, gfs2, lustre, glusterfs
+# Example: fuse.gdrive,fuse.dropbox,fuse.onedrive
+# Environment variable: HOST_SCANNING_EXTRA_NETWORK_FS_TYPES
+host_scanning_extra_network_fs_types=

@@ -140,16 +140,18 @@ scanServer:
     # Scans Kubernetes node host filesystems for packages and vulnerabilities
     hostScanning:
       enabled: true  # Enable host/node scanning
-      # Exclusion paths to avoid double-counting container packages
-      # Note: All patterns must start with './', '*/', or '**/'
-      excludePaths:
-        - "**/snapshots/**"            # containerd snapshots
-        - "**/rootfs/**"               # containerd rootfs
-        - "**/overlay2/**"             # docker overlay
-        - "**/var/lib/kubelet/pods/**" # pod volumes
-        - "**/var/lib/containerd/**"   # containerd data
-        - "**/var/lib/docker/**"       # docker data
-        - "**/var/lib/rancher/**"      # k3s/rancher data
+      # Auto-detect network filesystem mounts (NFS, CIFS, etc.) and exclude them
+      autoDetectNFS: true
+      # Additional exclusion patterns for host scanning (added to defaults)
+      # Defaults already include: container runtimes, virtual filesystems, /mnt/**, /media/**, /srv/**
+      extraExclusions: []
+        # - "**/home/**"
+        # - "**/backup/**"
+      # Additional network filesystem types to detect (added to defaults)
+      # Defaults include: nfs, nfs4, cifs, smbfs, fuse.sshfs, fuse.rclone, fuse.s3fs, etc.
+      extraNetworkFSTypes: []
+        # - "fuse.gdrive"
+        # - "fuse.dropbox"
 
   # Data persistence
   persistence:

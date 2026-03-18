@@ -76,8 +76,11 @@ type Config struct {
 	MetricsStalenessWindow time.Duration // Duration after which metrics are considered stale (default: 60m)
 
 	// Host scanning configuration
-	HostScanningEnabled  bool          // Enable scanning of host/node packages
-	HostScanningInterval time.Duration // Interval for periodic host SBOM regeneration (default: 24h)
+	HostScanningEnabled             bool          // Enable scanning of host/node packages
+	HostScanningInterval            time.Duration // Interval for periodic host SBOM regeneration (default: 24h)
+	HostScanningExtraExclusions     []string      // Additional exclusion patterns for host scanning
+	HostScanningAutoDetectNFS       bool          // Auto-detect network mounts (default: true)
+	HostScanningExtraNetworkFSTypes []string      // Additional network FS types to detect (added to defaults)
 
 	// Node metrics toggles (only applicable when host scanning is enabled)
 	MetricsNodeScannedEnabled              bool // Enable bjorn2scan_node_scanned metric
@@ -152,8 +155,11 @@ func defaultConfig() *Config {
 		MetricsStalenessWindow: 60 * time.Minute,
 
 		// Host scanning - enabled by default
-		HostScanningEnabled:  true,
-		HostScanningInterval: 24 * time.Hour,
+		HostScanningEnabled:             true,
+		HostScanningInterval:            24 * time.Hour,
+		HostScanningExtraExclusions:     nil,
+		HostScanningAutoDetectNFS:       true,
+		HostScanningExtraNetworkFSTypes: nil,
 
 		// Node metrics - enabled by default when host scanning is enabled
 		MetricsNodeScannedEnabled:              true,
@@ -384,6 +390,27 @@ func LoadConfig(path string) (*Config, error) {
 					cfg.MetricsStalenessWindow = duration
 				}
 			}
+
+			// Host scanning configuration
+			if section.HasKey("host_scanning_enabled") {
+				val := strings.ToLower(section.Key("host_scanning_enabled").String())
+				cfg.HostScanningEnabled = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("host_scanning_interval") {
+				if duration, err := time.ParseDuration(section.Key("host_scanning_interval").String()); err == nil {
+					cfg.HostScanningInterval = duration
+				}
+			}
+			if section.HasKey("host_scanning_extra_exclusions") {
+				cfg.HostScanningExtraExclusions = parseCommaSeparated(section.Key("host_scanning_extra_exclusions").String())
+			}
+			if section.HasKey("host_scanning_auto_detect_nfs") {
+				val := strings.ToLower(section.Key("host_scanning_auto_detect_nfs").String())
+				cfg.HostScanningAutoDetectNFS = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("host_scanning_extra_network_fs_types") {
+				cfg.HostScanningExtraNetworkFSTypes = parseCommaSeparated(section.Key("host_scanning_extra_network_fs_types").String())
+			}
 		} else if !os.IsNotExist(err) {
 			// File exists but can't be read
 			return nil, fmt.Errorf("cannot access config file %s: %w", path, err)
@@ -540,6 +567,16 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.HostScanningInterval = duration
 		}
 	}
+	if extraExclusionsEnv := os.Getenv("HOST_SCANNING_EXTRA_EXCLUSIONS"); extraExclusionsEnv != "" {
+		cfg.HostScanningExtraExclusions = parseCommaSeparated(extraExclusionsEnv)
+	}
+	if autoDetectNFSEnv := os.Getenv("HOST_SCANNING_AUTO_DETECT_NFS"); autoDetectNFSEnv != "" {
+		val := strings.ToLower(autoDetectNFSEnv)
+		cfg.HostScanningAutoDetectNFS = val == "true" || val == "1" || val == "yes"
+	}
+	if extraNetworkFSTypesEnv := os.Getenv("HOST_SCANNING_EXTRA_NETWORK_FS_TYPES"); extraNetworkFSTypesEnv != "" {
+		cfg.HostScanningExtraNetworkFSTypes = parseCommaSeparated(extraNetworkFSTypesEnv)
+	}
 
 	// Node metrics toggles
 	if nodeScannedEnabledEnv := os.Getenv("METRICS_NODE_SCANNED_ENABLED"); nodeScannedEnabledEnv != "" {
@@ -560,6 +597,23 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseCommaSeparated splits a comma-separated string into a slice of trimmed strings.
+// Empty strings are filtered out.
+func parseCommaSeparated(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // LoadConfigWithDefaults tries to load configuration from default locations.
