@@ -232,13 +232,14 @@ func (q *JobQueue) EnqueueHostScan(nodeName string) {
 	})
 }
 
-// EnqueueHostForceScan adds a host scan job that forces vulnerability rescan
-// This reuses the existing SBOM (skips SBOM regeneration), only reruns Grype.
+// EnqueueHostForceScan adds a host scan job that forces a full rescan
+// This always retrieves a fresh SBOM because node packages can change over time.
 // Used when the Grype database updates to detect newly-discovered vulnerabilities.
 func (q *JobQueue) EnqueueHostForceScan(nodeName string) {
 	q.enqueueHostJob(HostScanJob{
-		NodeName:  nodeName,
-		ForceScan: true,
+		NodeName:   nodeName,
+		ForceScan:  true,
+		FullRescan: true,
 	})
 }
 
@@ -594,28 +595,15 @@ func (q *JobQueue) processHostJob(job HostScanJob) {
 		return
 	}
 
-	// Check current status
-	status, err := q.db.GetNodeScanStatus(job.NodeName)
-	if err != nil {
-		log.Printf("Error checking status for node %s: %v", job.NodeName, err)
-	}
-
-	// If ForceScan (but not FullRescan) and we have SBOM data, skip to vulnerability scan
-	// FullRescan always regenerates the SBOM because node packages may have changed
-	if job.ForceScan && !job.FullRescan && (status == "completed" || status == "scanned") {
-		// Check if we have SBOM data
-		packages, err := q.db.GetNodePackages(job.NodeName)
-		if err == nil && len(packages) > 0 {
-			log.Printf("Force scan requested for node %s with existing SBOM, running vulnerability scan only", job.NodeName)
-			q.processHostVulnerabilityScan(job, nil)
+	// Skip if already completed (unless force scan)
+	if !job.ForceScan {
+		status, err := q.db.GetNodeScanStatus(job.NodeName)
+		if err != nil {
+			log.Printf("Error checking status for node %s: %v", job.NodeName, err)
+		} else if status == "completed" || status == "scanned" {
+			log.Printf("Node %s already scanned (status=%s), skipping", job.NodeName, status)
 			return
 		}
-	}
-
-	// Skip if already completed (unless force scan)
-	if !job.ForceScan && (status == "completed" || status == "scanned") {
-		log.Printf("Node %s already scanned (status=%s), skipping", job.NodeName, status)
-		return
 	}
 
 	// Mark node as generating SBOM
@@ -668,13 +656,17 @@ func (q *JobQueue) processHostVulnerabilityScan(job HostScanJob, sbomJSON []byte
 		log.Printf("Vulnerability database is ready, proceeding with host scan")
 	}
 
-	// If sbomJSON is nil, we need to reconstruct it from the database
-	// For now, log an error as this requires the SBOM to be passed
+	// If sbomJSON is nil, retrieve it from the database
 	if sbomJSON == nil {
-		log.Printf("Host vulnerability scan requires SBOM data, but none was provided for node %s", job.NodeName)
-		// In a future enhancement, we could store the raw SBOM JSON for nodes
-		// For now, mark the scan as complete without vulnerability data
-		return
+		var err error
+		sbomJSON, err = q.db.GetNodeSBOM(job.NodeName)
+		if err != nil {
+			log.Printf("Error retrieving SBOM from database for node %s: %v", job.NodeName, err)
+			if updateErr := q.db.UpdateNodeStatus(job.NodeName, database.StatusVulnScanFailed, "SBOM not available: "+err.Error()); updateErr != nil {
+				log.Printf("Error updating node status to failed: %v", updateErr)
+			}
+			return
+		}
 	}
 
 	// Scan for vulnerabilities using Grype

@@ -11,6 +11,7 @@ import (
 
 // RefreshImagesJob triggers a refresh of all running container images
 // This job calls the RefreshTrigger to get updated container instance data
+// and performs periodic reconciliation to catch any missed container events
 type RefreshImagesJob struct {
 	refreshTrigger containers.RefreshTrigger
 }
@@ -33,13 +34,13 @@ func (j *RefreshImagesJob) Run(ctx context.Context) error {
 	log.Printf("[refresh-images] Starting periodic reconciliation of running containers")
 
 	// Trigger the refresh - this will call back to agent/k8s-scan-server
-	// which will gather running container data and call SetContainerInstances
+	// which will gather running container data and call SetContainers
 	err := j.refreshTrigger.TriggerRefresh()
 	if err != nil {
 		return fmt.Errorf("failed to trigger refresh: %w", err)
 	}
 
-	log.Printf("[refresh-images] Reconciliation triggered successfully")
+	log.Printf("[refresh-images] Reconciliation completed successfully")
 	return nil
 }
 
@@ -83,26 +84,5 @@ func (j *CleanupOrphanedImagesJob) Run(ctx context.Context) error {
 		log.Printf("[cleanup] Cleanup completed: no orphaned images found")
 	}
 
-	return nil
-}
-
-// TelemetryJob sends metrics and data to OpenTelemetry collector
-type TelemetryJob struct {
-	// Add OpenTelemetry client dependency
-}
-
-func NewTelemetryJob() *TelemetryJob {
-	return &TelemetryJob{}
-}
-
-func (j *TelemetryJob) Name() string {
-	return "telemetry"
-}
-
-func (j *TelemetryJob) Run(ctx context.Context) error {
-	// TODO: Implement logic to:
-	// 1. Collect metrics/data
-	// 2. Send to OpenTelemetry collector
-	log.Printf("[telemetry] Job execution - implementation pending")
 	return nil
 }

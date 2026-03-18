@@ -517,6 +517,24 @@ func main() {
 			log.Printf("Scheduled cleanup-orphaned-images job (interval: %v, timeout: %v)", cfg.JobsCleanupInterval, cfg.JobsCleanupTimeout)
 		}
 
+		// Add refresh images job - periodic container reconciliation
+		// This catches any Docker events that were missed (daemon restart, network issues, etc.)
+		if cfg.JobsRefreshImagesEnabled && docker.IsDockerAvailable() {
+			refreshTrigger := docker.NewRefreshTrigger(manager)
+			refreshJob := jobs.NewRefreshImagesJob(refreshTrigger)
+			if err := sched.AddJob(
+				refreshJob,
+				scheduler.NewIntervalSchedule(cfg.JobsRefreshImagesInterval),
+				scheduler.JobConfig{
+					Enabled: true,
+					Timeout: cfg.JobsRefreshImagesTimeout,
+				},
+			); err != nil {
+				log.Fatalf("Failed to add refresh images job: %v", err)
+			}
+			log.Printf("Scheduled refresh-images job (interval: %v, timeout: %v)", cfg.JobsRefreshImagesInterval, cfg.JobsRefreshImagesTimeout)
+		}
+
 		// Start scheduler
 		if err := sched.Start(ctx); err != nil {
 			log.Fatalf("Failed to start scheduler: %v", err)

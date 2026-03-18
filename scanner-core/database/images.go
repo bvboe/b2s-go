@@ -67,7 +67,6 @@ func (db *DB) getOrCreateImageTx(exec interface {
 
 	log.Printf("New image added to database: %s (digest=%s, id=%d)",
 		image.Reference, image.Digest, id)
-	log.Printf("TODO: Request SBOM for image: %s", image.Reference)
 
 	return id, true, nil
 }

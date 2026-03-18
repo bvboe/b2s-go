@@ -121,7 +121,7 @@ func defaultConfig() *Config {
 		JobsRescanDatabaseInterval: 30 * time.Minute,
 		JobsRescanDatabaseTimeout:  30 * time.Minute,
 
-		// Refresh images job - check every 6 hours
+		// Refresh images job - periodic container reconciliation
 		JobsRefreshImagesEnabled:  true,
 		JobsRefreshImagesInterval: 6 * time.Hour,
 		JobsRefreshImagesTimeout:  10 * time.Minute,

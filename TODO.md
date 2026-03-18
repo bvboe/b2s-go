@@ -1,7 +1,10 @@
 # bjorn2scan TODO List
 
 ## Active Tasks
-- [ ] None currently
+- [ ] Validate v0.1.114 fixes after deployment:
+  - [ ] Verify node rescan works (check logs for successful "host vulnerability scan" without "SBOM not provided" errors)
+  - [ ] Verify refresh-images job runs on agent (check logs for "[refresh-images] Reconciliation completed" every 6 hours)
+  - [ ] Monitor for any regressions in container discovery or vulnerability scanning
 
 ## In Progress
 - [ ] None currently
