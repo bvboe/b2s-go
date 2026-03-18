@@ -734,3 +734,128 @@ func TestOTELExporter_NodeCollectorError(t *testing.T) {
 
 	// If we got here without panic, the test passes - errors are logged but don't stop image metrics
 }
+
+func TestOTELExporter_WithDirectExport(t *testing.T) {
+	ctx := context.Background()
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test-cluster",
+		deploymentType: "kubernetes",
+		version:        "1.0.0",
+	}
+	deploymentUUID := "direct-export-test-uuid"
+
+	collectorConfig := CollectorConfig{
+		DeploymentEnabled: true,
+	}
+
+	config := OTELConfig{
+		Endpoint:        "localhost:4317",
+		Protocol:        OTELProtocolGRPC,
+		PushInterval:    1 * time.Minute,
+		Insecure:        true,
+		UseDirectExport: true,
+		DirectBatchSize: 1000,
+	}
+
+	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+	defer func() { _ = exporter.Shutdown() }()
+
+	// Verify direct exporter was created
+	if exporter.directExporter == nil {
+		t.Error("Expected direct exporter to be initialized when UseDirectExport is true")
+	}
+
+	// Verify infoProvider and deploymentUUID are set for direct export
+	if exporter.infoProvider == nil {
+		t.Error("Expected infoProvider to be set")
+	}
+	if exporter.deploymentUUID != deploymentUUID {
+		t.Errorf("Expected deploymentUUID %q, got %q", deploymentUUID, exporter.deploymentUUID)
+	}
+}
+
+func TestOTELExporter_WithoutDirectExport(t *testing.T) {
+	ctx := context.Background()
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "agent",
+		version:        "1.0.0",
+	}
+
+	collectorConfig := CollectorConfig{
+		DeploymentEnabled: true,
+	}
+
+	config := OTELConfig{
+		Endpoint:        "localhost:4317",
+		Protocol:        OTELProtocolGRPC,
+		PushInterval:    1 * time.Minute,
+		Insecure:        true,
+		UseDirectExport: false, // Explicitly disabled
+	}
+
+	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+	defer func() { _ = exporter.Shutdown() }()
+
+	// Verify direct exporter was NOT created
+	if exporter.directExporter != nil {
+		t.Error("Expected direct exporter to be nil when UseDirectExport is false")
+	}
+}
+
+func TestOTELExporter_DirectExportShutdown(t *testing.T) {
+	ctx := context.Background()
+	infoProvider := &MockInfoProvider{
+		deploymentName: "test",
+		deploymentType: "agent",
+		version:        "1.0.0",
+	}
+
+	collectorConfig := CollectorConfig{
+		DeploymentEnabled: true,
+	}
+
+	config := OTELConfig{
+		Endpoint:        "localhost:4317",
+		Protocol:        OTELProtocolGRPC,
+		PushInterval:    1 * time.Minute,
+		Insecure:        true,
+		UseDirectExport: true,
+		DirectBatchSize: 5000,
+	}
+
+	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+
+	// Shutdown should close the direct exporter without errors
+	_ = exporter.Shutdown()
+
+	// Multiple shutdowns should be safe
+	_ = exporter.Shutdown()
+}
+
+func TestOTELConfig_DirectExportFields(t *testing.T) {
+	config := OTELConfig{
+		Endpoint:        "localhost:9090",
+		Protocol:        OTELProtocolHTTP,
+		PushInterval:    5 * time.Minute,
+		Insecure:        true,
+		UseDirectExport: true,
+		DirectBatchSize: 10000,
+	}
+
+	if !config.UseDirectExport {
+		t.Error("Expected UseDirectExport to be true")
+	}
+	if config.DirectBatchSize != 10000 {
+		t.Errorf("Expected DirectBatchSize 10000, got %d", config.DirectBatchSize)
+	}
+}

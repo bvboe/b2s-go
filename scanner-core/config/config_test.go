@@ -215,3 +215,162 @@ func TestLoadConfigWithDefaults(t *testing.T) {
 		t.Error("Expected debug enabled from env")
 	}
 }
+
+func TestOTELDirectExportDefaults(t *testing.T) {
+	cfg := defaultConfig()
+
+	// Verify OTEL direct export defaults
+	if !cfg.OTELUseDirectExport {
+		t.Error("Expected OTELUseDirectExport to be true by default")
+	}
+
+	if cfg.OTELDirectBatchSize != 5000 {
+		t.Errorf("Expected OTELDirectBatchSize to be 5000, got %d", cfg.OTELDirectBatchSize)
+	}
+}
+
+func TestOTELDirectExportFromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "test.conf")
+
+	configContent := `otel_use_direct_export=false
+otel_direct_batch_size=10000
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test config file: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	if cfg.OTELUseDirectExport {
+		t.Error("Expected OTELUseDirectExport to be false from config file")
+	}
+
+	if cfg.OTELDirectBatchSize != 10000 {
+		t.Errorf("Expected OTELDirectBatchSize to be 10000, got %d", cfg.OTELDirectBatchSize)
+	}
+}
+
+func TestOTELDirectExportEnvOverrides(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "test.conf")
+
+	// Config file has one set of values
+	configContent := `otel_use_direct_export=true
+otel_direct_batch_size=5000
+`
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test config file: %v", err)
+	}
+
+	// Set environment variables to override
+	origUseDirectExport := os.Getenv("OTEL_USE_DIRECT_EXPORT")
+	origDirectBatchSize := os.Getenv("OTEL_DIRECT_BATCH_SIZE")
+
+	if err := os.Setenv("OTEL_USE_DIRECT_EXPORT", "false"); err != nil {
+		t.Fatalf("Failed to set env var: %v", err)
+	}
+	if err := os.Setenv("OTEL_DIRECT_BATCH_SIZE", "2500"); err != nil {
+		t.Fatalf("Failed to set env var: %v", err)
+	}
+
+	defer func() {
+		_ = os.Setenv("OTEL_USE_DIRECT_EXPORT", origUseDirectExport)
+		_ = os.Setenv("OTEL_DIRECT_BATCH_SIZE", origDirectBatchSize)
+	}()
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Env vars should override file values
+	if cfg.OTELUseDirectExport {
+		t.Error("Expected OTELUseDirectExport to be false from env var")
+	}
+
+	if cfg.OTELDirectBatchSize != 2500 {
+		t.Errorf("Expected OTELDirectBatchSize to be 2500 from env var, got %d", cfg.OTELDirectBatchSize)
+	}
+}
+
+func TestOTELDirectBatchSizeValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		value         string
+		expectedValue int // Expected value (default if invalid)
+	}{
+		{"valid positive", "3000", 3000},
+		{"zero", "0", 5000},           // Invalid, should keep default
+		{"negative", "-100", 5000},    // Invalid, should keep default
+		{"non-numeric", "abc", 5000},  // Invalid, should keep default
+		{"empty", "", 5000},           // Invalid, should keep default
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origVal := os.Getenv("OTEL_DIRECT_BATCH_SIZE")
+			if err := os.Setenv("OTEL_DIRECT_BATCH_SIZE", tt.value); err != nil {
+				t.Fatalf("Failed to set env var: %v", err)
+			}
+			defer func() {
+				_ = os.Setenv("OTEL_DIRECT_BATCH_SIZE", origVal)
+			}()
+
+			cfg, err := LoadConfig("")
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+
+			if cfg.OTELDirectBatchSize != tt.expectedValue {
+				t.Errorf("For value %q, expected batch size %d, got %d",
+					tt.value, tt.expectedValue, cfg.OTELDirectBatchSize)
+			}
+		})
+	}
+}
+
+func TestOTELUseDirectExportVariations(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected bool
+	}{
+		{"true lowercase", "true", true},
+		{"TRUE uppercase", "TRUE", true},
+		{"1", "1", true},
+		{"yes", "yes", true},
+		{"false lowercase", "false", false},
+		{"FALSE uppercase", "FALSE", false},
+		{"0", "0", false},
+		{"no", "no", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "test.conf")
+
+			configContent := "otel_use_direct_export=" + tt.value + "\n"
+			err := os.WriteFile(configPath, []byte(configContent), 0644)
+			if err != nil {
+				t.Fatalf("Failed to create test config file: %v", err)
+			}
+
+			cfg, err := LoadConfig(configPath)
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+
+			if cfg.OTELUseDirectExport != tt.expected {
+				t.Errorf("For value %q, expected %v, got %v",
+					tt.value, tt.expected, cfg.OTELUseDirectExport)
+			}
+		})
+	}
+}

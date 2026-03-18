@@ -187,6 +187,18 @@ otel_metrics_push_interval=1m
 # Environment variable: OTEL_METRICS_INSECURE
 otel_metrics_insecure=true
 
+# Use direct OTLP export for high-cardinality metrics (default: true)
+# Bypasses SDK buffering to prevent OOM with large node vulnerability datasets
+# Recommended for deployments with many node vulnerabilities (100k+)
+# Environment variable: OTEL_USE_DIRECT_EXPORT
+otel_use_direct_export=true
+
+# Batch size for direct export (default: 5000)
+# Number of data points per HTTP/gRPC request when using direct export
+# Larger batches are more efficient but use more memory per batch
+# Environment variable: OTEL_DIRECT_BATCH_SIZE
+otel_direct_batch_size=5000
+
 # ============================================================================
 # INDIVIDUAL METRIC TOGGLES
 # ============================================================================

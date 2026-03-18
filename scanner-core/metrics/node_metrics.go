@@ -377,3 +377,17 @@ func (c *NodeCollector) StreamVulnerabilityMetricsToOTEL(gauges OTELGauges) erro
 		return nil
 	})
 }
+
+// GetStreamingDatabase returns the database as a StreamingNodeDatabaseProvider if supported.
+// Returns nil if the database doesn't support streaming.
+func (c *NodeCollector) GetStreamingDatabase() StreamingNodeDatabaseProvider {
+	if streamingDB, ok := c.database.(StreamingNodeDatabaseProvider); ok {
+		return streamingDB
+	}
+	return nil
+}
+
+// GetConfig returns the collector configuration.
+func (c *NodeCollector) GetConfig() NodeCollectorConfig {
+	return c.config
+}

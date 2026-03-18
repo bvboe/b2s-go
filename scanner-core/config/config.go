@@ -61,6 +61,8 @@ type Config struct {
 	OTELMetricsProtocol     string // "grpc" or "http"
 	OTELMetricsPushInterval time.Duration
 	OTELMetricsInsecure     bool
+	OTELUseDirectExport     bool // Use direct OTLP export for high-cardinality metrics (bypasses SDK buffering)
+	OTELDirectBatchSize     int  // Batch size for direct export (default 5000)
 
 	// Individual metric toggles
 	MetricsDeploymentEnabled             bool // Enable bjorn2scan_deployment metric
@@ -135,6 +137,8 @@ func defaultConfig() *Config {
 		OTELMetricsProtocol:     "grpc", // Use "http" for Prometheus native OTLP
 		OTELMetricsPushInterval: 1 * time.Minute,
 		OTELMetricsInsecure:     true,
+		OTELUseDirectExport:     true,  // Bypass SDK buffering for high-cardinality node metrics
+		OTELDirectBatchSize:     5000,  // Batch size for direct export
 
 		// Individual metrics - enabled by default
 		MetricsDeploymentEnabled:             true,
@@ -338,6 +342,15 @@ func LoadConfig(path string) (*Config, error) {
 				val := strings.ToLower(section.Key("otel_metrics_insecure").String())
 				cfg.OTELMetricsInsecure = val == "true" || val == "1" || val == "yes"
 			}
+			if section.HasKey("otel_use_direct_export") {
+				val := strings.ToLower(section.Key("otel_use_direct_export").String())
+				cfg.OTELUseDirectExport = val == "true" || val == "1" || val == "yes"
+			}
+			if section.HasKey("otel_direct_batch_size") {
+				if batchSize, err := strconv.Atoi(section.Key("otel_direct_batch_size").String()); err == nil && batchSize > 0 {
+					cfg.OTELDirectBatchSize = batchSize
+				}
+			}
 
 			// Individual metric toggles
 			if section.HasKey("metrics_deployment_enabled") {
@@ -473,6 +486,15 @@ func LoadConfig(path string) (*Config, error) {
 	if insecureEnv := os.Getenv("OTEL_METRICS_INSECURE"); insecureEnv != "" {
 		val := strings.ToLower(insecureEnv)
 		cfg.OTELMetricsInsecure = val == "true" || val == "1" || val == "yes"
+	}
+	if useDirectExportEnv := os.Getenv("OTEL_USE_DIRECT_EXPORT"); useDirectExportEnv != "" {
+		val := strings.ToLower(useDirectExportEnv)
+		cfg.OTELUseDirectExport = val == "true" || val == "1" || val == "yes"
+	}
+	if directBatchSizeEnv := os.Getenv("OTEL_DIRECT_BATCH_SIZE"); directBatchSizeEnv != "" {
+		if batchSize, err := strconv.Atoi(directBatchSizeEnv); err == nil && batchSize > 0 {
+			cfg.OTELDirectBatchSize = batchSize
+		}
 	}
 
 	// Individual metric toggles

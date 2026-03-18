@@ -77,6 +77,10 @@ spec:
           value: {{ .Values.scanServer.config.otelMetrics.pushInterval | quote }}
         - name: OTEL_METRICS_INSECURE
           value: {{ .Values.scanServer.config.otelMetrics.insecure | quote }}
+        - name: OTEL_USE_DIRECT_EXPORT
+          value: {{ .Values.scanServer.config.otelMetrics.useDirectExport | quote }}
+        - name: OTEL_DIRECT_BATCH_SIZE
+          value: {{ .Values.scanServer.config.otelMetrics.directBatchSize | quote }}
         - name: METRICS_DEPLOYMENT_ENABLED
           value: {{ .Values.scanServer.config.metrics.deploymentEnabled | quote }}
         - name: METRICS_SCANNED_INSTANCES_ENABLED

@@ -573,10 +573,12 @@ func main() {
 			cfg.OTELMetricsEndpoint, cfg.OTELMetricsProtocol, cfg.OTELMetricsPushInterval)
 
 		otelConfig := metrics.OTELConfig{
-			Endpoint:     cfg.OTELMetricsEndpoint,
-			Protocol:     metrics.OTELProtocol(cfg.OTELMetricsProtocol),
-			PushInterval: cfg.OTELMetricsPushInterval,
-			Insecure:     cfg.OTELMetricsInsecure,
+			Endpoint:        cfg.OTELMetricsEndpoint,
+			Protocol:        metrics.OTELProtocol(cfg.OTELMetricsProtocol),
+			PushInterval:    cfg.OTELMetricsPushInterval,
+			Insecure:        cfg.OTELMetricsInsecure,
+			UseDirectExport: cfg.OTELUseDirectExport,
+			DirectBatchSize: cfg.OTELDirectBatchSize,
 		}
 
 		var err error

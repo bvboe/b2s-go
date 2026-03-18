@@ -779,3 +779,61 @@ func TestNodeCollector_VulnerabilityLabelsComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestNodeCollector_GetStreamingDatabase(t *testing.T) {
+	tests := []struct {
+		name           string
+		db             NodeDatabaseProvider
+		expectStreaming bool
+	}{
+		{
+			name:           "non-streaming database returns nil",
+			db:             &MockNodeDatabaseProvider{},
+			expectStreaming: false,
+		},
+		{
+			name:           "nil database returns nil",
+			db:             nil,
+			expectStreaming: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector := NewNodeCollector("uuid", "name", tt.db, NodeCollectorConfig{})
+			streamingDB := collector.GetStreamingDatabase()
+			
+			if tt.expectStreaming && streamingDB == nil {
+				t.Error("Expected streaming database, got nil")
+			}
+			if !tt.expectStreaming && streamingDB != nil {
+				t.Error("Expected nil, got streaming database")
+			}
+		})
+	}
+}
+
+func TestNodeCollector_GetConfig(t *testing.T) {
+	config := NodeCollectorConfig{
+		NodeScannedEnabled:                true,
+		NodeVulnerabilitiesEnabled:        true,
+		NodeVulnerabilityRiskEnabled:      false,
+		NodeVulnerabilityExploitedEnabled: true,
+	}
+
+	collector := NewNodeCollector("uuid", "name", nil, config)
+	gotConfig := collector.GetConfig()
+
+	if gotConfig.NodeScannedEnabled != config.NodeScannedEnabled {
+		t.Errorf("NodeScannedEnabled: expected %v, got %v", config.NodeScannedEnabled, gotConfig.NodeScannedEnabled)
+	}
+	if gotConfig.NodeVulnerabilitiesEnabled != config.NodeVulnerabilitiesEnabled {
+		t.Errorf("NodeVulnerabilitiesEnabled: expected %v, got %v", config.NodeVulnerabilitiesEnabled, gotConfig.NodeVulnerabilitiesEnabled)
+	}
+	if gotConfig.NodeVulnerabilityRiskEnabled != config.NodeVulnerabilityRiskEnabled {
+		t.Errorf("NodeVulnerabilityRiskEnabled: expected %v, got %v", config.NodeVulnerabilityRiskEnabled, gotConfig.NodeVulnerabilityRiskEnabled)
+	}
+	if gotConfig.NodeVulnerabilityExploitedEnabled != config.NodeVulnerabilityExploitedEnabled {
+		t.Errorf("NodeVulnerabilityExploitedEnabled: expected %v, got %v", config.NodeVulnerabilityExploitedEnabled, gotConfig.NodeVulnerabilityExploitedEnabled)
+	}
+}

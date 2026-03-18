@@ -31,22 +31,27 @@ const (
 
 // OTELConfig holds OpenTelemetry configuration
 type OTELConfig struct {
-	Endpoint     string
-	Protocol     OTELProtocol
-	PushInterval time.Duration
-	Insecure     bool
+	Endpoint        string
+	Protocol        OTELProtocol
+	PushInterval    time.Duration
+	Insecure        bool
+	UseDirectExport bool // Enable direct OTLP for high-cardinality metrics (bypasses SDK buffering)
+	DirectBatchSize int  // Batch size for direct export (default 5000)
 }
 
 // OTELExporter exports metrics to an OpenTelemetry collector
 type OTELExporter struct {
-	collector     *Collector
-	nodeCollector *NodeCollector
-	config        OTELConfig
-	meterProvider *sdkmetric.MeterProvider
-	meter         metric.Meter
-	gauges        map[string]metric.Float64Gauge
-	ctx           context.Context
-	cancel        context.CancelFunc
+	collector      *Collector
+	nodeCollector  *NodeCollector
+	config         OTELConfig
+	meterProvider  *sdkmetric.MeterProvider
+	meter          metric.Meter
+	gauges         map[string]metric.Float64Gauge
+	ctx            context.Context
+	cancel         context.CancelFunc
+	directExporter *DirectOTLPExporter // For high-cardinality node metrics
+	infoProvider   InfoProvider        // For direct export resource attributes
+	deploymentUUID string              // For direct export resource attributes
 }
 
 // createExporter creates the appropriate OTLP exporter based on protocol
@@ -118,15 +123,48 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 
 	exporterCtx, cancel := context.WithCancel(ctx)
 
-	return &OTELExporter{
-		collector:     collector,
-		config:        config,
-		meterProvider: meterProvider,
-		meter:         meter,
-		gauges:        make(map[string]metric.Float64Gauge),
-		ctx:           exporterCtx,
-		cancel:        cancel,
-	}, nil
+	otelExporter := &OTELExporter{
+		collector:      collector,
+		config:         config,
+		meterProvider:  meterProvider,
+		meter:          meter,
+		gauges:         make(map[string]metric.Float64Gauge),
+		ctx:            exporterCtx,
+		cancel:         cancel,
+		infoProvider:   infoProvider,
+		deploymentUUID: deploymentUUID,
+	}
+
+	// Initialize direct exporter for high-cardinality metrics if enabled
+	if config.UseDirectExport {
+		batchSize := config.DirectBatchSize
+		if batchSize <= 0 {
+			batchSize = 5000
+		}
+
+		directConfig := DirectOTLPConfig{
+			Endpoint:       config.Endpoint,
+			Protocol:       string(config.Protocol),
+			BatchSize:      batchSize,
+			Timeout:        30 * time.Second,
+			MaxRetries:     3,
+			Insecure:       config.Insecure,
+			ServiceName:    "bjorn2scan",
+			ServiceVersion: infoProvider.GetVersion(),
+			DeploymentName: infoProvider.GetDeploymentName(),
+			DeploymentUUID: deploymentUUID,
+		}
+
+		directExporter, err := NewDirectOTLPExporter(directConfig)
+		if err != nil {
+			log.Printf("Warning: failed to create direct OTLP exporter: %v (falling back to SDK)", err)
+		} else {
+			otelExporter.directExporter = directExporter
+			log.Printf("Direct OTLP exporter initialized (batch size: %d)", batchSize)
+		}
+	}
+
+	return otelExporter, nil
 }
 
 // SetTracker sets the metric tracker on the internal collector for staleness detection
@@ -176,7 +214,7 @@ func (e *OTELExporter) recordMetrics() {
 
 	// Collect and record node metrics if node collector is configured
 	if e.nodeCollector != nil {
-		// First, collect node_scanned metrics (small dataset)
+		// First, collect node_scanned metrics (small dataset) via SDK
 		nodeScannedData, err := e.nodeCollector.CollectNodeScannedOnly()
 		if err != nil {
 			log.Printf("Error collecting node scanned metrics for OTEL: %v", err)
@@ -184,9 +222,31 @@ func (e *OTELExporter) recordMetrics() {
 			e.recordMetricFamilies(nodeScannedData.Families)
 		}
 
-		// Then stream vulnerability metrics directly to OTEL (memory efficient)
-		if err := e.streamNodeVulnerabilityMetrics(); err != nil {
-			log.Printf("Error streaming node vulnerability metrics for OTEL: %v", err)
+		// Node vulnerability metrics via direct export (high cardinality) or SDK fallback
+		if e.directExporter != nil {
+			// Use direct OTLP export to avoid SDK buffering OOM
+			streamingDB := e.nodeCollector.GetStreamingDatabase()
+			if streamingDB != nil {
+				if err := e.directExporter.StreamNodeVulnerabilityMetrics(
+					e.ctx,
+					streamingDB,
+					e.nodeCollector.GetConfig(),
+					e.deploymentUUID,
+					e.infoProvider.GetDeploymentName(),
+				); err != nil {
+					log.Printf("Error streaming node vulnerability metrics via direct OTLP: %v", err)
+				}
+			} else {
+				log.Printf("Warning: database does not support streaming, falling back to SDK export")
+				if err := e.streamNodeVulnerabilityMetrics(); err != nil {
+					log.Printf("Error streaming node vulnerability metrics for OTEL: %v", err)
+				}
+			}
+		} else {
+			// Fallback to SDK-based export (will OOM with large datasets)
+			if err := e.streamNodeVulnerabilityMetrics(); err != nil {
+				log.Printf("Error streaming node vulnerability metrics for OTEL: %v", err)
+			}
 		}
 	}
 }
@@ -260,6 +320,13 @@ func (e *OTELExporter) getOrCreateGauge(name, help string) (metric.Float64Gauge,
 // Shutdown gracefully shuts down the OTEL exporter
 func (e *OTELExporter) Shutdown() error {
 	e.cancel()
+
+	// Close direct exporter if it was initialized
+	if e.directExporter != nil {
+		if err := e.directExporter.Close(); err != nil {
+			log.Printf("Error closing direct OTLP exporter: %v", err)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

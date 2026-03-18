@@ -96,6 +96,8 @@ scanServer:
       protocol: "http"  # "grpc" for OTEL Collector, "http" for Prometheus native OTLP
       pushInterval: "1m"
       insecure: true
+      useDirectExport: true  # Bypass SDK buffering for high-cardinality node metrics (prevents OOM)
+      directBatchSize: 5000  # Number of data points per batch when using direct export
 
     # Individual Metric Toggles
     metrics:
