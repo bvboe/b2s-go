@@ -75,10 +75,15 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), cfg.Timeout)
 		defer cancel()
 
+		// Copy exclusion patterns to avoid syft modifying the shared slice
+		// (syft prepends the scan path to patterns, corrupting them for reuse)
+		patternsCopy := make([]string, len(exclusionPatterns))
+		copy(patternsCopy, exclusionPatterns)
+
 		// Configure source with exclusions for container filesystems
 		sourceCfg := syft.DefaultGetSourceConfig().
 			WithExcludeConfig(source.ExcludeConfig{
-				Paths: exclusionPatterns,
+				Paths: patternsCopy,
 			})
 
 		// Get source for the host filesystem
