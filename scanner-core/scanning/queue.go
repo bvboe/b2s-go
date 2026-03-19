@@ -74,20 +74,20 @@ type QueueMetrics struct {
 
 // JobQueue manages a queue of scan jobs and processes them serially with a single worker
 type JobQueue struct {
-	jobs             []ScanJob
-	hostJobs         []HostScanJob
-	jobsMu           sync.Mutex
-	jobsAvailable    *sync.Cond
-	sbomRetriever    SBOMRetriever
+	jobs              []ScanJob
+	hostJobs          []HostScanJob
+	jobsMu            sync.Mutex
+	jobsAvailable     *sync.Cond
+	sbomRetriever     SBOMRetriever
 	hostSBOMRetriever HostSBOMRetriever
-	db               *database.DB
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	grypeCfg         grype.Config
-	config           QueueConfig
-	metrics          QueueMetrics
-	dbReadinessState DBReadinessChecker // Allows waiting for grype DB to be ready
+	db                *database.DB
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	grypeCfg          grype.Config
+	config            QueueConfig
+	metrics           QueueMetrics
+	dbReadinessState  DBReadinessChecker // Allows waiting for grype DB to be ready
 }
 
 // NewJobQueue creates a new job queue with the specified SBOM retriever and configuration
@@ -651,6 +651,10 @@ func (q *JobQueue) processHostVulnerabilityScan(job HostScanJob, sbomJSON []byte
 		log.Printf("Waiting for vulnerability database to be ready...")
 		if !q.dbReadinessState.WaitForReady(q.ctx) {
 			log.Printf("Host scan cancelled while waiting for database")
+			// Update status to failed instead of silently returning
+			if updateErr := q.db.UpdateNodeStatus(job.NodeName, database.StatusVulnScanFailed, "cancelled while waiting for vulnerability database"); updateErr != nil {
+				log.Printf("Error updating node status to failed: %v", updateErr)
+			}
 			return
 		}
 		log.Printf("Vulnerability database is ready, proceeding with host scan")

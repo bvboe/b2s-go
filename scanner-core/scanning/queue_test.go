@@ -12,6 +12,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
+	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	// Note: SQLite driver is imported via Grype's dependencies
 	// DO NOT import sqlitedriver here to avoid duplicate registration
 )
@@ -58,7 +59,7 @@ func TestJobQueueIntegration(t *testing.T) {
 		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Name: "nginx",
+			Name:      "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
@@ -145,7 +146,7 @@ func TestJobQueueErrorHandling(t *testing.T) {
 		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Name: "nginx",
+			Name:      "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
@@ -229,7 +230,7 @@ func TestJobQueueSkipAlreadyScanned(t *testing.T) {
 		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Name: "nginx",
+			Name:      "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
@@ -308,7 +309,7 @@ func TestJobQueueForceScan(t *testing.T) {
 		ID: containers.ContainerID{
 			Namespace: "default",
 			Pod:       "test-pod",
-			Name: "nginx",
+			Name:      "nginx",
 		},
 		Image:            testImage,
 		NodeName:         "test-node",
@@ -405,7 +406,7 @@ func TestJobQueueMaxDepthDrop(t *testing.T) {
 			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "test-pod-" + string(rune('a'+i-1)),
-				Name: "nginx",
+				Name:      "nginx",
 			},
 			Image:            image,
 			NodeName:         "test-node",
@@ -498,7 +499,7 @@ func TestJobQueueMaxDepthDropOldest(t *testing.T) {
 			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "test-pod-" + string(rune('a'+i-1)),
-				Name: "nginx",
+				Name:      "nginx",
 			},
 			Image:            image,
 			NodeName:         "test-node",
@@ -569,7 +570,7 @@ func TestJobQueueMetricsTracking(t *testing.T) {
 			ID: containers.ContainerID{
 				Namespace: "default",
 				Pod:       "test-pod-" + string(rune('a'+i-1)),
-				Name: "nginx",
+				Name:      "nginx",
 			},
 			Image:            image,
 			NodeName:         "test-node",
@@ -611,5 +612,87 @@ func TestJobQueueMetricsTracking(t *testing.T) {
 
 	if totalProcessed == 0 {
 		t.Error("Expected at least some jobs to be processed")
+	}
+}
+
+// mockDBReadinessChecker implements DBReadinessChecker for testing
+type mockDBReadinessChecker struct {
+	ready bool
+}
+
+func (m *mockDBReadinessChecker) WaitForReady(ctx context.Context) bool {
+	return m.ready
+}
+
+// TestHostVulnScanCancelled tests that node status is set to failed when
+// context is cancelled while waiting for the grype database
+func TestHostVulnScanCancelled(t *testing.T) {
+	// Create temporary database
+	dbPath := "/tmp/test_queue_host_cancel_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = database.Close(db) }()
+
+	// Mock SBOM retriever (not used in this test since we're testing the vuln scan path)
+	mockRetriever := func(ctx context.Context, image containers.ImageID, nodeName string, runtime string) ([]byte, error) {
+		return []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`), nil
+	}
+
+	// Mock host SBOM retriever that returns valid SBOM
+	mockHostRetriever := func(ctx context.Context, nodeName string) ([]byte, error) {
+		return []byte(`{
+			"bomFormat": "CycloneDX",
+			"specVersion": "1.4",
+			"version": 1,
+			"components": [
+				{"type": "library", "name": "openssl", "version": "1.1.1"}
+			]
+		}`), nil
+	}
+
+	// Create job queue
+	queue := NewJobQueue(db, mockRetriever, grype.Config{}, QueueConfig{MaxDepth: 0})
+	queue.SetHostSBOMRetriever(mockHostRetriever)
+
+	// Set up a mock DB readiness checker that returns false (simulates cancelled context)
+	mockChecker := &mockDBReadinessChecker{ready: false}
+	queue.SetDBReadinessChecker(mockChecker)
+
+	defer queue.Shutdown()
+
+	// Add a test node
+	testNode := nodes.Node{
+		Name:         "test-node-1",
+		Hostname:     "test-node-1.local",
+		OSRelease:    "Ubuntu 22.04",
+		Architecture: "amd64",
+	}
+	_, err = db.AddNode(testNode)
+	if err != nil {
+		t.Fatalf("Failed to add node: %v", err)
+	}
+
+	// Enqueue a host scan job
+	queue.EnqueueHostScan(testNode.Name)
+
+	// Wait for the job to be processed
+	time.Sleep(1 * time.Second)
+
+	// Verify node status is 'vuln_scan_failed', not stuck at 'scanning_vulnerabilities'
+	node, err := db.GetNode(testNode.Name)
+	if err != nil {
+		t.Fatalf("Failed to get node: %v", err)
+	}
+
+	if node.Status != "vuln_scan_failed" {
+		t.Errorf("Expected node status 'vuln_scan_failed', got '%s'", node.Status)
+	}
+
+	if node.StatusError != "cancelled while waiting for vulnerability database" {
+		t.Errorf("Expected status error 'cancelled while waiting for vulnerability database', got '%s'", node.StatusError)
 	}
 }
