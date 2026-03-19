@@ -28,6 +28,125 @@ func (db *DB) GetImageStatus(digest string) (Status, error) {
 	return Status(status), nil
 }
 
+// GetImageScanStatusBulk returns scan status for multiple image digests in a single query.
+// Returns a map of digest -> status string. Missing digests are returned as "pending".
+func (db *DB) GetImageScanStatusBulk(digests []string) (map[string]string, error) {
+	result := make(map[string]string, len(digests))
+
+	// Initialize all digests as pending (for any not found in DB)
+	for _, digest := range digests {
+		result[digest] = "pending"
+	}
+
+	if len(digests) == 0 {
+		return result, nil
+	}
+
+	// Build query with placeholders
+	placeholders := make([]string, len(digests))
+	args := make([]interface{}, len(digests))
+	for i, digest := range digests {
+		placeholders[i] = "?"
+		args[i] = digest
+	}
+
+	query := fmt.Sprintf(`
+		SELECT digest, status FROM images
+		WHERE digest IN (%s)
+	`, joinStrings(placeholders, ","))
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query image statuses: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var digest, status string
+		if err := rows.Scan(&digest, &status); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Map new status to old scan_status (same logic as GetImageScanStatus)
+		switch Status(status) {
+		case StatusCompleted, StatusScanningVulnerabilities, StatusVulnScanFailed:
+			result[digest] = "scanned"
+		case StatusGeneratingSBOM:
+			result[digest] = "scanning"
+		case StatusSBOMFailed, StatusSBOMUnavailable:
+			result[digest] = "failed"
+		default:
+			result[digest] = "pending"
+		}
+	}
+
+	return result, rows.Err()
+}
+
+// IsScanDataCompleteBulk checks scan completeness for multiple image digests in a single query.
+// Returns a map of digest -> bool. Missing digests are returned as false.
+func (db *DB) IsScanDataCompleteBulk(digests []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(digests))
+
+	// Initialize all digests as incomplete (for any not found in DB)
+	for _, digest := range digests {
+		result[digest] = false
+	}
+
+	if len(digests) == 0 {
+		return result, nil
+	}
+
+	// Build query with placeholders
+	placeholders := make([]string, len(digests))
+	args := make([]interface{}, len(digests))
+	for i, digest := range digests {
+		placeholders[i] = "?"
+		args[i] = digest
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			digest,
+			status,
+			sbom IS NOT NULL AND LENGTH(sbom) > 0,
+			vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0
+		FROM images
+		WHERE digest IN (%s)
+	`, joinStrings(placeholders, ","))
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query scan data completeness: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var digest, status string
+		var hasSBOM, hasVulns bool
+		if err := rows.Scan(&digest, &status, &hasSBOM, &hasVulns); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Data is complete only if status is completed AND we have both SBOM and vulnerabilities
+		result[digest] = status == string(StatusCompleted) && hasSBOM && hasVulns
+	}
+
+	return result, rows.Err()
+}
+
+// joinStrings joins strings with a separator (helper to avoid importing strings package)
+func joinStrings(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	result := strs[0]
+	for i := 1; i < len(strs); i++ {
+		result += sep + strs[i]
+	}
+	return result
+}
+
 // GetImageScanStatus is deprecated, use GetImageStatus instead
 // Provided for backward compatibility during migration
 func (db *DB) GetImageScanStatus(digest string) (string, error) {

@@ -339,6 +339,107 @@ func (db *DB) IsNodeScanComplete(name string) (bool, error) {
 	return pkgCount > 0, nil
 }
 
+// GetNodeScanStatusBulk returns scan status for multiple nodes in a single query.
+// Returns a map of node name -> status string. Missing nodes are returned as "pending".
+func (db *DB) GetNodeScanStatusBulk(names []string) (map[string]string, error) {
+	result := make(map[string]string, len(names))
+
+	// Initialize all names as pending (for any not found in DB)
+	for _, name := range names {
+		result[name] = "pending"
+	}
+
+	if len(names) == 0 {
+		return result, nil
+	}
+
+	// Build query with placeholders
+	placeholders := make([]string, len(names))
+	args := make([]interface{}, len(names))
+	for i, name := range names {
+		placeholders[i] = "?"
+		args[i] = name
+	}
+
+	query := fmt.Sprintf(`
+		SELECT name, status FROM nodes
+		WHERE name IN (%s)
+	`, joinStrings(placeholders, ","))
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query node statuses: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var name string
+		var status sql.NullString
+		if err := rows.Scan(&name, &status); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		if status.Valid {
+			result[name] = status.String
+		}
+		// If status is NULL, leave as "pending" (initialized above)
+	}
+
+	return result, rows.Err()
+}
+
+// IsNodeScanCompleteBulk checks scan completeness for multiple nodes in a single query.
+// Returns a map of node name -> bool. Missing nodes are returned as false.
+func (db *DB) IsNodeScanCompleteBulk(names []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(names))
+
+	// Initialize all names as incomplete (for any not found in DB)
+	for _, name := range names {
+		result[name] = false
+	}
+
+	if len(names) == 0 {
+		return result, nil
+	}
+
+	// Build query with placeholders
+	placeholders := make([]string, len(names))
+	args := make([]interface{}, len(names))
+	for i, name := range names {
+		placeholders[i] = "?"
+		args[i] = name
+	}
+
+	// Get nodes with their status and package counts in a single query
+	query := fmt.Sprintf(`
+		SELECT n.name, n.status, COUNT(np.id) as pkg_count
+		FROM nodes n
+		LEFT JOIN node_packages np ON np.node_id = n.id
+		WHERE n.name IN (%s)
+		GROUP BY n.id, n.name, n.status
+	`, joinStrings(placeholders, ","))
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query node scan completeness: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var name string
+		var status sql.NullString
+		var pkgCount int
+		if err := rows.Scan(&name, &status, &pkgCount); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Must be in completed status AND have packages
+		result[name] = status.Valid && status.String == StatusCompleted.String() && pkgCount > 0
+	}
+
+	return result, rows.Err()
+}
+
 // UpdateNodeStatus updates the scan status for a node
 func (db *DB) UpdateNodeStatus(name string, status Status, errorMsg string) error {
 	_, err := db.conn.Exec(`

@@ -13,7 +13,9 @@ type NodeDatabaseInterface interface {
 	GetNode(name string) (*NodeWithStatus, error)
 	GetAllNodes() ([]NodeWithStatus, error)
 	GetNodeScanStatus(name string) (string, error)
+	GetNodeScanStatusBulk(names []string) (map[string]string, error)
 	IsNodeScanComplete(name string) (bool, error)
+	IsNodeScanCompleteBulk(names []string) (map[string]bool, error)
 }
 
 // NodeScanQueueInterface defines the interface for enqueuing node scan jobs
@@ -55,18 +57,84 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 
 	// Catch-up: enqueue scans for nodes discovered before queue was connected
 	if m.db != nil && len(m.nodes) > 0 {
-		log.Printf("Checking %d nodes for pending scans...", len(m.nodes))
+		nodeCount := len(m.nodes)
+		log.Printf("Checking %d nodes for pending scans...", nodeCount)
 
-		pendingCount := 0
+		// Build map of node name -> node
+		nodeMap := make(map[string]Node)
+		nodeNames := make([]string, 0, nodeCount)
 		for _, n := range m.nodes {
-			// Check and enqueue scan with retry logic
-			m.mu.Unlock()
-			m.checkAndEnqueueScan(n)
-			m.mu.Lock()
-			pendingCount++
+			nodeMap[n.Name] = n
+			nodeNames = append(nodeNames, n.Name)
+		}
+		m.mu.Unlock()
+
+		if len(nodeNames) == 0 {
+			log.Printf("No nodes to check for pending scans")
+			return
 		}
 
-		log.Printf("Queued catch-up scans for %d nodes", pendingCount)
+		// Get status for all nodes in a single bulk query
+		scanStatuses, err := m.db.GetNodeScanStatusBulk(nodeNames)
+		if err != nil {
+			log.Printf("Error fetching bulk node scan status: %v", err)
+			return
+		}
+
+		// Identify nodes that need completeness check (those marked as "completed")
+		scannedNodes := make([]string, 0)
+		for name, status := range scanStatuses {
+			if status == "completed" {
+				scannedNodes = append(scannedNodes, name)
+			}
+		}
+
+		// Get completeness status for scanned nodes in a single bulk query
+		var completenessStatus map[string]bool
+		if len(scannedNodes) > 0 {
+			completenessStatus, err = m.db.IsNodeScanCompleteBulk(scannedNodes)
+			if err != nil {
+				log.Printf("Error fetching bulk node completeness status: %v", err)
+				completenessStatus = make(map[string]bool)
+			}
+		} else {
+			completenessStatus = make(map[string]bool)
+		}
+
+		// Enqueue scans based on status (using actual database status values)
+		enqueuedCount := 0
+		for name, status := range scanStatuses {
+			switch status {
+			case "pending":
+				// New node, enqueue normal scan
+				log.Printf("Enqueuing scan for new node: %s", name)
+				m.scanQueue.EnqueueHostScan(name)
+				enqueuedCount++
+
+			case "sbom_failed", "sbom_unavailable", "vuln_scan_failed":
+				// Previous scan failed, retry with force scan
+				log.Printf("Retrying failed scan for node: %s (status=%s)", name, status)
+				m.scanQueue.EnqueueHostForceScan(name)
+				enqueuedCount++
+
+			case "completed":
+				// Check if data is actually complete
+				if !completenessStatus[name] {
+					log.Printf("Retrying scan for node with incomplete data: %s", name)
+					m.scanQueue.EnqueueHostForceScan(name)
+					enqueuedCount++
+				}
+
+			case "generating_sbom", "scanning_vulnerabilities":
+				// Node is in an intermediate state (previous scan was interrupted)
+				log.Printf("Retrying interrupted scan for node: %s", name)
+				m.scanQueue.EnqueueHostForceScan(name)
+				enqueuedCount++
+			}
+		}
+
+		log.Printf("Queued catch-up scans for %d of %d nodes", enqueuedCount, len(nodeNames))
+		return
 	}
 	m.mu.Unlock()
 }
@@ -212,19 +280,19 @@ func (m *Manager) checkAndEnqueueScan(n Node) {
 		return
 	}
 
-	// Handle different scan statuses
+	// Handle different scan statuses (using actual database status values)
 	switch scanStatus {
 	case "pending":
 		// New node, enqueue normal scan
 		log.Printf("Enqueuing scan for new node: %s", n.Name)
 		m.scanQueue.EnqueueHostScan(n.Name)
 
-	case "failed":
+	case "sbom_failed", "sbom_unavailable", "vuln_scan_failed":
 		// Previous scan failed, retry with force scan
-		log.Printf("Retrying failed scan for node: %s", n.Name)
+		log.Printf("Retrying failed scan for node: %s (status=%s)", n.Name, scanStatus)
 		m.scanQueue.EnqueueHostForceScan(n.Name)
 
-	case "scanned", "completed":
+	case "completed":
 		// Check if data is actually complete
 		isComplete, err := m.db.IsNodeScanComplete(n.Name)
 		if err != nil {
@@ -238,7 +306,7 @@ func (m *Manager) checkAndEnqueueScan(n Node) {
 		}
 		// If complete, no action needed
 
-	case "scanning", "generating_sbom", "scanning_vulnerabilities":
+	case "generating_sbom", "scanning_vulnerabilities":
 		// Node is in an intermediate state (previous scan was interrupted)
 		log.Printf("Retrying interrupted scan for node: %s", n.Name)
 		m.scanQueue.EnqueueHostForceScan(n.Name)

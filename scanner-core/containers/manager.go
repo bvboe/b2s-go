@@ -18,7 +18,9 @@ type DatabaseInterface interface {
 	RemoveContainer(id ContainerID) error
 	SetContainers(containers []Container) (*ReconciliationStats, error)
 	GetImageScanStatus(digest string) (string, error)
+	GetImageScanStatusBulk(digests []string) (map[string]string, error)
 	IsScanDataComplete(digest string) (bool, error)
+	IsScanDataCompleteBulk(digests []string) (map[string]bool, error)
 }
 
 // ScanQueueInterface defines the interface for enqueuing scan jobs
@@ -69,30 +71,99 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 	// Catch-up: enqueue scans for images discovered before queue was connected
 	// This handles images from initial sync that couldn't be enqueued
 	if m.db != nil && len(m.containers) > 0 {
-		log.Printf("Checking %d containers for pending scans...", len(m.containers))
+		containerCount := len(m.containers)
+		log.Printf("Checking %d containers for pending scans...", containerCount)
 
-		// Track unique images to avoid duplicate scan jobs
-		seenDigests := make(map[string]bool)
-		pendingCount := 0
-
+		// Build map of digest -> container (first container per digest for scan context)
+		digestToContainer := make(map[string]Container)
 		for _, c := range m.containers {
 			if c.Image.Digest == "" {
 				continue
 			}
-			if seenDigests[c.Image.Digest] {
-				continue
+			if _, exists := digestToContainer[c.Image.Digest]; !exists {
+				digestToContainer[c.Image.Digest] = c
 			}
-			seenDigests[c.Image.Digest] = true
+		}
+		m.mu.Unlock()
 
-			// Check and enqueue scan with retry logic
-			// Note: checkAndEnqueueScan needs the lock released
-			m.mu.Unlock()
-			m.checkAndEnqueueScan(c)
-			m.mu.Lock()
-			pendingCount++
+		// Collect unique digests
+		digests := make([]string, 0, len(digestToContainer))
+		for digest := range digestToContainer {
+			digests = append(digests, digest)
 		}
 
-		log.Printf("Queued catch-up scans for %d unique images", pendingCount)
+		if len(digests) == 0 {
+			log.Printf("No images to check for pending scans")
+			return
+		}
+
+		// Get status for all images in a single bulk query
+		scanStatuses, err := m.db.GetImageScanStatusBulk(digests)
+		if err != nil {
+			log.Printf("Error fetching bulk scan status: %v", err)
+			return
+		}
+
+		// Identify digests that need completeness check (those marked as "scanned")
+		scannedDigests := make([]string, 0)
+		for digest, status := range scanStatuses {
+			if status == "scanned" {
+				scannedDigests = append(scannedDigests, digest)
+			}
+		}
+
+		// Get completeness status for scanned images in a single bulk query
+		var completenessStatus map[string]bool
+		if len(scannedDigests) > 0 {
+			completenessStatus, err = m.db.IsScanDataCompleteBulk(scannedDigests)
+			if err != nil {
+				log.Printf("Error fetching bulk completeness status: %v", err)
+				completenessStatus = make(map[string]bool)
+			}
+		} else {
+			completenessStatus = make(map[string]bool)
+		}
+
+		// Enqueue scans based on status
+		enqueuedCount := 0
+		for digest, status := range scanStatuses {
+			c := digestToContainer[digest]
+
+			switch status {
+			case "pending":
+				// New image, enqueue normal scan
+				log.Printf("Enqueuing scan for new image: %s (digest=%s)",
+					c.Image.Reference, c.Image.Digest)
+				m.scanQueue.EnqueueScan(c.Image, c.NodeName, c.ContainerRuntime)
+				enqueuedCount++
+
+			case "failed":
+				// Previous scan failed, retry with force scan
+				log.Printf("Retrying failed scan for image: %s (digest=%s)",
+					c.Image.Reference, c.Image.Digest)
+				m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
+				enqueuedCount++
+
+			case "scanned":
+				// Check if data is actually complete
+				if !completenessStatus[digest] {
+					log.Printf("Retrying scan for image with incomplete data: %s (digest=%s)",
+						c.Image.Reference, c.Image.Digest)
+					m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
+					enqueuedCount++
+				}
+
+			case "scanning":
+				// Image is in an intermediate state (previous scan was interrupted)
+				log.Printf("Retrying interrupted scan for image: %s (digest=%s)",
+					c.Image.Reference, c.Image.Digest)
+				m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
+				enqueuedCount++
+			}
+		}
+
+		log.Printf("Queued catch-up scans for %d of %d unique images", enqueuedCount, len(digests))
+		return
 	}
 	m.mu.Unlock()
 }
