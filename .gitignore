@@ -53,4 +53,4 @@ dev-local/
 # Cross-compiled binaries
 *-amd64
 *-arm64
-.claude/skills/validate-deployments.md
+.claude/skills/validate-deployments/
