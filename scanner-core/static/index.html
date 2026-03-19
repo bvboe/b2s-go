@@ -395,7 +395,7 @@
                 addCellToRow(row, 'right', formatAverage(ns.avg_unknown));
                 addCellToRow(row, 'right', formatRiskNumber(ns.avg_risk));
                 addCellToRow(row, 'right', formatAverage(ns.avg_exploits));
-                addCellToRow(row, 'right', formatAverage(ns.avg_packages));
+                addCellToRow(row, 'right', formatAveragePackages(ns.avg_packages));
 
                 tbody.appendChild(row);
             });
@@ -537,7 +537,7 @@
                 addCellToRow(row, 'right', formatAverage(dist.avg_unknown));
                 addCellToRow(row, 'right', formatRiskNumber(dist.avg_risk));
                 addCellToRow(row, 'right', formatAverage(dist.avg_exploits));
-                addCellToRow(row, 'right', formatAverage(dist.avg_packages));
+                addCellToRow(row, 'right', formatAveragePackages(dist.avg_packages));
 
                 tbody.appendChild(row);
             });
@@ -672,9 +672,9 @@
                 addCellToRow(row, 'right', formatAverage(dist.avg_low));
                 addCellToRow(row, 'right', formatAverage(dist.avg_negligible));
                 addCellToRow(row, 'right', formatAverage(dist.avg_unknown));
-                addCellToRow(row, 'right', formatAverage(dist.avg_risk));
+                addCellToRow(row, 'right', formatRiskNumber(dist.avg_risk));
                 addCellToRow(row, 'right', formatAverage(dist.avg_exploits));
-                addCellToRow(row, 'right', formatAverage(dist.avg_packages));
+                addCellToRow(row, 'right', formatAveragePackages(dist.avg_packages));
 
                 tbody.appendChild(row);
             });
@@ -695,10 +695,16 @@
             return paramString ? '?' + paramString : '';
         }
 
-        // Format average numbers
+        // Format average numbers with one decimal and commas
         function formatAverage(value) {
             if (value === null || value === undefined) return '0.0';
-            return value.toFixed(1);
+            return value.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        }
+
+        // Format average packages as integer with commas (no decimals)
+        function formatAveragePackages(value) {
+            if (value === null || value === undefined) return '0';
+            return Math.round(value).toLocaleString('en-US');
         }
 
         // Auto-refresh functionality

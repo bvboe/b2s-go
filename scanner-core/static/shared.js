@@ -348,7 +348,7 @@ function formatNumber(num) {
     return num.toLocaleString();
 }
 
-// Format risk number
+// Format risk number with commas (x,xxx.0 format, or "< 0.1" for small values)
 function formatRiskNumber(risk) {
     if (risk === null || risk === undefined || risk === 0) {
         return '0.0';
@@ -356,7 +356,8 @@ function formatRiskNumber(risk) {
     if (risk < 0.1) {
         return '< 0.1';
     }
-    return risk.toFixed(1);
+    // Format with commas and one decimal place
+    return risk.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 // Format timestamp to a readable date/time string
