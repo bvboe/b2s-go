@@ -151,14 +151,18 @@ func (m *Manager) AddNode(n Node) {
 
 	// Persist to database if configured
 	if m.db != nil {
-		if _, err := m.db.AddNode(n); err != nil {
+		isNew, err := m.db.AddNode(n)
+		if err != nil {
 			log.Printf("Error adding node to database: %v", err)
 			return
 		}
 
-		// Check if this node needs scanning
-		if m.scanQueue != nil {
-			m.checkAndEnqueueScan(n)
+		// Only enqueue scan for NEW nodes. Existing nodes are handled by:
+		// - CatchUpScans() at startup (retries failed/interrupted scans)
+		// - RescanNodesOnDBUpdate() when grype DB updates
+		// This avoids unnecessary retries on every K8s node event (~every 30-90s)
+		if isNew && m.scanQueue != nil {
+			m.scanQueue.EnqueueHostScan(n.Name)
 		}
 	}
 }
@@ -236,12 +240,8 @@ func (m *Manager) SetNodes(nodeList []Node) {
 		}
 	}
 
-	// Enqueue scan jobs for nodes that need scanning
-	if m.db != nil && m.scanQueue != nil {
-		for _, n := range nodeList {
-			m.checkAndEnqueueScan(n)
-		}
-	}
+	// Note: We don't enqueue scans here. CatchUpScans() handles all retry logic at startup.
+	// This avoids duplicating work and keeps the retry logic in one place.
 }
 
 // GetAllNodes returns all nodes (thread-safe copy)
@@ -270,45 +270,4 @@ func (m *Manager) GetNode(name string) (Node, bool) {
 
 	n, exists := m.nodes[name]
 	return n, exists
-}
-
-// checkAndEnqueueScan checks if a node needs scanning and enqueues it
-func (m *Manager) checkAndEnqueueScan(n Node) {
-	scanStatus, err := m.db.GetNodeScanStatus(n.Name)
-	if err != nil {
-		log.Printf("Error checking scan status for node %s: %v", n.Name, err)
-		return
-	}
-
-	// Handle different scan statuses (using actual database status values)
-	switch scanStatus {
-	case "pending":
-		// New node, enqueue normal scan
-		log.Printf("Enqueuing scan for new node: %s", n.Name)
-		m.scanQueue.EnqueueHostScan(n.Name)
-
-	case "sbom_failed", "sbom_unavailable", "vuln_scan_failed":
-		// Previous scan failed, retry with force scan
-		log.Printf("Retrying failed scan for node: %s (status=%s)", n.Name, scanStatus)
-		m.scanQueue.EnqueueHostForceScan(n.Name)
-
-	case "completed":
-		// Check if data is actually complete
-		isComplete, err := m.db.IsNodeScanComplete(n.Name)
-		if err != nil {
-			log.Printf("Error checking scan completeness for node %s: %v", n.Name, err)
-			return
-		}
-		if !isComplete {
-			// Data is incomplete, retry with force scan
-			log.Printf("Retrying scan for node with incomplete data: %s", n.Name)
-			m.scanQueue.EnqueueHostForceScan(n.Name)
-		}
-		// If complete, no action needed
-
-	case "generating_sbom", "scanning_vulnerabilities":
-		// Node is in an intermediate state (previous scan was interrupted)
-		log.Printf("Retrying interrupted scan for node: %s", n.Name)
-		m.scanQueue.EnqueueHostForceScan(n.Name)
-	}
 }
