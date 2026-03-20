@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // ContainerImage represents a container image in the database
@@ -65,7 +64,7 @@ func (db *DB) getOrCreateImageTx(exec interface {
 		return 0, false, fmt.Errorf("failed to get image ID: %w", err)
 	}
 
-	logging.For(logging.ComponentDatabase).Debug("new image added",
+	log.Debug("new image added",
 		"reference", image.Reference, "digest", image.Digest, "id", id)
 
 	return id, true, nil

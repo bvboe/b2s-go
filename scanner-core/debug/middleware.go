@@ -7,6 +7,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
+var log = logging.For(logging.ComponentHTTP)
+
 // responseWriter wraps http.ResponseWriter to capture status code and response size.
 type responseWriter struct {
 	http.ResponseWriter
@@ -49,7 +51,7 @@ func LoggingMiddleware(debugConfig *DebugConfig, next http.Handler) http.Handler
 		start := time.Now()
 
 		// Log request
-		log := logging.For(logging.ComponentHTTP)
+		log := log
 		log.Debug("request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 
 		// Wrap response writer to capture status and size

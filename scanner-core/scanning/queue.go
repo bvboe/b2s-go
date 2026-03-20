@@ -12,6 +12,12 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
+var (
+	log      = logging.For(logging.ComponentQueue)
+	grypeLog = logging.For(logging.ComponentGrype)
+	nodesLog = logging.For(logging.ComponentNodes)
+)
+
 // ScanJob represents a request to scan a container image
 type ScanJob struct {
 	Image            containers.ImageID
@@ -112,7 +118,6 @@ func NewJobQueue(db *database.DB, sbomRetriever SBOMRetriever, grypeCfg grype.Co
 	queue.wg.Add(1)
 	go queue.worker()
 
-	log := logging.For(logging.ComponentQueue)
 	if queueCfg.MaxDepth > 0 {
 		log.Info("scan job queue initialized", "max_depth", queueCfg.MaxDepth, "behavior", queueCfg.FullBehavior)
 	} else {
@@ -138,12 +143,11 @@ func (q *JobQueue) SetDBReadinessChecker(checker DBReadinessChecker) {
 // This must be set before host scan jobs can be processed
 func (q *JobQueue) SetHostSBOMRetriever(retriever HostSBOMRetriever) {
 	q.hostSBOMRetriever = retriever
-	logging.For(logging.ComponentQueue).Info("host SBOM retriever configured")
+	log.Info("host SBOM retriever configured")
 }
 
 // Enqueue adds a scan job to the queue with respect to max depth and full behavior
 func (q *JobQueue) Enqueue(job ScanJob) {
-	log := logging.For(logging.ComponentQueue)
 
 	q.jobsMu.Lock()
 	defer q.jobsMu.Unlock()
@@ -268,7 +272,6 @@ func (q *JobQueue) EnqueueHostFullRescan(nodeName string) {
 
 // enqueueHostJob adds a host scan job to the queue
 func (q *JobQueue) enqueueHostJob(job HostScanJob) {
-	log := logging.For(logging.ComponentQueue)
 
 	q.jobsMu.Lock()
 	defer q.jobsMu.Unlock()
@@ -377,7 +380,6 @@ func (q *JobQueue) GetMetrics() (currentDepth, peakDepth int, totalEnqueued, tot
 func (q *JobQueue) worker() {
 	defer q.wg.Done()
 
-	log := logging.For(logging.ComponentQueue)
 	log.Info("scan worker started")
 
 	for {
@@ -453,7 +455,7 @@ func (q *JobQueue) worker() {
 
 // processJob handles a single scan job
 func (q *JobQueue) processJob(job ScanJob) {
-	log := logging.For(logging.ComponentQueue).With("image", job.Image.Reference, "digest", job.Image.Digest)
+	log := log.With("image", job.Image.Reference, "digest", job.Image.Digest)
 
 	log.Info("processing scan job", "force_scan", job.ForceScan)
 
@@ -527,7 +529,7 @@ func (q *JobQueue) processJob(job ScanJob) {
 
 // processVulnerabilityScan scans an SBOM for vulnerabilities
 func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
-	log := logging.For(logging.ComponentGrype).With("image", job.Image.Reference, "digest", job.Image.Digest)
+	log := grypeLog.With("image", job.Image.Reference, "digest", job.Image.Digest)
 
 	log.Info("starting vulnerability scan")
 
@@ -595,7 +597,7 @@ func (q *JobQueue) processVulnerabilityScan(job ScanJob, sbomJSON []byte) {
 
 // processHostJob handles a single host scan job
 func (q *JobQueue) processHostJob(job HostScanJob) {
-	log := logging.For(logging.ComponentNodes).With("node", job.NodeName)
+	log := nodesLog.With("node", job.NodeName)
 
 	log.Info("processing host scan job", "force_scan", job.ForceScan)
 
@@ -656,7 +658,7 @@ func (q *JobQueue) processHostJob(job HostScanJob) {
 
 // processHostVulnerabilityScan scans a host SBOM for vulnerabilities
 func (q *JobQueue) processHostVulnerabilityScan(job HostScanJob, sbomJSON []byte) {
-	log := logging.For(logging.ComponentGrype).With("node", job.NodeName)
+	log := grypeLog.With("node", job.NodeName)
 
 	log.Info("starting host vulnerability scan")
 
@@ -716,7 +718,6 @@ func (q *JobQueue) processHostVulnerabilityScan(job HostScanJob, sbomJSON []byte
 
 // Shutdown gracefully shuts down the queue, waiting for current job to complete
 func (q *JobQueue) Shutdown() {
-	log := logging.For(logging.ComponentQueue)
 	log.Info("shutting down scan queue")
 	q.cancel()
 

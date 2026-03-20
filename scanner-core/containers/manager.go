@@ -7,6 +7,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
+var log = logging.For(logging.ComponentContainers)
+
 // ReconciliationStats holds statistics about a reconciliation operation
 type ReconciliationStats struct {
 	ContainersAdded   int // Number of new containers added
@@ -59,7 +61,7 @@ func (m *Manager) SetDatabase(db DatabaseInterface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.db = db
-	logging.For(logging.ComponentContainers).Info("database persistence enabled")
+	log.Info("database persistence enabled")
 }
 
 // SetScanQueue configures the manager to use a scan queue for SBOM generation
@@ -68,13 +70,13 @@ func (m *Manager) SetDatabase(db DatabaseInterface) {
 func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 	m.mu.Lock()
 	m.scanQueue = queue
-	logging.For(logging.ComponentContainers).Info("scan queue enabled")
+	log.Info("scan queue enabled")
 
 	// Catch-up: enqueue scans for images discovered before queue was connected
 	// This handles images from initial sync that couldn't be enqueued
 	if m.db != nil && len(m.containers) > 0 {
 		containerCount := len(m.containers)
-		logging.For(logging.ComponentContainers).Info("checking containers for pending scans", "count", containerCount)
+		log.Info("checking containers for pending scans", "count", containerCount)
 
 		// Build map of digest -> container (first container per digest for scan context)
 		digestToContainer := make(map[string]Container)
@@ -95,14 +97,14 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 		}
 
 		if len(digests) == 0 {
-			logging.For(logging.ComponentContainers).Debug("no images to check for pending scans")
+			log.Debug("no images to check for pending scans")
 			return
 		}
 
 		// Get status for all images in a single bulk query
 		scanStatuses, err := m.db.GetImageScanStatusBulk(digests)
 		if err != nil {
-			logging.For(logging.ComponentContainers).Error("failed to fetch bulk scan status", slog.Any("error", err))
+			log.Error("failed to fetch bulk scan status", slog.Any("error", err))
 			return
 		}
 
@@ -119,7 +121,7 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 		if len(scannedDigests) > 0 {
 			completenessStatus, err = m.db.IsScanDataCompleteBulk(scannedDigests)
 			if err != nil {
-				logging.For(logging.ComponentContainers).Error("failed to fetch bulk completeness status", slog.Any("error", err))
+				log.Error("failed to fetch bulk completeness status", slog.Any("error", err))
 				completenessStatus = make(map[string]bool)
 			}
 		} else {
@@ -127,7 +129,7 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 		}
 
 		// Enqueue scans based on status
-		log := logging.For(logging.ComponentContainers)
+		log := log
 		enqueuedCount := 0
 		for digest, status := range scanStatuses {
 			c := digestToContainer[digest]
@@ -180,14 +182,14 @@ func (m *Manager) AddContainer(c Container) {
 	key := makeKey(c.ID.Namespace, c.ID.Pod, c.ID.Name)
 	m.containers[key] = c
 
-	logging.For(logging.ComponentContainers).Info("add container",
+	log.Info("add container",
 		"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name,
 		"image", c.Image.Reference, "digest", c.Image.Digest)
 
 	// Persist to database if configured
 	if m.db != nil {
 		if _, err := m.db.AddContainer(c); err != nil {
-			logging.For(logging.ComponentContainers).Error("failed to add container to database",
+			log.Error("failed to add container to database",
 				"container", c.ID.Name, slog.Any("error", err))
 			return
 		}
@@ -207,13 +209,13 @@ func (m *Manager) RemoveContainer(id ContainerID) {
 	key := makeKey(id.Namespace, id.Pod, id.Name)
 	delete(m.containers, key)
 
-	logging.For(logging.ComponentContainers).Info("remove container",
+	log.Info("remove container",
 		"namespace", id.Namespace, "pod", id.Pod, "name", id.Name)
 
 	// Remove from database if configured
 	if m.db != nil {
 		if err := m.db.RemoveContainer(id); err != nil {
-			logging.For(logging.ComponentContainers).Error("failed to remove container from database",
+			log.Error("failed to remove container from database",
 				"container", id.Name, slog.Any("error", err))
 		}
 	}
@@ -245,7 +247,7 @@ func (m *Manager) SetContainers(containers []Container) {
 		}
 	}
 
-	log := logging.For(logging.ComponentContainers)
+	log := log
 	log.Info("set containers", "containers", len(containers), "unique_images", len(uniqueImages), "nodes", len(uniqueNodes))
 
 	// Log first 3 containers as samples for debugging (only if we have containers)
@@ -337,7 +339,7 @@ func (m *Manager) GetContainer(namespace, pod, name string) (Container, bool) {
 // checkAndEnqueueScan checks if an image needs scanning and enqueues it with appropriate flags
 // This method handles retrying failed or incomplete scans
 func (m *Manager) checkAndEnqueueScan(c Container) {
-	log := logging.For(logging.ComponentContainers)
+	log := log
 	scanStatus, err := m.db.GetImageScanStatus(c.Image.Digest)
 	if err != nil {
 		log.Error("failed to check scan status", "digest", c.Image.Digest, slog.Any("error", err))

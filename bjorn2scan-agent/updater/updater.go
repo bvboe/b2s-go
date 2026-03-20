@@ -9,6 +9,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
+var log = logging.For(logging.ComponentHTTP)
+
 // Status represents the current state of the updater
 type Status string
 
@@ -79,7 +81,7 @@ func New(config *Config) (*Updater, error) {
 
 // Start begins the update checker loop
 func (u *Updater) Start() {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	if !u.config.Enabled {
 		log.Info("auto-update is disabled")
@@ -118,7 +120,7 @@ func (u *Updater) Start() {
 
 // checkForUpdate checks for and applies updates
 func (u *Updater) checkForUpdate() {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	u.setStatus(StatusChecking, "")
 	u.mu.Lock()
@@ -172,7 +174,7 @@ func (u *Updater) checkForUpdate() {
 
 // performUpdate downloads and installs an update
 func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	// Download
 	u.setStatus(StatusDownloading, "")

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 // LastUpdatedProvider interface for getting the most recent update timestamp
 type LastUpdatedProvider interface {
@@ -32,7 +32,7 @@ func LastUpdatedHandler(provider LastUpdatedProvider) http.HandlerFunc {
 
 		timestamp, err := provider.GetLastUpdatedTimestamp(dataType)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error getting last updated timestamp", "error", err)
+			log.Error("error getting last updated timestamp", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -40,7 +40,7 @@ func LastUpdatedHandler(provider LastUpdatedProvider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		if _, err := fmt.Fprint(w, timestamp); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error writing response", "error", err)
+			log.Error("error writing response", "error", err)
 		}
 	}
 }

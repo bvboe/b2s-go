@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/bvboe/b2s-go/scanner-core/grype"
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 // DatabaseReadinessState tracks the current database readiness
 type DatabaseReadinessState struct {
@@ -105,7 +105,7 @@ func DatabaseStatusHandler(state *DatabaseReadinessState) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(status); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding database status", "error", err)
+			log.Error("error encoding database status", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -120,14 +120,14 @@ func DatabaseReinitHandler(state *DatabaseReadinessState) http.HandlerFunc {
 			return
 		}
 
-		logging.For(logging.ComponentHTTP).Info("database re-initialization requested")
+		log.Info("database re-initialization requested")
 
 		// Mark as not ready during re-init
 		state.SetReady(&grype.DatabaseStatus{Available: false, Error: "re-initializing"})
 
 		// Delete existing database
 		if err := grype.DeleteDatabase(state.grypeCfg); err != nil {
-			logging.For(logging.ComponentHTTP).Error("failed to delete database", "error", err)
+			log.Error("failed to delete database", "error", err)
 			state.SetReady(&grype.DatabaseStatus{Available: false, Error: err.Error()})
 			http.Error(w, "Failed to delete database: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -136,18 +136,18 @@ func DatabaseReinitHandler(state *DatabaseReadinessState) http.HandlerFunc {
 		// Re-initialize (download fresh)
 		status, err := grype.InitializeDatabase(state.grypeCfg)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("failed to re-initialize database", "error", err)
+			log.Error("failed to re-initialize database", "error", err)
 			state.SetReady(status)
 			http.Error(w, "Failed to initialize database: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		state.SetReady(status)
-		logging.For(logging.ComponentHTTP).Info("database re-initialized successfully")
+		log.Info("database re-initialized successfully")
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(status); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 		}
 	}
 }

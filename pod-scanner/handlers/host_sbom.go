@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/anchore/syft/syft/source"
 	"github.com/bvboe/b2s-go/sbom-generator-shared/exclusions"
 )
+
 
 // HostSBOMConfig configures the host SBOM handler
 type HostSBOMConfig struct {
@@ -49,7 +49,7 @@ func (cfg *HostSBOMConfig) BuildExclusions() []string {
 	}
 	result, err := exclusions.BuildExclusions(excCfg)
 	if err != nil {
-		slog.Default().With("component", "pod-scanner").Warn("failed to detect network mounts", "error", err)
+		log.Warn("failed to detect network mounts", "error", err)
 	}
 	return result
 }
@@ -61,17 +61,17 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 	exclusionPatterns := cfg.BuildExclusions()
 
 	// Log exclusion configuration for debugging
-	slog.Default().With("component", "pod-scanner").Info("host SBOM exclusion config",
+	log.Info("host SBOM exclusion config",
 		"autoDetectNFS", cfg.AutoDetectNFS,
 		"extraExclusions", len(cfg.ExtraExclusions),
 		"extraNetworkFSTypes", len(cfg.ExtraNetworkFSTypes),
 		"totalPatterns", len(exclusionPatterns))
 	for _, pattern := range exclusionPatterns {
-		slog.Default().With("component", "pod-scanner").Debug("exclusion pattern", "pattern", pattern)
+		log.Debug("exclusion pattern", "pattern", pattern)
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		slog.Default().With("component", "pod-scanner").Info("host SBOM request received")
+		log.Info("host SBOM request received")
 
 		// Set timeout for SBOM generation
 		ctx, cancel := context.WithTimeout(r.Context(), cfg.Timeout)
@@ -89,10 +89,10 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 			})
 
 		// Get source for the host filesystem
-		slog.Default().With("component", "pod-scanner").Info("scanning host filesystem", "path", cfg.HostPath, "excludePatterns", len(exclusionPatterns))
+		log.Info("scanning host filesystem", "path", cfg.HostPath, "excludePatterns", len(exclusionPatterns))
 		src, err := syft.GetSource(ctx, cfg.HostPath, sourceCfg)
 		if err != nil {
-			slog.Default().With("component", "pod-scanner").Error("error getting source for host filesystem", "error", err)
+			log.Error("error getting source for host filesystem", "error", err)
 			http.Error(w, "Failed to access host filesystem", http.StatusInternalServerError)
 			return
 		}
@@ -100,7 +100,7 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 		// Ensure cleanup of source
 		defer func() {
 			if cleanupErr := src.Close(); cleanupErr != nil {
-				slog.Default().With("component", "pod-scanner").Warn("failed to cleanup source", "error", cleanupErr)
+				log.Warn("failed to cleanup source", "error", cleanupErr)
 			}
 		}()
 
@@ -110,7 +110,7 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 
 		s, err := syft.CreateSBOM(ctx, src, sbomCfg)
 		if err != nil {
-			slog.Default().With("component", "pod-scanner").Error("error creating SBOM for host filesystem", "error", err)
+			log.Error("error creating SBOM for host filesystem", "error", err)
 
 			// Check if it's a timeout
 			if ctx.Err() == context.DeadlineExceeded {
@@ -126,7 +126,7 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 		encoder := syftjson.NewFormatEncoder()
 		sbomBytes, err := format.Encode(*s, encoder)
 		if err != nil {
-			slog.Default().With("component", "pod-scanner").Error("error encoding host SBOM to JSON", "error", err)
+			log.Error("error encoding host SBOM to JSON", "error", err)
 			http.Error(w, "Failed to encode host SBOM", http.StatusInternalServerError)
 			return
 		}
@@ -147,9 +147,9 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 
 		// Write SBOM data
 		if _, err := w.Write(sbomBytes); err != nil {
-			slog.Default().With("component", "pod-scanner").Error("error writing host SBOM response", "error", err)
+			log.Error("error writing host SBOM response", "error", err)
 		} else {
-			slog.Default().With("component", "pod-scanner").Info("successfully served host SBOM",
+			log.Info("successfully served host SBOM",
 				"node", nodeName,
 				"size", len(sbomBytes),
 				"packages", s.Artifacts.Packages.PackageCount())

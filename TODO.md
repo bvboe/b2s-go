@@ -10,6 +10,10 @@
 - [ ] None currently
 
 ## Backlog
+- [ ] Improve log output format to show component before msg
+  - [ ] Update `scanner-core/logging/logger.go` to customize slog handler field ordering
+  - [ ] Update standalone loggers in `pod-scanner/main.go` and `k8s-update-controller/main.go`
+  - [ ] Goal: Output format should be `component=X msg=Y` instead of `msg=Y component=X`
 - [ ] Remove gomezboe.com dependency from grype database update tests
   - [ ] Replace `scripts/test-grype-db-updater` with self-contained unit tests
   - [ ] Consider mocking distribution.Client for IsUpdateAvailable tests

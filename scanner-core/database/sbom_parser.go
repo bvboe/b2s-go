@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // SyftPackage represents a package from Syft SBOM
@@ -217,7 +215,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	}
 	defer func() {
 		if err := stmt.Close(); err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to close statement", "error", err)
+			log.Warn("failed to close statement", "error", err)
 		}
 	}()
 
@@ -231,7 +229,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	}
 	defer func() {
 		if err := detailsStmt.Close(); err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to close details statement", "error", err)
+			log.Warn("failed to close details statement", "error", err)
 		}
 	}()
 
@@ -239,7 +237,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	for key, count := range packageCounts {
 		packages := packageInfo[key]
 		if len(packages) == 0 {
-			logging.For(logging.ComponentDatabase).Warn("no packages found for key", "key", key)
+			log.Warn("no packages found for key", "key", key)
 			continue
 		}
 
@@ -248,14 +246,14 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 
 		result, err := stmt.Exec(imageID, firstPkg.Name, firstPkg.Version, firstPkg.Type, count)
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to insert package", "package", firstPkg.Name, "error", err)
+			log.Warn("failed to insert package", "package", firstPkg.Name, "error", err)
 			continue
 		}
 
 		// Get the package ID (either newly inserted or existing)
 		packageID, err := result.LastInsertId()
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to get package ID", "package", firstPkg.Name, "error", err)
+			log.Warn("failed to get package ID", "package", firstPkg.Name, "error", err)
 			continue
 		}
 
@@ -264,13 +262,13 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 		// Using struct marshaling preserves field order as defined in the struct
 		detailsJSON, err := json.Marshal(packages)
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to marshal package details", "package", firstPkg.Name, "error", err)
+			log.Warn("failed to marshal package details", "package", firstPkg.Name, "error", err)
 			continue
 		}
 
 		// Insert package details
 		if _, err := detailsStmt.Exec(packageID, string(detailsJSON)); err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to insert package details", "package", firstPkg.Name, "error", err)
+			log.Warn("failed to insert package details", "package", firstPkg.Name, "error", err)
 			// Continue anyway - the package itself was inserted
 		}
 
@@ -280,7 +278,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	// Update images with architecture information if available
 	if sbom.Source.Metadata.Architecture != "" {
 		arch := sbom.Source.Metadata.Architecture
-		logging.For(logging.ComponentDatabase).Debug("extracted architecture info", "image_id", imageID, "architecture", arch)
+		log.Debug("extracted architecture info", "image_id", imageID, "architecture", arch)
 
 		_, err = tx.Exec(`
 			UPDATE images
@@ -288,7 +286,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 			WHERE id = ?
 		`, arch, imageID)
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to update images with architecture info", "error", err)
+			log.Warn("failed to update images with architecture info", "error", err)
 		}
 	}
 
@@ -296,7 +294,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	logging.For(logging.ComponentDatabase).Info("parsed SBOM",
+	log.Info("parsed SBOM",
 		"image_id", imageID, "unique_packages", totalPackages, "total_instances", len(sbom.Artifacts))
 	return nil
 }
@@ -351,7 +349,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	}
 	defer func() {
 		if err := stmt.Close(); err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to close statement", "error", err)
+			log.Warn("failed to close statement", "error", err)
 		}
 	}()
 
@@ -365,7 +363,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	}
 	defer func() {
 		if err := detailsStmt.Close(); err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to close details statement", "error", err)
+			log.Warn("failed to close details statement", "error", err)
 		}
 	}()
 
@@ -373,11 +371,11 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	for key, count := range vulnCounts {
 		matches := vulnInfo[key]
 		if len(matches) == 0 {
-			logging.For(logging.ComponentDatabase).Warn("no matches found for vulnerability", "cve_id", key.cveID)
+			log.Warn("no matches found for vulnerability", "cve_id", key.cveID)
 			continue
 		}
 
-		logging.For(logging.ComponentDatabase).Debug("processing vulnerability",
+		log.Debug("processing vulnerability",
 			"cve_id", key.cveID, "package", key.packageName, "count", count, "matches_in_array", len(matches))
 
 		// Use first match for summary data (they should all be identical for the same vulnerability)
@@ -428,14 +426,14 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			knownExploited,
 		)
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to insert vulnerability", "cve_id", key.cveID, "error", err)
+			log.Warn("failed to insert vulnerability", "cve_id", key.cveID, "error", err)
 			continue
 		}
 
 		// Get the vulnerability ID (either newly inserted or existing)
 		vulnID, err := result.LastInsertId()
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to get vulnerability ID", "cve_id", key.cveID, "error", err)
+			log.Warn("failed to get vulnerability ID", "cve_id", key.cveID, "error", err)
 			continue
 		}
 
@@ -443,16 +441,16 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		// This ensures we capture all instances when count > 1
 		detailsJSON, err := json.Marshal(matches)
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to marshal vulnerability details", "cve_id", key.cveID, "error", err)
+			log.Warn("failed to marshal vulnerability details", "cve_id", key.cveID, "error", err)
 			continue
 		}
 
-		logging.For(logging.ComponentDatabase).Debug("storing vulnerability details",
+		log.Debug("storing vulnerability details",
 			"cve_id", key.cveID, "vuln_id", vulnID, "matches", len(matches), "json_size", len(detailsJSON))
 
 		// Insert vulnerability details
 		if _, err := detailsStmt.Exec(vulnID, string(detailsJSON)); err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to insert vulnerability details", "cve_id", key.cveID, "error", err)
+			log.Warn("failed to insert vulnerability details", "cve_id", key.cveID, "error", err)
 			// Continue anyway - the vulnerability itself was inserted
 		}
 
@@ -463,7 +461,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	if doc.Distro != nil {
 		osName := doc.Distro.Name
 		osVersion := doc.Distro.Version
-		logging.For(logging.ComponentDatabase).Debug("extracted distro info",
+		log.Debug("extracted distro info",
 			"image_id", imageID, "os_name", osName, "os_version", osVersion)
 
 		_, err = tx.Exec(`
@@ -472,7 +470,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 			WHERE id = ?
 		`, osName, osVersion, imageID)
 		if err != nil {
-			logging.For(logging.ComponentDatabase).Warn("failed to update images with distro info", "error", err)
+			log.Warn("failed to update images with distro info", "error", err)
 		}
 	}
 
@@ -480,7 +478,7 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	logging.For(logging.ComponentDatabase).Info("parsed vulnerabilities",
+	log.Info("parsed vulnerabilities",
 		"image_id", imageID, "unique_vulnerabilities", totalVulns)
 	return nil
 }

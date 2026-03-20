@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -22,6 +21,7 @@ import (
 
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 )
+
 
 // DirectOTLPConfig holds configuration for direct OTLP export
 type DirectOTLPConfig struct {
@@ -418,7 +418,7 @@ func (e *DirectOTLPExporter) StreamNodeVulnerabilityMetrics(
 		return err
 	}
 
-	logging.For(logging.ComponentMetrics).Debug("sent data points to OTLP",
+	log.Debug("sent data points to OTLP",
 		"total_points", totalPoints,
 		"batch_count", batchCount)
 	return nil

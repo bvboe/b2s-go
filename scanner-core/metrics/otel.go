@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -19,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+
 // OTELProtocol represents the protocol to use for OTLP
 type OTELProtocol string
 
@@ -28,6 +28,7 @@ const (
 	// OTELProtocolHTTP uses HTTP for OTLP communication
 	OTELProtocolHTTP OTELProtocol = "http"
 )
+
 
 // OTELConfig holds OpenTelemetry configuration
 type OTELConfig struct {
@@ -157,11 +158,11 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 
 		directExporter, err := NewDirectOTLPExporter(directConfig)
 		if err != nil {
-			logging.For(logging.ComponentMetrics).Warn("failed to create direct OTLP exporter, falling back to SDK",
+			log.Warn("failed to create direct OTLP exporter, falling back to SDK",
 				"error", err)
 		} else {
 			otelExporter.directExporter = directExporter
-			logging.For(logging.ComponentMetrics).Info("direct OTLP exporter initialized",
+			log.Info("direct OTLP exporter initialized",
 				"batch_size", batchSize)
 		}
 	}
@@ -207,7 +208,7 @@ func (e *OTELExporter) recordMetrics() {
 	// Collect image metrics using the same method as /metrics endpoint
 	data, err := e.collector.Collect()
 	if err != nil {
-		logging.For(logging.ComponentMetrics).Error("error collecting metrics for OTEL", "error", err)
+		log.Error("error collecting metrics for OTEL", "error", err)
 		return
 	}
 
@@ -219,7 +220,7 @@ func (e *OTELExporter) recordMetrics() {
 		// First, collect node_scanned metrics (small dataset) via SDK
 		nodeScannedData, err := e.nodeCollector.CollectNodeScannedOnly()
 		if err != nil {
-			logging.For(logging.ComponentMetrics).Error("error collecting node scanned metrics for OTEL", "error", err)
+			log.Error("error collecting node scanned metrics for OTEL", "error", err)
 		} else {
 			e.recordMetricFamilies(nodeScannedData.Families)
 		}
@@ -236,18 +237,18 @@ func (e *OTELExporter) recordMetrics() {
 					e.deploymentUUID,
 					e.infoProvider.GetDeploymentName(),
 				); err != nil {
-					logging.For(logging.ComponentMetrics).Error("error streaming node vulnerability metrics via direct OTLP", "error", err)
+					log.Error("error streaming node vulnerability metrics via direct OTLP", "error", err)
 				}
 			} else {
-				logging.For(logging.ComponentMetrics).Warn("database does not support streaming, falling back to SDK export")
+				log.Warn("database does not support streaming, falling back to SDK export")
 				if err := e.streamNodeVulnerabilityMetrics(); err != nil {
-					logging.For(logging.ComponentMetrics).Error("error streaming node vulnerability metrics for OTEL", "error", err)
+					log.Error("error streaming node vulnerability metrics for OTEL", "error", err)
 				}
 			}
 		} else {
 			// Fallback to SDK-based export (will OOM with large datasets)
 			if err := e.streamNodeVulnerabilityMetrics(); err != nil {
-				logging.For(logging.ComponentMetrics).Error("error streaming node vulnerability metrics for OTEL", "error", err)
+				log.Error("error streaming node vulnerability metrics for OTEL", "error", err)
 			}
 		}
 	}
@@ -283,7 +284,7 @@ func (e *OTELExporter) recordMetricFamilies(families []MetricFamily) {
 		// Get or create gauge for this metric
 		gauge, err := e.getOrCreateGauge(family.Name, family.Help)
 		if err != nil {
-			logging.For(logging.ComponentMetrics).Error("error creating gauge",
+			log.Error("error creating gauge",
 				"metric_name", family.Name,
 				"error", err)
 			continue
@@ -328,7 +329,7 @@ func (e *OTELExporter) Shutdown() error {
 	// Close direct exporter if it was initialized
 	if e.directExporter != nil {
 		if err := e.directExporter.Close(); err != nil {
-			logging.For(logging.ComponentMetrics).Error("error closing direct OTLP exporter", "error", err)
+			log.Error("error closing direct OTLP exporter", "error", err)
 		}
 	}
 
@@ -336,7 +337,7 @@ func (e *OTELExporter) Shutdown() error {
 	defer cancel()
 
 	if err := e.meterProvider.Shutdown(ctx); err != nil {
-		logging.For(logging.ComponentMetrics).Error("error shutting down OTEL meter provider", "error", err)
+		log.Error("error shutting down OTEL meter provider", "error", err)
 		return err
 	}
 

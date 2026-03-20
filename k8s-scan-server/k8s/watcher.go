@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+var log = logging.For(logging.ComponentK8s)
+
 // extractImageReference extracts the image reference from a container image string
 // This preserves the original reference exactly as specified by the user
 // Example: "nginx:1.21" -> "nginx:1.21"
@@ -109,13 +111,13 @@ func extractContainers(pod *corev1.Pod) []containers.Container {
 		if digest == "" {
 			// Skip containers without digest - they're not fully initialized yet
 			// The watcher will pick them up again when status becomes available
-			logging.For(logging.ComponentK8s).Debug("skipping container without digest",
+			log.Debug("skipping container without digest",
 				"namespace", pod.Namespace, "pod", pod.Name, "container", container.Name, "image", container.Image)
 			continue
 		}
 
 		if reference == "" {
-			logging.For(logging.ComponentK8s).Warn("container has empty reference",
+			log.Warn("container has empty reference",
 				"namespace", pod.Namespace, "pod", pod.Name, "container", container.Name)
 			continue
 		}
@@ -156,7 +158,7 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 	podInformer := factory.Core().V1().Pods().Informer()
 
 	// Add event handlers
-	log := logging.For(logging.ComponentK8s)
+	log := log
 	_, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod, ok := obj.(*corev1.Pod)
@@ -240,7 +242,7 @@ func handlePodDelete(pod *corev1.Pod, manager *containers.Manager) {
 	for _, c := range podContainers {
 		manager.RemoveContainer(c.ID)
 	}
-	logging.For(logging.ComponentK8s).Debug("removed containers from deleted pod",
+	log.Debug("removed containers from deleted pod",
 		"namespace", pod.Namespace, "pod", pod.Name, "containers", len(podContainers))
 }
 
@@ -249,7 +251,7 @@ func handlePodDelete(pod *corev1.Pod, manager *containers.Manager) {
 // since the informer automatically performs an initial list and sync (via cache.WaitForCacheSync).
 // This function is kept for explicit synchronization use cases or testing.
 func SyncInitialPods(ctx context.Context, clientset kubernetes.Interface, manager *containers.Manager) error {
-	log := logging.For(logging.ComponentK8s)
+	log := log
 	log.Info("performing initial pod sync")
 
 	podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})

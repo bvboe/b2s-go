@@ -9,6 +9,8 @@ import (
 	"github.com/bvboe/b2s-go/k8s-update-controller/config"
 )
 
+var log = slog.Default().With("component", "k8s-update-controller")
+
 // Controller manages the update process
 type Controller struct {
 	config         *config.Config
@@ -51,7 +53,7 @@ func New(cfg *config.Config) (*Controller, error) {
 
 // CheckAndUpdate performs a single update check and applies updates if needed
 func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) {
-	log := slog.Default().With("component", "k8s-update-controller")
+	log := log
 	result := &UpdateResult{}
 
 	// 1. Get current release version

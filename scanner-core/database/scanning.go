@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // GetImageStatus returns the unified status for an image by digest
@@ -272,7 +270,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 
 	// Parse and store SBOM data in packages table
 	if err := parseSBOMData(db.conn, imageID, sbomJSON); err != nil {
-		logging.For(logging.ComponentDatabase).Warn("failed to parse SBOM data", "digest", digest, "error", err)
+		log.Warn("failed to parse SBOM data", "digest", digest, "error", err)
 		// Don't fail the whole operation if parsing fails
 	}
 
@@ -485,7 +483,7 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 
 	// Parse and store vulnerability data in vulnerabilities table
 	if err := parseVulnerabilityData(db.conn, imageID, vulnJSON); err != nil {
-		logging.For(logging.ComponentDatabase).Warn("failed to parse vulnerability data", "digest", digest, "error", err)
+		log.Warn("failed to parse vulnerability data", "digest", digest, "error", err)
 		// Don't fail the whole operation if parsing fails
 	}
 

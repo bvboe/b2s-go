@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"helm.sh/helm/v3/pkg/release"
 	"k8s.io/client-go/rest"
 )
+
 
 // HelmClient wraps Helm operations
 type HelmClient struct {
@@ -57,7 +57,7 @@ func (hc *HelmClient) GetCurrentRelease() (*release.Release, error) {
 
 // UpgradeRelease performs a Helm upgrade
 func (hc *HelmClient) UpgradeRelease(ctx context.Context, chartPath string, version string) error {
-	log := slog.Default().With("component", "k8s-update-controller")
+	log := log
 
 	actionConfig, err := hc.getActionConfig()
 	if err != nil {
@@ -88,7 +88,7 @@ func (hc *HelmClient) UpgradeRelease(ctx context.Context, chartPath string, vers
 
 // RollbackRelease rolls back to the previous release
 func (hc *HelmClient) RollbackRelease() error {
-	log := slog.Default().With("component", "k8s-update-controller")
+	log := log
 
 	actionConfig, err := hc.getActionConfig()
 	if err != nil {
@@ -142,7 +142,7 @@ func (hc *HelmClient) IsReleaseHealthy() (bool, error) {
 
 // getActionConfig creates a Helm action configuration
 func (hc *HelmClient) getActionConfig() (*action.Configuration, error) {
-	log := slog.Default().With("component", "k8s-update-controller")
+	log := log
 	actionConfig := new(action.Configuration)
 
 	// Initialize with Kubernetes client

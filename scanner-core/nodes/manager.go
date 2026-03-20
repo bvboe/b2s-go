@@ -7,6 +7,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
+var log = logging.For(logging.ComponentNodes)
+
 // NodeDatabaseInterface defines the interface for node database operations
 type NodeDatabaseInterface interface {
 	AddNode(n Node) (bool, error)
@@ -46,7 +48,7 @@ func (m *Manager) SetDatabase(db NodeDatabaseInterface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.db = db
-	logging.For(logging.ComponentNodes).Info("database persistence enabled")
+	log.Info("database persistence enabled")
 }
 
 // SetScanQueue configures the manager to use a scan queue for host SBOM generation
@@ -55,12 +57,12 @@ func (m *Manager) SetDatabase(db NodeDatabaseInterface) {
 func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 	m.mu.Lock()
 	m.scanQueue = queue
-	logging.For(logging.ComponentNodes).Info("scan queue enabled")
+	log.Info("scan queue enabled")
 
 	// Catch-up: enqueue scans for nodes discovered before queue was connected
 	if m.db != nil && len(m.nodes) > 0 {
 		nodeCount := len(m.nodes)
-		logging.For(logging.ComponentNodes).Info("checking nodes for pending scans", "count", nodeCount)
+		log.Info("checking nodes for pending scans", "count", nodeCount)
 
 		// Build map of node name -> node
 		nodeMap := make(map[string]Node)
@@ -72,14 +74,14 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 		m.mu.Unlock()
 
 		if len(nodeNames) == 0 {
-			logging.For(logging.ComponentNodes).Debug("no nodes to check for pending scans")
+			log.Debug("no nodes to check for pending scans")
 			return
 		}
 
 		// Get status for all nodes in a single bulk query
 		scanStatuses, err := m.db.GetNodeScanStatusBulk(nodeNames)
 		if err != nil {
-			logging.For(logging.ComponentNodes).Error("failed to fetch bulk node scan status", slog.Any("error", err))
+			log.Error("failed to fetch bulk node scan status", slog.Any("error", err))
 			return
 		}
 
@@ -96,7 +98,7 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 		if len(scannedNodes) > 0 {
 			completenessStatus, err = m.db.IsNodeScanCompleteBulk(scannedNodes)
 			if err != nil {
-				logging.For(logging.ComponentNodes).Error("failed to fetch bulk node completeness status", slog.Any("error", err))
+				log.Error("failed to fetch bulk node completeness status", slog.Any("error", err))
 				completenessStatus = make(map[string]bool)
 			}
 		} else {
@@ -104,7 +106,7 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 		}
 
 		// Enqueue scans based on status (using actual database status values)
-		log := logging.For(logging.ComponentNodes)
+		log := log
 		enqueuedCount := 0
 		for name, status := range scanStatuses {
 			switch status {
@@ -149,14 +151,14 @@ func (m *Manager) AddNode(n Node) {
 
 	m.nodes[n.Name] = n
 
-	logging.For(logging.ComponentNodes).Info("add node",
+	log.Info("add node",
 		"name", n.Name, "hostname", n.Hostname, "os", n.OSRelease, "arch", n.Architecture)
 
 	// Persist to database if configured
 	if m.db != nil {
 		isNew, err := m.db.AddNode(n)
 		if err != nil {
-			logging.For(logging.ComponentNodes).Error("failed to add node to database",
+			log.Error("failed to add node to database",
 				"node", n.Name, slog.Any("error", err))
 			return
 		}
@@ -179,18 +181,18 @@ func (m *Manager) UpdateNode(n Node) {
 	// Check if node exists
 	_, exists := m.nodes[n.Name]
 	if !exists {
-		logging.For(logging.ComponentNodes).Debug("node not found, adding instead", "node", n.Name)
+		log.Debug("node not found, adding instead", "node", n.Name)
 	}
 
 	m.nodes[n.Name] = n
 
-	logging.For(logging.ComponentNodes).Info("update node",
+	log.Info("update node",
 		"name", n.Name, "hostname", n.Hostname, "os", n.OSRelease, "arch", n.Architecture)
 
 	// Update in database if configured
 	if m.db != nil {
 		if err := m.db.UpdateNode(n); err != nil {
-			logging.For(logging.ComponentNodes).Error("failed to update node in database",
+			log.Error("failed to update node in database",
 				"node", n.Name, slog.Any("error", err))
 		}
 	}
@@ -203,12 +205,12 @@ func (m *Manager) RemoveNode(name string) {
 
 	delete(m.nodes, name)
 
-	logging.For(logging.ComponentNodes).Info("remove node", "name", name)
+	log.Info("remove node", "name", name)
 
 	// Remove from database if configured
 	if m.db != nil {
 		if err := m.db.RemoveNode(name); err != nil {
-			logging.For(logging.ComponentNodes).Error("failed to remove node from database",
+			log.Error("failed to remove node from database",
 				"node", name, slog.Any("error", err))
 		}
 	}
@@ -227,7 +229,7 @@ func (m *Manager) SetNodes(nodeList []Node) {
 		m.nodes[n.Name] = n
 	}
 
-	log := logging.For(logging.ComponentNodes)
+	log := log
 	log.Info("set nodes", "count", len(nodeList))
 
 	// Log first 3 nodes as samples for debugging

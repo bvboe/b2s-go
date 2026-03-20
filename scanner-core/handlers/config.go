@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 // ConfigProvider is an interface for components to provide scanner configuration
 type ConfigProvider interface {
@@ -36,7 +36,7 @@ func ConfigHandler(provider ConfigProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(config); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding config response", "error", err)
+			log.Error("error encoding config response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}

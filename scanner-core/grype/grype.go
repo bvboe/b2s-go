@@ -30,6 +30,8 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 )
 
+var log = logging.For(logging.ComponentGrype)
+
 // Config holds configuration for the Grype scanner
 type Config struct {
 	// DBRootDir is the root directory where Grype stores its vulnerability database
@@ -39,7 +41,7 @@ type Config struct {
 
 // logDirectoryContents logs the contents of a directory for debugging
 func logDirectoryContents(dir string, phase string) {
-	log := logging.For(logging.ComponentGrype)
+	log := log
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -89,7 +91,7 @@ type ScanResult struct {
 // This should be called at startup before accepting scan requests.
 // Returns the database status and any error encountered.
 func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
-	log := logging.For(logging.ComponentGrype)
+	log := log
 	log.Info("initializing vulnerability database")
 
 	identification := clio.Identification{
@@ -241,7 +243,7 @@ func isNumericDir(name string) bool {
 // DeleteDatabase removes the vulnerability database, forcing a re-download on next use.
 // This is useful for testing database initialization.
 func DeleteDatabase(cfg Config) error {
-	log := logging.For(logging.ComponentGrype)
+	log := log
 	dbDir := cfg.DBRootDir
 	if dbDir != "" {
 		dbDir = filepath.Join(dbDir, "grype")
@@ -307,7 +309,7 @@ func ScanVulnerabilities(ctx context.Context, sbomJSON []byte) (*ScanResult, err
 // ScanVulnerabilitiesWithConfig scans an SBOM for vulnerabilities using Grype library with custom configuration
 // Returns a ScanResult containing both the vulnerability JSON and information about the database used
 func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Config) (*ScanResult, error) {
-	log := logging.For(logging.ComponentGrype)
+	log := log
 	log.Debug("starting vulnerability scan", "sbom_size", len(sbomJSON))
 
 	// Write SBOM to temp file so we can use Grype's Provide function

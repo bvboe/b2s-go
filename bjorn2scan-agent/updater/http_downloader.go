@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 // HTTPDownloader handles downloading release assets via direct HTTP
 type HTTPDownloader struct {
@@ -99,7 +99,7 @@ func (hd *HTTPDownloader) DownloadAsset(ctx context.Context, version, filename, 
 	var lastErr error
 	var lastStatusCode int
 
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	for attempt := 0; attempt <= hd.maxRetries; attempt++ {
 		if attempt > 0 {
@@ -141,7 +141,7 @@ func (hd *HTTPDownloader) DownloadAsset(ctx context.Context, version, filename, 
 
 // downloadAssetOnce performs a single download attempt
 func (hd *HTTPDownloader) downloadAssetOnce(ctx context.Context, url, filename, destPath string) error {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	if filename != "" {
 		log.Info("downloading", "filename", filename, "url", url)
@@ -200,7 +200,7 @@ func (hd *HTTPDownloader) extractStatusCode(err error) int {
 
 // DownloadReleaseAssets downloads all required assets for a release
 func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, workDir string) (string, error) {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	// Determine asset names based on OS and architecture
 	arch := runtime.GOARCH

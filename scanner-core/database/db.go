@@ -10,6 +10,8 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
+var log = logging.For(logging.ComponentDatabase)
+
 // DB wraps the database connection
 type DB struct {
 	conn *sql.DB
@@ -33,7 +35,6 @@ func isCorruptionError(err error) bool {
 
 // deleteDatabase deletes the database file and associated files (WAL, SHM)
 func deleteDatabase(dbPath string) error {
-	log := logging.For(logging.ComponentDatabase)
 	log.Info("deleting database files", "path", dbPath)
 
 	// Delete main database file
@@ -72,7 +73,6 @@ func New(dbPath string) (*DB, error) {
 
 		// Check if it's a corruption error
 		if isCorruptionError(err) {
-			log := logging.For(logging.ComponentDatabase)
 			log.Error("database corruption detected", slog.Any("error", err))
 			log.Info("deleting corrupted database and starting fresh")
 			if err := deleteDatabase(dbPath); err != nil {
@@ -104,7 +104,6 @@ func New(dbPath string) (*DB, error) {
 
 		// If configuration fails due to corruption, delete and recreate
 		if isCorruptionError(err) {
-			log := logging.For(logging.ComponentDatabase)
 			log.Error("database corruption detected during configuration", slog.Any("error", err))
 			log.Info("deleting corrupted database and starting fresh")
 			if err := deleteDatabase(dbPath); err != nil {
@@ -124,7 +123,6 @@ func New(dbPath string) (*DB, error) {
 
 		// If migration fails due to corruption, delete and recreate
 		if isCorruptionError(err) {
-			log := logging.For(logging.ComponentDatabase)
 			log.Error("database corruption detected during migration", slog.Any("error", err))
 			log.Info("deleting corrupted database and starting fresh")
 			if err := deleteDatabase(dbPath); err != nil {
@@ -136,7 +134,7 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
 
-	logging.For(logging.ComponentDatabase).Info("database initialized", "path", dbPath)
+	log.Info("database initialized", "path", dbPath)
 	return db, nil
 }
 
@@ -147,9 +145,9 @@ func Close(db *DB) error {
 	}
 
 	// Checkpoint WAL to ensure all data is written to main database
-	logging.For(logging.ComponentDatabase).Info("checkpointing WAL before closing database")
+	log.Info("checkpointing WAL before closing database")
 	if _, err := db.conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		logging.For(logging.ComponentDatabase).Warn("failed to checkpoint WAL", "error", err)
+		log.Warn("failed to checkpoint WAL", "error", err)
 	}
 
 	return db.conn.Close()
@@ -188,7 +186,6 @@ func HealthCheck(db *DB) error {
 // RecoverFromCorruption attempts to recover from database corruption
 // WARNING: This may result in data loss
 func RecoverFromCorruption(dbPath string) error {
-	log := logging.For(logging.ComponentDatabase)
 	log.Info("attempting to recover corrupted database", "path", dbPath)
 
 	// Try to dump and restore

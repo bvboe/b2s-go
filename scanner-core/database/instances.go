@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // ContainerRow represents a container in the database
@@ -79,7 +78,7 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 				return false, fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			logging.For(logging.ComponentDatabase).Info("updated container in database",
+			log.Info("updated container in database",
 				"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
 			return true, nil
 		}
@@ -111,7 +110,7 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	logging.For(logging.ComponentDatabase).Info("new container added to database",
+	log.Info("new container added to database",
 		"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
 
 	return true, nil
@@ -134,7 +133,7 @@ func (db *DB) RemoveContainer(id containers.ContainerID) error {
 	}
 
 	if rowsAffected > 0 {
-		logging.For(logging.ComponentDatabase).Info("container removed from database",
+		log.Info("container removed from database",
 			"namespace", id.Namespace, "pod", id.Pod, "name", id.Name)
 	}
 
@@ -215,7 +214,7 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	logging.For(logging.ComponentDatabase).Info("reconciliation complete",
+	log.Info("reconciliation complete",
 		"added", stats.ContainersAdded, "removed", stats.ContainersRemoved, "new_images", stats.ImagesAdded)
 	return stats, nil
 }
@@ -294,7 +293,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 
 	if orphanedCount == 0 {
 		// No cleanup needed
-		logging.For(logging.ComponentDatabase).Info("cleanup: no orphaned images found")
+		log.Info("cleanup: no orphaned images found")
 		return &CleanupStats{}, nil
 	}
 
@@ -481,7 +480,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		VulnerabilityDetailsRemoved: vulnerabilityDetailsCount,
 	}
 
-	logging.For(logging.ComponentDatabase).Info("cleanup complete",
+	log.Info("cleanup complete",
 		"images_removed", stats.ImagesRemoved,
 		"packages_removed", stats.PackagesRemoved,
 		"package_details_removed", stats.PackageDetailsRemoved,

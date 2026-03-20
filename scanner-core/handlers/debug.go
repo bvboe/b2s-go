@@ -9,9 +9,9 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/debug"
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 )
+
 
 // DebugSQLHandler handles POST /debug/sql requests to execute SQL queries.
 //
@@ -62,13 +62,13 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Parse JSON body
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				logging.For(logging.ComponentHTTP).Warn("failed to close request body", "error", err)
+				log.Warn("failed to close request body", "error", err)
 			}
 		}()
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error reading request body", "error", err)
+			log.Error("error reading request body", "error", err)
 			http.Error(w, "Failed to read request body", http.StatusBadRequest)
 			return
 		}
@@ -78,7 +78,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		}
 
 		if err := json.Unmarshal(body, &request); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error parsing JSON", "error", err)
+			log.Error("error parsing JSON", "error", err)
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
@@ -91,7 +91,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Validate SQL query
 		valid, err := debug.ValidateQuery(request.Query)
 		if !valid {
-			logging.For(logging.ComponentHTTP).Warn("invalid SQL query rejected", "error", err)
+			log.Warn("invalid SQL query rejected", "error", err)
 			http.Error(w, fmt.Sprintf("Invalid query: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -99,7 +99,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Execute query
 		result, err := db.ExecuteQuery(request.Query)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error executing query", "error", err)
+			log.Error("error executing query", "error", err)
 			http.Error(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -119,7 +119,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Return JSON response
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}
@@ -193,7 +193,7 @@ func DebugMetricsHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.Job
 		// Return JSON response
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}
@@ -235,7 +235,7 @@ func DebugQueueHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.JobQu
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(contents); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding queue contents", "error", err)
+			log.Error("error encoding queue contents", "error", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}
@@ -290,7 +290,7 @@ func DebugRescanNodeHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.
 			scanQueue.EnqueueHostForceScan(nodeName)
 		}
 
-		logging.For(logging.ComponentHTTP).Debug("enqueued manual node rescan", "node_name", nodeName, "full_rescan", fullRescan)
+		log.Debug("enqueued manual node rescan", "node_name", nodeName, "full_rescan", fullRescan)
 
 		w.Header().Set("Content-Type", "application/json")
 		response := map[string]interface{}{
@@ -299,7 +299,7 @@ func DebugRescanNodeHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.
 			"full_rescan": fullRescan,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 		}
 	}
 }
@@ -366,7 +366,7 @@ func DebugRescanImageHandler(debugConfig *debug.DebugConfig, db *database.DB, sc
 
 		scanQueue.Enqueue(job)
 
-		logging.For(logging.ComponentHTTP).Debug("enqueued manual image rescan", "digest", digest)
+		log.Debug("enqueued manual image rescan", "digest", digest)
 
 		w.Header().Set("Content-Type", "application/json")
 		response := map[string]interface{}{
@@ -374,7 +374,7 @@ func DebugRescanImageHandler(debugConfig *debug.DebugConfig, db *database.DB, sc
 			"digest": digest,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 		}
 	}
 }
@@ -402,7 +402,7 @@ func DebugRescanAllNodesHandler(debugConfig *debug.DebugConfig, db *database.DB,
 		// Get all nodes from database
 		nodes, err := db.GetAllNodes()
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error getting nodes for rescan", "error", err)
+			log.Error("error getting nodes for rescan", "error", err)
 			http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
 			return
 		}
@@ -412,7 +412,7 @@ func DebugRescanAllNodesHandler(debugConfig *debug.DebugConfig, db *database.DB,
 			scanQueue.EnqueueHostForceScan(node.Name)
 		}
 
-		logging.For(logging.ComponentHTTP).Debug("enqueued node rescan batch", "count", len(nodes))
+		log.Debug("enqueued node rescan batch", "count", len(nodes))
 
 		w.Header().Set("Content-Type", "application/json")
 		response := map[string]interface{}{
@@ -420,7 +420,7 @@ func DebugRescanAllNodesHandler(debugConfig *debug.DebugConfig, db *database.DB,
 			"count":  len(nodes),
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 		}
 	}
 }
@@ -448,7 +448,7 @@ func DebugRescanAllImagesHandler(debugConfig *debug.DebugConfig, db *database.DB
 		// Get all images from database
 		imagesRaw, err := db.GetAllImages()
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error getting images for rescan", "error", err)
+			log.Error("error getting images for rescan", "error", err)
 			http.Error(w, "Failed to get images", http.StatusInternalServerError)
 			return
 		}
@@ -471,7 +471,7 @@ func DebugRescanAllImagesHandler(debugConfig *debug.DebugConfig, db *database.DB
 			scanQueue.Enqueue(job)
 		}
 
-		logging.For(logging.ComponentHTTP).Debug("enqueued image rescan batch", "count", len(images))
+		log.Debug("enqueued image rescan batch", "count", len(images))
 
 		w.Header().Set("Content-Type", "application/json")
 		response := map[string]interface{}{
@@ -479,7 +479,7 @@ func DebugRescanAllImagesHandler(debugConfig *debug.DebugConfig, db *database.DB
 			"count":  len(images),
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+			log.Error("error encoding response", "error", err)
 		}
 	}
 }
@@ -509,5 +509,5 @@ func RegisterDebugHandlers(mux *http.ServeMux, db *database.DB, debugConfig *deb
 	mux.HandleFunc("/api/debug/rescan/all-nodes", DebugRescanAllNodesHandler(debugConfig, db, scanQueue))
 	mux.HandleFunc("/api/debug/rescan/all-images", DebugRescanAllImagesHandler(debugConfig, db, scanQueue))
 
-	logging.For(logging.ComponentHTTP).Info("debug handlers registered", "endpoints", "/api/debug/sql, /api/debug/metrics, /api/debug/queue, /api/debug/rescan/*")
+	log.Info("debug handlers registered", "endpoints", "/api/debug/sql, /api/debug/metrics, /api/debug/queue, /api/debug/rescan/*")
 }

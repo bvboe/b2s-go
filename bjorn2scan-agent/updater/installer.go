@@ -7,14 +7,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 const (
 	defaultBinaryPath = "/var/lib/bjorn2scan/bin/bjorn2scan-agent"
 	backupSuffix      = ".backup"
 	rollbackMarker    = "/tmp/bjorn2scan-update-rollback"
 )
+
 
 // Installer handles atomic binary replacement and service restart
 type Installer struct {
@@ -46,7 +47,7 @@ func NewInstaller(binaryPath, healthURL string, healthTimeout time.Duration) *In
 // The health check and rollback decision happen on the next startup
 // The cleanup function is called after the binary is copied but before exit
 func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	log.Info("starting installation")
 
@@ -104,7 +105,7 @@ func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
 
 // Rollback restores the previous binary and exits for restart
 func (i *Installer) Rollback() error {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	log.Info("performing rollback")
 
@@ -132,7 +133,7 @@ func (i *Installer) Rollback() error {
 // PerformPostUpdateHealthCheck checks if update was successful and commits or rolls back
 // This should be called on startup if ShouldCheckRollback() returns true
 func (i *Installer) PerformPostUpdateHealthCheck() error {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	log.Info("pending update detected, performing health check")
 
@@ -153,7 +154,7 @@ func (i *Installer) PerformPostUpdateHealthCheck() error {
 
 // CommitUpdate removes the rollback marker and backup after successful update
 func (i *Installer) CommitUpdate() error {
-	log := logging.For(logging.ComponentHTTP)
+	log := log
 
 	backupPath := i.binaryPath + backupSuffix
 

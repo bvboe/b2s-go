@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
+
 
 // RegistryClient handles OCI registry operations
 type RegistryClient struct {
@@ -125,7 +125,7 @@ func (rc *RegistryClient) VerifySignature(ctx context.Context, chartPath string,
 	// For now, we'll skip this in the initial implementation
 	// This will be added in a follow-up as it requires cosign library integration
 
-	log := slog.Default().With("component", "k8s-update-controller")
+	log := log
 	log.Info("signature verification not yet implemented")
 	return nil
 }

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 // DefaultStalenessWindow is the default duration after which metrics are considered stale
 const DefaultStalenessWindow = 60 * time.Minute
@@ -62,7 +62,7 @@ func NewMetricTracker(cfg MetricTrackerConfig) *MetricTracker {
 	// Load persisted data from database
 	if cfg.Store != nil {
 		if err := mt.loadFromStore(); err != nil {
-			logging.For(logging.ComponentMetrics).Warn("failed to load persisted metric staleness data", "error", err)
+			log.Warn("failed to load persisted metric staleness data", "error", err)
 		}
 	}
 
@@ -91,7 +91,7 @@ func (mt *MetricTracker) loadFromStore() error {
 	for key, ts := range timestamps {
 		t, err := time.Parse(time.RFC3339, ts)
 		if err != nil {
-			logging.For(logging.ComponentMetrics).Warn("invalid timestamp in persisted data",
+			log.Warn("invalid timestamp in persisted data",
 				"key", key,
 				"error", err)
 			continue
@@ -99,7 +99,7 @@ func (mt *MetricTracker) loadFromStore() error {
 		mt.lastSeen[key] = t
 	}
 
-	logging.For(logging.ComponentMetrics).Debug("loaded metric timestamps from database",
+	log.Debug("loaded metric timestamps from database",
 		"count", len(mt.lastSeen))
 	return nil
 }
@@ -211,17 +211,17 @@ func (mt *MetricTracker) ProcessMetrics(data *MetricsData) *MetricsData {
 
 	// Persist to database (only if changed)
 	if err := mt.saveToStore(); err != nil {
-		logging.For(logging.ComponentMetrics).Warn("failed to persist metric staleness data", "error", err)
+		log.Warn("failed to persist metric staleness data", "error", err)
 	}
 
 	// Add stale metrics to the output with NaN value
 	if len(staleMetrics) > 0 {
 		data = mt.addStaleMetrics(data, staleMetrics)
-		logging.For(logging.ComponentMetrics).Debug("marked metrics as stale (NaN)",
+		log.Debug("marked metrics as stale (NaN)",
 			"count", len(staleMetrics))
 	}
 	if len(expiredMetrics) > 0 {
-		logging.For(logging.ComponentMetrics).Debug("purged expired metrics",
+		log.Debug("purged expired metrics",
 			"count", len(expiredMetrics))
 	}
 

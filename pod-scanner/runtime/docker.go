@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
+
 // DockerClient implements RuntimeClient for Docker daemon
 type DockerClient struct {
 	cli *client.Client
@@ -23,7 +23,7 @@ type DockerClient struct {
 func NewDockerClient() *DockerClient {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		slog.Default().With("component", "pod-scanner").Warn("failed to create Docker client", "error", err)
+		log.Warn("failed to create Docker client", "error", err)
 		return &DockerClient{cli: nil}
 	}
 	return &DockerClient{cli: cli}
@@ -92,7 +92,7 @@ func (d *DockerClient) GenerateSBOM(ctx context.Context, digest string) ([]byte,
 		return nil, fmt.Errorf("image with digest %s not found in Docker", digest)
 	}
 
-	slog.Default().With("component", "pod-scanner").Info("generating SBOM for Docker image", "image", imageRef, "digest", digest)
+	log.Info("generating SBOM for Docker image", "image", imageRef, "digest", digest)
 
 	// Use syft to generate SBOM from Docker daemon
 	src, err := syft.GetSource(ctx, imageRef, nil)
@@ -103,7 +103,7 @@ func (d *DockerClient) GenerateSBOM(ctx context.Context, digest string) ([]byte,
 	// Ensure cleanup of source
 	defer func() {
 		if cleanupErr := src.Close(); cleanupErr != nil {
-			slog.Default().With("component", "pod-scanner").Warn("failed to cleanup source", "error", cleanupErr)
+			log.Warn("failed to cleanup source", "error", cleanupErr)
 		}
 	}()
 
@@ -120,7 +120,7 @@ func (d *DockerClient) GenerateSBOM(ctx context.Context, digest string) ([]byte,
 		return nil, fmt.Errorf("failed to encode SBOM to JSON: %w", err)
 	}
 
-	slog.Default().With("component", "pod-scanner").Info("successfully generated SBOM",
+	log.Info("successfully generated SBOM",
 		"image", imageRef,
 		"size", len(sbomBytes),
 		"packages", s.Artifacts.Packages.PackageCount())

@@ -6,6 +6,8 @@ import (
 	"log/slog"
 )
 
+var log = slog.Default().With("component", "pod-scanner")
+
 // Manager manages container runtime clients and auto-detects available runtime
 type Manager struct {
 	docker     *DockerClient
@@ -22,7 +24,7 @@ func NewManager() (*Manager, error) {
 	mgr.docker = NewDockerClient()
 	if mgr.docker.IsAvailable() {
 		mgr.active = mgr.docker
-		slog.Default().With("component", "pod-scanner").Info("container runtime detected", "runtime", "Docker")
+		log.Info("container runtime detected", "runtime", "Docker")
 		return mgr, nil
 	}
 
@@ -30,7 +32,7 @@ func NewManager() (*Manager, error) {
 	mgr.containerd = NewContainerDClient()
 	if mgr.containerd.IsAvailable() {
 		mgr.active = mgr.containerd
-		slog.Default().With("component", "pod-scanner").Info("container runtime detected", "runtime", "ContainerD")
+		log.Info("container runtime detected", "runtime", "ContainerD")
 		return mgr, nil
 	}
 
@@ -57,12 +59,12 @@ func (m *Manager) ActiveRuntime() string {
 func (m *Manager) Close() error {
 	if m.docker != nil {
 		if err := m.docker.Close(); err != nil {
-			slog.Default().With("component", "pod-scanner").Warn("failed to close Docker client", "error", err)
+			log.Warn("failed to close Docker client", "error", err)
 		}
 	}
 	if m.containerd != nil {
 		if err := m.containerd.Close(); err != nil {
-			slog.Default().With("component", "pod-scanner").Warn("failed to close ContainerD client", "error", err)
+			log.Warn("failed to close ContainerD client", "error", err)
 		}
 	}
 	return nil

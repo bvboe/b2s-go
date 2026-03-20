@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
+
 
 // extractNodeInfo extracts node information from a Kubernetes node object
 func extractNodeInfo(node *corev1.Node) nodes.Node {
@@ -81,7 +81,7 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 	nodeInformer := factory.Core().V1().Nodes().Informer()
 
 	// Add event handlers
-	log := logging.For(logging.ComponentK8s)
+	log := log
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*corev1.Node)
@@ -150,14 +150,14 @@ func handleNodeAddOrUpdate(node *corev1.Node, manager *nodes.Manager) {
 	} else {
 		// If node is not ready, we might want to track it differently
 		// For now, just log it
-		logging.For(logging.ComponentK8s).Debug("skipping non-ready node", "node", node.Name)
+		log.Debug("skipping non-ready node", "node", node.Name)
 	}
 }
 
 // handleNodeDelete processes node deletions
 func handleNodeDelete(node *corev1.Node, manager *nodes.Manager) {
 	manager.RemoveNode(node.Name)
-	logging.For(logging.ComponentK8s).Debug("removed node", "node", node.Name)
+	log.Debug("removed node", "node", node.Name)
 }
 
 // SyncInitialNodes performs an initial sync of all existing nodes.
@@ -165,7 +165,7 @@ func handleNodeDelete(node *corev1.Node, manager *nodes.Manager) {
 // since the informer automatically performs an initial list and sync (via cache.WaitForCacheSync).
 // This function is kept for explicit synchronization use cases or testing.
 func SyncInitialNodes(ctx context.Context, clientset kubernetes.Interface, manager *nodes.Manager) error {
-	log := logging.For(logging.ComponentK8s)
+	log := log
 	log.Info("performing initial node sync")
 
 	nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})

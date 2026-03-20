@@ -6,9 +6,9 @@ import (
 	"strconv"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/scheduler"
 )
+
 
 // JobExecutionStore defines the interface for job execution database operations
 type JobExecutionStore interface {
@@ -49,7 +49,7 @@ func JobsListHandler(sched *scheduler.Scheduler) http.HandlerFunc {
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"jobs": jobInfos,
 		}); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding jobs response", "error", err)
+			log.Error("error encoding jobs response", "error", err)
 		}
 	}
 }
@@ -84,10 +84,10 @@ func JobsTriggerHandler(sched *scheduler.Scheduler) http.HandlerFunc {
 			return
 		}
 
-		logging.For(logging.ComponentHTTP).Info("triggering job", "job_name", jobName)
+		log.Info("triggering job", "job_name", jobName)
 
 		if err := sched.RunJobNow(jobName); err != nil {
-			logging.For(logging.ComponentHTTP).Error("failed to trigger job", "job_name", jobName, "error", err)
+			log.Error("failed to trigger job", "job_name", jobName, "error", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -98,7 +98,7 @@ func JobsTriggerHandler(sched *scheduler.Scheduler) http.HandlerFunc {
 			"job":     jobName,
 			"message": "Job has been queued for immediate execution",
 		}); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding trigger response", "error", err)
+			log.Error("error encoding trigger response", "error", err)
 		}
 	}
 }
@@ -130,7 +130,7 @@ func JobExecutionsHandler(db JobExecutionStore) http.HandlerFunc {
 
 		executions, err := db.GetJobExecutions(jobName, limit)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("failed to get job executions", "error", err)
+			log.Error("failed to get job executions", "error", err)
 			http.Error(w, "Failed to get job executions", http.StatusInternalServerError)
 			return
 		}
@@ -145,7 +145,7 @@ func JobExecutionsHandler(db JobExecutionStore) http.HandlerFunc {
 			"executions": executions,
 			"count":      len(executions),
 		}); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding executions response", "error", err)
+			log.Error("error encoding executions response", "error", err)
 		}
 	}
 }
@@ -154,7 +154,7 @@ func JobExecutionsHandler(db JobExecutionStore) http.HandlerFunc {
 func RegisterJobsHandlers(mux *http.ServeMux, sched *scheduler.Scheduler) {
 	mux.HandleFunc("/api/debug/jobs", JobsListHandler(sched))
 	mux.HandleFunc("/api/debug/jobs/", JobsTriggerHandler(sched)) // Matches /api/debug/jobs/{name}/trigger
-	logging.For(logging.ComponentHTTP).Info("jobs debug handlers registered", "path", "/api/debug/jobs")
+	log.Info("jobs debug handlers registered", "path", "/api/debug/jobs")
 }
 
 // RegisterJobsHandlersWithDB registers all jobs debug endpoints including execution history
@@ -162,5 +162,5 @@ func RegisterJobsHandlersWithDB(mux *http.ServeMux, sched *scheduler.Scheduler, 
 	mux.HandleFunc("/api/debug/jobs", JobsListHandler(sched))
 	mux.HandleFunc("/api/debug/jobs/history", JobExecutionsHandler(db))
 	mux.HandleFunc("/api/debug/jobs/", JobsTriggerHandler(sched)) // Matches /api/debug/jobs/{name}/trigger
-	logging.For(logging.ComponentHTTP).Info("jobs debug handlers registered", "path", "/api/debug/jobs", "with_history", true)
+	log.Info("jobs debug handlers registered", "path", "/api/debug/jobs", "with_history", true)
 }

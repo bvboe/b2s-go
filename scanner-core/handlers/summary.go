@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
+
 
 // ScanStatusCountsHandler creates an HTTP handler for /api/summary/scan-status endpoint
 // Returns counts of container images by scan status, excluding statuses with zero count
@@ -29,7 +29,7 @@ func ScanStatusCountsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error executing scan status query", "error", err)
+			log.Error("error executing scan status query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -63,7 +63,7 @@ func ScanStatusCountsHandler(provider ImageQueryProvider) http.HandlerFunc {
 			"statusCounts": statusCounts,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding scan status response", "error", err)
+			log.Error("error encoding scan status response", "error", err)
 		}
 	}
 }
@@ -154,7 +154,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error executing namespace count query", "error", err)
+			log.Error("error executing namespace count query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -169,7 +169,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error executing namespace summary query", "error", err)
+			log.Error("error executing namespace summary query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -205,7 +205,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 				"Namespace", "Containers", "Avg Critical", "Avg High", "Avg Medium",
 				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
 			}); err != nil {
-				logging.For(logging.ComponentHTTP).Error("error writing CSV header", "error", err)
+				log.Error("error writing CSV header", "error", err)
 				http.Error(w, "Error generating CSV", http.StatusInternalServerError)
 				return
 			}
@@ -225,7 +225,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 					fmt.Sprintf("%.1f", item["avg_exploits"]),
 					fmt.Sprintf("%.1f", item["avg_packages"]),
 				}); err != nil {
-					logging.For(logging.ComponentHTTP).Error("error writing CSV row", "error", err)
+					log.Error("error writing CSV row", "error", err)
 					http.Error(w, "Error generating CSV", http.StatusInternalServerError)
 					return
 				}
@@ -244,7 +244,7 @@ func NamespaceSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			"totalPages": totalPages,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding namespace summary response", "error", err)
+			log.Error("error encoding namespace summary response", "error", err)
 		}
 	}
 }
@@ -393,7 +393,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error executing distribution count query", "error", err)
+			log.Error("error executing distribution count query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -408,7 +408,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			logging.For(logging.ComponentHTTP).Error("error executing distribution summary query", "error", err)
+			log.Error("error executing distribution summary query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -444,7 +444,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 				"OS Distribution", "Containers", "Avg Critical", "Avg High", "Avg Medium",
 				"Avg Low", "Avg Negligible", "Avg Unknown", "Avg Risk Score", "Avg Exploits", "Avg Packages",
 			}); err != nil {
-				logging.For(logging.ComponentHTTP).Error("error writing CSV header", "error", err)
+				log.Error("error writing CSV header", "error", err)
 				http.Error(w, "Error generating CSV", http.StatusInternalServerError)
 				return
 			}
@@ -464,7 +464,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 					fmt.Sprintf("%.1f", item["avg_exploits"]),
 					fmt.Sprintf("%.1f", item["avg_packages"]),
 				}); err != nil {
-					logging.For(logging.ComponentHTTP).Error("error writing CSV row", "error", err)
+					log.Error("error writing CSV row", "error", err)
 					http.Error(w, "Error generating CSV", http.StatusInternalServerError)
 					return
 				}
@@ -483,7 +483,7 @@ func DistributionSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 			"totalPages":    totalPages,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logging.For(logging.ComponentHTTP).Error("error encoding distribution summary response", "error", err)
+			log.Error("error encoding distribution summary response", "error", err)
 		}
 	}
 }

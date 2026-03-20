@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // QueryResult represents the result of a SQL query with column order preserved.
@@ -26,7 +24,7 @@ type QueryResult struct {
 // is safe before calling this method. Use debug.ValidateQuery() to validate queries.
 func (db *DB) ExecuteQuery(query string) (*QueryResult, error) {
 	// Log the SQL query for tracking
-	logging.For(logging.ComponentDatabase).Debug("executing query", "query", query)
+	log.Debug("executing query", "query", query)
 	start := time.Now()
 
 	// Determine if this is a read query (SELECT) or a write query (INSERT/UPDATE/DELETE/etc.)
@@ -50,7 +48,7 @@ func (db *DB) executeSelectQuery(query string, start time.Time) (*QueryResult, e
 	defer func() {
 		if err := rows.Close(); err != nil {
 			// Log but don't fail on close error
-			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
+			log.Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -99,7 +97,7 @@ func (db *DB) executeSelectQuery(query string, start time.Time) (*QueryResult, e
 
 	// Log completion with row count and duration
 	duration := time.Since(start)
-	logging.For(logging.ComponentDatabase).Debug("query completed", "rows_returned", len(results), "duration", duration)
+	log.Debug("query completed", "rows_returned", len(results), "duration", duration)
 
 	return &QueryResult{
 		Columns: columns,
@@ -121,7 +119,7 @@ func (db *DB) executeWriteQuery(query string, start time.Time) (*QueryResult, er
 
 	// Log completion with rows affected and duration
 	duration := time.Since(start)
-	logging.For(logging.ComponentDatabase).Debug("query completed", "rows_affected", rowsAffected, "duration", duration)
+	log.Debug("query completed", "rows_affected", rowsAffected, "duration", duration)
 
 	return &QueryResult{
 		Columns:      []string{"rows_affected"},

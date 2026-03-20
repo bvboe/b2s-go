@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+var log = logging.For(logging.ComponentPodScannerClient)
+
 // Client handles communication with pod-scanner instances
 type Client struct {
 	httpClient *http.Client
@@ -38,7 +40,7 @@ func (c *Client) GetSBOMFromNode(ctx context.Context, clientset kubernetes.Inter
 	pod, err := c.findPodScannerPod(ctx, clientset, nodeName)
 	if err != nil {
 		// Pod-scanner not running, check if we should wait
-		logging.For(logging.ComponentPodScannerClient).Debug("pod-scanner not immediately available on node", "node", nodeName, "error", err)
+		log.Debug("pod-scanner not immediately available on node", "node", nodeName, "error", err)
 
 		// Check if pod-scanner is scheduled (but not ready yet)
 		scheduled, checkErr := c.IsPodScannerScheduledOnNode(ctx, clientset, nodeName)
@@ -48,7 +50,7 @@ func (c *Client) GetSBOMFromNode(ctx context.Context, clientset kubernetes.Inter
 
 		if scheduled {
 			// Pod-scanner is scheduled, wait for it to become ready
-			logging.For(logging.ComponentPodScannerClient).Info("pod-scanner scheduled but not ready, waiting", "node", nodeName)
+			log.Info("pod-scanner scheduled but not ready, waiting", "node", nodeName)
 			waitErr := c.WaitForPodScannerReady(ctx, clientset, nodeName, 2*time.Minute)
 			if waitErr != nil {
 				return nil, fmt.Errorf("pod-scanner did not become ready: %w", waitErr)
@@ -61,14 +63,14 @@ func (c *Client) GetSBOMFromNode(ctx context.Context, clientset kubernetes.Inter
 			}
 		} else {
 			// Not scheduled - DaemonSet won't run on this node (due to taints, node selectors, etc.)
-			logging.For(logging.ComponentPodScannerClient).Info("no pod-scanner scheduled on node (DaemonSet not configured)", "node", nodeName)
+			log.Info("no pod-scanner scheduled on node (DaemonSet not configured)", "node", nodeName)
 			return nil, fmt.Errorf("no pod-scanner scheduled on node %s (DaemonSet not configured to run on this node)", nodeName)
 		}
 	}
 
 	// Build URL to pod-scanner
 	url := fmt.Sprintf("http://%s:8080/sbom/%s", pod.Status.PodIP, digest)
-	logging.For(logging.ComponentPodScannerClient).Info("requesting SBOM from pod-scanner", "url", url, "node", nodeName)
+	log.Info("requesting SBOM from pod-scanner", "url", url, "node", nodeName)
 
 	// Create HTTP request with context
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -83,7 +85,7 @@ func (c *Client) GetSBOMFromNode(ctx context.Context, clientset kubernetes.Inter
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			logging.For(logging.ComponentPodScannerClient).Warn("failed to close response body", "error", closeErr)
+			log.Warn("failed to close response body", "error", closeErr)
 		}
 	}()
 
@@ -99,7 +101,7 @@ func (c *Client) GetSBOMFromNode(ctx context.Context, clientset kubernetes.Inter
 		return nil, fmt.Errorf("failed to read SBOM response: %w", err)
 	}
 
-	logging.For(logging.ComponentPodScannerClient).Info("successfully received SBOM from pod-scanner", "node", nodeName, "size", len(sbomData))
+	log.Info("successfully received SBOM from pod-scanner", "node", nodeName, "size", len(sbomData))
 	return sbomData, nil
 }
 
@@ -163,7 +165,7 @@ func (c *Client) IsPodScannerScheduledOnNode(ctx context.Context, clientset kube
 // WaitForPodScannerReady waits for a pod-scanner to become ready on a node
 // Returns error if timeout is reached
 func (c *Client) WaitForPodScannerReady(ctx context.Context, clientset kubernetes.Interface, nodeName string, timeout time.Duration) error {
-	logging.For(logging.ComponentPodScannerClient).Debug("waiting for pod-scanner to become ready", "node", nodeName, "timeout", timeout)
+	log.Debug("waiting for pod-scanner to become ready", "node", nodeName, "timeout", timeout)
 
 	// Wait for pod-scanner to become ready
 	deadline := time.Now().Add(timeout)
@@ -178,7 +180,7 @@ func (c *Client) WaitForPodScannerReady(ctx context.Context, clientset kubernete
 			// Try to find running pod-scanner
 			_, err := c.findPodScannerPod(ctx, clientset, nodeName)
 			if err == nil {
-				logging.For(logging.ComponentPodScannerClient).Info("pod-scanner is now ready", "node", nodeName)
+				log.Info("pod-scanner is now ready", "node", nodeName)
 				return nil
 			}
 
@@ -198,7 +200,7 @@ func (c *Client) GetHostSBOMFromNode(ctx context.Context, clientset kubernetes.I
 	pod, err := c.findPodScannerPod(ctx, clientset, nodeName)
 	if err != nil {
 		// Pod-scanner not running, check if we should wait
-		logging.For(logging.ComponentPodScannerClient).Debug("pod-scanner not immediately available on node", "node", nodeName, "error", err)
+		log.Debug("pod-scanner not immediately available on node", "node", nodeName, "error", err)
 
 		// Check if pod-scanner is scheduled (but not ready yet)
 		scheduled, checkErr := c.IsPodScannerScheduledOnNode(ctx, clientset, nodeName)
@@ -208,7 +210,7 @@ func (c *Client) GetHostSBOMFromNode(ctx context.Context, clientset kubernetes.I
 
 		if scheduled {
 			// Pod-scanner is scheduled, wait for it to become ready
-			logging.For(logging.ComponentPodScannerClient).Info("pod-scanner scheduled but not ready, waiting", "node", nodeName)
+			log.Info("pod-scanner scheduled but not ready, waiting", "node", nodeName)
 			waitErr := c.WaitForPodScannerReady(ctx, clientset, nodeName, 2*time.Minute)
 			if waitErr != nil {
 				return nil, fmt.Errorf("pod-scanner did not become ready: %w", waitErr)
@@ -221,14 +223,14 @@ func (c *Client) GetHostSBOMFromNode(ctx context.Context, clientset kubernetes.I
 			}
 		} else {
 			// Not scheduled - DaemonSet won't run on this node (due to taints, node selectors, etc.)
-			logging.For(logging.ComponentPodScannerClient).Info("no pod-scanner scheduled on node, skipping host scan", "node", nodeName)
+			log.Info("no pod-scanner scheduled on node, skipping host scan", "node", nodeName)
 			return nil, fmt.Errorf("no pod-scanner scheduled on node %s (DaemonSet not configured to run on this node)", nodeName)
 		}
 	}
 
 	// Build URL to pod-scanner's host SBOM endpoint
 	url := fmt.Sprintf("http://%s:8080/host-sbom", pod.Status.PodIP)
-	logging.For(logging.ComponentPodScannerClient).Info("requesting host SBOM from pod-scanner", "url", url, "node", nodeName)
+	log.Info("requesting host SBOM from pod-scanner", "url", url, "node", nodeName)
 
 	// Create HTTP request with context
 	// Use a longer timeout for host scans (they take longer than container image scans)
@@ -250,7 +252,7 @@ func (c *Client) GetHostSBOMFromNode(ctx context.Context, clientset kubernetes.I
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			logging.For(logging.ComponentPodScannerClient).Warn("failed to close response body", "error", closeErr)
+			log.Warn("failed to close response body", "error", closeErr)
 		}
 	}()
 
@@ -266,6 +268,6 @@ func (c *Client) GetHostSBOMFromNode(ctx context.Context, clientset kubernetes.I
 		return nil, fmt.Errorf("failed to read host SBOM response: %w", err)
 	}
 
-	logging.For(logging.ComponentPodScannerClient).Info("successfully received host SBOM from pod-scanner", "node", nodeName, "size", len(sbomData))
+	log.Info("successfully received host SBOM from pod-scanner", "node", nodeName, "size", len(sbomData))
 	return sbomData, nil
 }
