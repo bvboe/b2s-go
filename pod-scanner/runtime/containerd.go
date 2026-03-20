@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -124,7 +124,7 @@ func NewContainerDClient() *ContainerDClient {
 
 	// Check environment variable override first
 	if envSocket := os.Getenv("CONTAINERD_SOCKET"); envSocket != "" {
-		log.Printf("CONTAINERD_SOCKET set to: %s", envSocket)
+		slog.Default().With("component", "pod-scanner").Info("CONTAINERD_SOCKET environment variable set", "socket", envSocket)
 		socketPaths = append(socketPaths, envSocket)
 	}
 
@@ -133,19 +133,19 @@ func NewContainerDClient() *ContainerDClient {
 
 	// Try each socket until we find one that works
 	for _, socketPath := range socketPaths {
-		log.Printf("Trying containerd socket: %s", socketPath)
+		slog.Default().With("component", "pod-scanner").Debug("trying containerd socket", "socket", socketPath)
 		client, err := tryContainerdSocket(socketPath)
 		if err != nil {
-			log.Printf("  Socket %s not usable: %v", socketPath, err)
+			slog.Default().With("component", "pod-scanner").Debug("socket not usable", "socket", socketPath, "error", err)
 			continue
 		}
 
-		log.Printf("Successfully connected to containerd via: %s", socketPath)
+		slog.Default().With("component", "pod-scanner").Info("successfully connected to containerd", "socket", socketPath)
 		return &ContainerDClient{client: client, socketPath: socketPath}
 	}
 
 	// No working socket found
-	log.Printf("Failed to find any working containerd socket (tried: %v)", socketPaths)
+	slog.Default().With("component", "pod-scanner").Warn("failed to find any working containerd socket", "tried", socketPaths)
 	return &ContainerDClient{client: nil, socketPath: ""}
 }
 
@@ -187,19 +187,18 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 
 	var imageRef string
 	var targetDigest string
-	log.Printf("Looking for digest: %s", digest)
-	log.Printf("Found %d images in ContainerD", len(images))
+	slog.Default().With("component", "pod-scanner").Debug("looking for image digest", "digest", digest, "imagesFound", len(images))
 
 	// First pass: find the image by digest and get its Target.Digest
 	for _, img := range images {
 		imgDigest := img.Target.Digest.String()
-		log.Printf("  Image: %s, Digest: %s", img.Name, imgDigest)
+		slog.Default().With("component", "pod-scanner").Debug("checking image", "name", img.Name, "digest", imgDigest)
 
 		// Check if digest matches in Target.Digest (manifest digest)
 		if imgDigest == digest || "sha256:"+imgDigest == digest || imgDigest == "sha256:"+digest {
 			imageRef = img.Name
 			targetDigest = imgDigest
-			log.Printf("Found matching image by manifest digest: %s", imageRef)
+			slog.Default().With("component", "pod-scanner").Debug("found matching image by manifest digest", "image", imageRef)
 			break
 		}
 
@@ -207,13 +206,13 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 		if img.Name == digest || "sha256:"+img.Name == digest || img.Name == "sha256:"+digest {
 			imageRef = img.Name
 			targetDigest = imgDigest
-			log.Printf("Found matching image by name digest: %s", imageRef)
+			slog.Default().With("component", "pod-scanner").Debug("found matching image by name digest", "image", imageRef)
 			break
 		}
 	}
 
 	if imageRef == "" {
-		log.Printf("Image digest %s not found. Searched %d images.", digest, len(images))
+		slog.Default().With("component", "pod-scanner").Warn("image digest not found", "digest", digest, "searched", len(images))
 		return nil, fmt.Errorf("image with digest %s not found in ContainerD", digest)
 	}
 
@@ -221,7 +220,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 	// with the same Target.Digest. Prefer platform-specific names (e.g., with "-arm64") that actually
 	// have content available, as containerd discards layers for other platforms
 	if len(imageRef) > 7 && imageRef[:7] == "sha256:" {
-		log.Printf("Found digest-only reference, looking for named reference with same target digest...")
+		slog.Default().With("component", "pod-scanner").Debug("found digest-only reference, looking for named reference")
 		var fallbackRef string
 		for _, img := range images {
 			// Look for ANY named image (not starting with sha256:) with the same target digest
@@ -235,7 +234,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 				if len(img.Name) > 6 && ((len(img.Name) >= 10 && img.Name[len(img.Name)-10:] == "-arm64:") ||
 					(len(img.Name) >= 10 && img.Name[len(img.Name)-10:] == "-amd64:") ||
 					containsPlatformSuffix(img.Name)) {
-					log.Printf("Found platform-specific named reference: %s", img.Name)
+					slog.Default().With("component", "pod-scanner").Debug("found platform-specific named reference", "image", img.Name)
 					imageRef = img.Name
 					break
 				}
@@ -243,12 +242,12 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 		}
 		// If no platform-specific image found, use fallback
 		if imageRef[:7] == "sha256:" && len(fallbackRef) > 0 {
-			log.Printf("Using fallback named reference: %s", fallbackRef)
+			slog.Default().With("component", "pod-scanner").Debug("using fallback named reference", "image", fallbackRef)
 			imageRef = fallbackRef
 		}
 	}
 
-	log.Printf("Generating SBOM for ContainerD image: %s (digest=%s)", imageRef, digest)
+	slog.Default().With("component", "pod-scanner").Info("generating SBOM for ContainerD image", "image", imageRef, "digest", digest)
 
 	// Use snapshot-based scanning to avoid export issues with discard_unpacked_layers=true
 	// This scans the actual unpacked filesystem from containerd's snapshots
@@ -258,7 +257,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 	}
 
 	// Unpack the image to ensure snapshots exist
-	log.Printf("Unpacking image (if needed): %s", imageRef)
+	slog.Default().With("component", "pod-scanner").Debug("checking if image needs unpacking", "image", imageRef)
 	snapshotterName := "overlayfs" // Default snapshotter for containerd
 	unpacked, err := img.IsUnpacked(ctx, snapshotterName)
 	if err != nil {
@@ -268,7 +267,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 		if err := img.Unpack(ctx, snapshotterName); err != nil {
 			return nil, fmt.Errorf("failed to unpack image: %w", err)
 		}
-		log.Printf("Image unpacked successfully")
+		slog.Default().With("component", "pod-scanner").Debug("image unpacked successfully")
 	}
 
 	// Get the snapshot mounts for the image
@@ -279,7 +278,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 
 	// Compute chain ID from diff IDs
 	chainID := computeChainID(diffIDs).String()
-	log.Printf("Getting snapshot mounts for chain ID: %s", chainID)
+	slog.Default().With("component", "pod-scanner").Debug("getting snapshot mounts", "chainID", chainID)
 
 	snapshotter := c.client.SnapshotService(snapshotterName)
 
@@ -294,7 +293,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 	// Ensure cleanup of view snapshot
 	defer func() {
 		if removeErr := snapshotter.Remove(ctx, viewKey); removeErr != nil {
-			log.Printf("Warning: failed to remove view snapshot %s: %v", viewKey, removeErr)
+			slog.Default().With("component", "pod-scanner").Warn("failed to remove view snapshot", "viewKey", viewKey, "error", removeErr)
 		}
 	}()
 
@@ -307,21 +306,21 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 	// Ensure cleanup of mount directory
 	defer func() {
 		if unmountErr := mount.UnmountAll(mountDir, 0); unmountErr != nil {
-			log.Printf("Warning: failed to unmount %s: %v", mountDir, unmountErr)
+			slog.Default().With("component", "pod-scanner").Warn("failed to unmount", "mountDir", mountDir, "error", unmountErr)
 		}
 		if removeErr := os.RemoveAll(mountDir); removeErr != nil {
-			log.Printf("Warning: failed to remove mount directory %s: %v", mountDir, removeErr)
+			slog.Default().With("component", "pod-scanner").Warn("failed to remove mount directory", "mountDir", mountDir, "error", removeErr)
 		}
 	}()
 
 	// Perform the mount
-	log.Printf("Mounting snapshot to: %s", mountDir)
+	slog.Default().With("component", "pod-scanner").Debug("mounting snapshot", "mountDir", mountDir)
 	if err := mount.All(mounts, mountDir); err != nil {
 		return nil, fmt.Errorf("failed to mount snapshot: %w", err)
 	}
 
 	// Scan the mounted filesystem with syft
-	log.Printf("Scanning mounted filesystem: %s", mountDir)
+	slog.Default().With("component", "pod-scanner").Debug("scanning mounted filesystem", "mountDir", mountDir)
 	src, err := syft.GetSource(ctx, mountDir, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source for mounted directory %s: %w", mountDir, err)
@@ -330,7 +329,7 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 	// Ensure cleanup of source
 	defer func() {
 		if cleanupErr := src.Close(); cleanupErr != nil {
-			log.Printf("Warning: failed to cleanup source: %v", cleanupErr)
+			slog.Default().With("component", "pod-scanner").Warn("failed to cleanup source", "error", cleanupErr)
 		}
 	}()
 
@@ -353,15 +352,17 @@ func (c *ContainerDClient) GenerateSBOM(ctx context.Context, digest string) ([]b
 	if arch != "" {
 		sbomBytes, err = injectPlatformIntoSBOM(sbomBytes, arch, os)
 		if err != nil {
-			log.Printf("Warning: failed to inject platform into SBOM: %v", err)
+			slog.Default().With("component", "pod-scanner").Warn("failed to inject platform into SBOM", "error", err)
 			// Continue with original SBOM
 		} else {
-			log.Printf("Injected platform into SBOM: arch=%s, os=%s", arch, os)
+			slog.Default().With("component", "pod-scanner").Debug("injected platform into SBOM", "arch", arch, "os", os)
 		}
 	}
 
-	log.Printf("Successfully generated SBOM for %s (%d bytes, %d packages)",
-		imageRef, len(sbomBytes), s.Artifacts.Packages.PackageCount())
+	slog.Default().With("component", "pod-scanner").Info("successfully generated SBOM",
+		"image", imageRef,
+		"size", len(sbomBytes),
+		"packages", s.Artifacts.Packages.PackageCount())
 
 	return sbomBytes, nil
 }
@@ -371,7 +372,7 @@ func (c *ContainerDClient) getImagePlatform(ctx context.Context, img containerd.
 	// Get the image config which contains platform info
 	configDesc, err := img.Config(ctx)
 	if err != nil {
-		log.Printf("Warning: failed to get image config: %v", err)
+		slog.Default().With("component", "pod-scanner").Warn("failed to get image config", "error", err)
 		return "", ""
 	}
 
@@ -379,21 +380,21 @@ func (c *ContainerDClient) getImagePlatform(ctx context.Context, img containerd.
 	contentStore := c.client.ContentStore()
 	configBlob, err := contentStore.ReaderAt(ctx, configDesc)
 	if err != nil {
-		log.Printf("Warning: failed to read config blob: %v", err)
+		slog.Default().With("component", "pod-scanner").Warn("failed to read config blob", "error", err)
 		return "", ""
 	}
 	defer func() { _ = configBlob.Close() }()
 
 	configData := make([]byte, configDesc.Size)
 	if _, err := configBlob.ReadAt(configData, 0); err != nil {
-		log.Printf("Warning: failed to read config data: %v", err)
+		slog.Default().With("component", "pod-scanner").Warn("failed to read config data", "error", err)
 		return "", ""
 	}
 
 	// Parse OCI image config
 	var imgConfig ocispec.Image
 	if err := json.Unmarshal(configData, &imgConfig); err != nil {
-		log.Printf("Warning: failed to parse image config: %v", err)
+		slog.Default().With("component", "pod-scanner").Warn("failed to parse image config", "error", err)
 		return "", ""
 	}
 

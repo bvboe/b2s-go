@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -40,7 +40,7 @@ func SBOMHandler(runtimeMgr *runtime.Manager) http.HandlerFunc {
 			return
 		}
 
-		log.Printf("SBOM request received for digest: %s", digest)
+		slog.Default().With("component", "pod-scanner").Info("SBOM request received", "digest", digest)
 
 		// Set timeout for SBOM generation (5 minutes)
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -49,7 +49,7 @@ func SBOMHandler(runtimeMgr *runtime.Manager) http.HandlerFunc {
 		// Generate SBOM using runtime manager
 		sbomData, err := runtimeMgr.GenerateSBOM(ctx, digest)
 		if err != nil {
-			log.Printf("Error generating SBOM for %s: %v", digest, err)
+			slog.Default().With("component", "pod-scanner").Error("error generating SBOM", "digest", digest, "error", err)
 
 			// Check if it's a timeout
 			if ctx.Err() == context.DeadlineExceeded {
@@ -77,9 +77,9 @@ func SBOMHandler(runtimeMgr *runtime.Manager) http.HandlerFunc {
 
 		// Write SBOM data
 		if _, err := w.Write(sbomData); err != nil {
-			log.Printf("Error writing SBOM response: %v", err)
+			slog.Default().With("component", "pod-scanner").Error("error writing SBOM response", "error", err)
 		} else {
-			log.Printf("Successfully served SBOM for %s (%d bytes)", digest, len(sbomData))
+			slog.Default().With("component", "pod-scanner").Info("successfully served SBOM", "digest", digest, "size", len(sbomData))
 		}
 	}
 }

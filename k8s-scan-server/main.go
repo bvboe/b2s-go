@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +21,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	corehandlers "github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/metrics"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
@@ -78,7 +78,7 @@ func NewK8sScanServerInfo(port string, webUIEnabled bool, customConsoleURL strin
 	// Cache deployment IP (node IP from downward API)
 	info.deploymentIP = os.Getenv("NODE_IP")
 	if info.deploymentIP == "" {
-		log.Printf("Warning: NODE_IP environment variable not set")
+		logging.For(logging.ComponentK8s).Warn("NODE_IP environment variable not set")
 	}
 
 	// Cache console URL at startup
@@ -89,7 +89,7 @@ func NewK8sScanServerInfo(port string, webUIEnabled bool, customConsoleURL strin
 	}
 
 	if info.cachedConsoleURL != "" {
-		log.Printf("Console URL: %s", info.cachedConsoleURL)
+		logging.For(logging.ComponentK8s).Info("console URL set", "url", info.cachedConsoleURL)
 	}
 
 	return info
@@ -112,7 +112,7 @@ func (k *K8sScanServerInfo) StartPeriodicRefresh(ctx context.Context, interval t
 				newURL := k.detectConsoleURL()
 				k.consoleMu.Lock()
 				if newURL != k.cachedConsoleURL {
-					log.Printf("Console URL updated: %s", newURL)
+					logging.For(logging.ComponentK8s).Info("console URL updated", "url", newURL)
 					k.cachedConsoleURL = newURL
 				}
 				k.consoleMu.Unlock()
@@ -222,7 +222,7 @@ func (k *K8sScanServerInfo) detectConsoleURL() string {
 
 		svc, err := k.k8sClient.CoreV1().Services(namespace).Get(ctx, k.serviceName, metav1.GetOptions{})
 		if err != nil {
-			log.Printf("Warning: failed to get service %s: %v", k.serviceName, err)
+			logging.For(logging.ComponentK8s).Warn("failed to get service", "service", k.serviceName, "error", err)
 		} else {
 			// Determine URL based on service type
 			switch svc.Spec.Type {
@@ -277,22 +277,29 @@ func (k *K8sScanServerInfo) detectConsoleURL() string {
 }
 
 func main() {
+	// Initialize structured logging from environment variables
+	// LOG_LEVEL: debug, info, warn, error (default: info)
+	// LOG_FORMAT: text, json (default: text)
+	logging.InitFromEnv()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	log.Printf("k8s-scan-server v%s starting", version)
+	logging.For(logging.ComponentK8s).Info("k8s-scan-server starting", "version", version)
 
 	// Create Kubernetes client
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		log.Fatalf("Error creating Kubernetes config: %v", err)
+		logging.For(logging.ComponentK8s).Error("error creating Kubernetes config", "error", err)
+		os.Exit(1)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("Error creating Kubernetes client: %v", err)
+		logging.For(logging.ComponentK8s).Error("error creating Kubernetes client", "error", err)
+		os.Exit(1)
 	}
 
 	// Create container manager
@@ -308,13 +315,14 @@ func main() {
 	debugEnabled := os.Getenv("DEBUG_ENABLED")
 	debugConfig := debug.NewDebugConfig(debugEnabled == "true")
 	if debugConfig.IsEnabled() {
-		log.Println("Debug mode ENABLED - /debug endpoints available")
+		logging.For(logging.ComponentK8s).Info("debug mode enabled", "endpoints", "/debug")
 	}
 
 	// Initialize database (will auto-delete and recreate if corrupted)
 	db, err := database.New(dbPath)
 	if err != nil {
-		log.Fatalf("Error initializing database: %v", err)
+		logging.For(logging.ComponentK8s).Error("error initializing database", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = database.Close(db) }()
 
@@ -322,14 +330,16 @@ func main() {
 	dbDir := filepath.Dir(dbPath)
 	deploymentUUID, err := deployment.NewUUID(dbDir)
 	if err != nil {
-		log.Fatalf("Failed to initialize deployment UUID: %v", err)
+		logging.For(logging.ComponentK8s).Error("failed to initialize deployment UUID", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("Deployment UUID: %s", deploymentUUID)
+	logging.For(logging.ComponentK8s).Info("deployment UUID initialized", "uuid", deploymentUUID)
 
 	// Load configuration with environment variable overrides from Helm values
 	cfg, err := scannerconfig.LoadConfig("")
 	if err != nil {
-		log.Fatalf("Error loading configuration: %v", err)
+		logging.For(logging.ComponentK8s).Error("error loading configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Connect database to manager
@@ -341,7 +351,8 @@ func main() {
 
 	// Perform initial sync
 	if err := k8s.SyncInitialPods(ctx, clientset, manager); err != nil {
-		log.Fatalf("Error performing initial pod sync: %v", err)
+		logging.For(logging.ComponentK8s).Error("error performing initial pod sync", "error", err)
+		os.Exit(1)
 	}
 
 	// Start pod watcher in background
@@ -353,13 +364,13 @@ func main() {
 	// Initialize node manager for host scanning (if enabled)
 	var nodeManager *nodes.Manager
 	if cfg.HostScanningEnabled {
-		log.Println("Host scanning ENABLED - initializing node manager...")
+		logging.For(logging.ComponentK8s).Info("host scanning enabled", "initializing", "node manager")
 		nodeManager = nodes.NewManager()
 		nodeManager.SetDatabase(db)
 
 		// Perform initial node sync
 		if err := k8s.SyncInitialNodes(ctx, clientset, nodeManager); err != nil {
-			log.Printf("Warning: failed to sync initial nodes: %v", err)
+			logging.For(logging.ComponentK8s).Warn("failed to sync initial nodes", "error", err)
 		}
 
 		// Start node watcher in background
@@ -383,7 +394,7 @@ func main() {
 	grypeCfg := grype.Config{
 		DBRootDir: grypeDBPath,
 	}
-	log.Printf("Grype database path: %s/grype/", grypeDBPath)
+	logging.For(logging.ComponentK8s).Info("grype database configured", "path", grypeDBPath+"/grype/")
 
 	// Initialize database readiness state
 	dbReadinessState := corehandlers.NewDatabaseReadinessState(grypeCfg)
@@ -391,14 +402,14 @@ func main() {
 	// Start async database initialization
 	// This prevents the 2+ minute initial download from blocking server startup
 	go func() {
-		log.Printf("Starting background vulnerability database initialization...")
+		logging.For(logging.ComponentK8s).Info("starting background vulnerability database initialization")
 		dbStatus, err := grype.InitializeDatabase(grypeCfg)
 		if err != nil {
-			log.Printf("Warning: Failed to initialize vulnerability database: %v", err)
-			log.Printf("Scans will wait for manual database setup")
+			logging.For(logging.ComponentK8s).Warn("failed to initialize vulnerability database", "error", err)
+			logging.For(logging.ComponentK8s).Warn("scans will wait for manual database setup")
 			dbReadinessState.SetReady(dbStatus)
 		} else {
-			log.Printf("Vulnerability database ready: schema=%s, built=%v", dbStatus.SchemaVersion, dbStatus.Built)
+			logging.For(logging.ComponentK8s).Info("vulnerability database ready", "schema", dbStatus.SchemaVersion, "built", dbStatus.Built)
 			dbReadinessState.SetReady(dbStatus)
 		}
 	}()
@@ -426,13 +437,13 @@ func main() {
 		}
 		scanQueue.SetHostSBOMRetriever(hostSBOMRetriever)
 		nodeManager.SetScanQueue(scanQueue)
-		log.Println("Host scanning configured and ready")
+		logging.For(logging.ComponentK8s).Info("host scanning configured and ready")
 	}
 
 	// Initialize scheduler for periodic jobs
 	var sched *scheduler.Scheduler
 	if cfg.JobsEnabled {
-		log.Println("Initializing scheduled jobs...")
+		logging.For(logging.ComponentK8s).Info("initializing scheduled jobs")
 		sched = scheduler.New()
 
 		// Add rescan database job - uses grype's native update mechanism
@@ -442,7 +453,7 @@ func main() {
 				TimestampStore: db,
 			})
 			if err != nil {
-				log.Printf("Warning: failed to create database updater: %v", err)
+				logging.For(logging.ComponentK8s).Warn("failed to create database updater", "error", err)
 			} else {
 				rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
 				// Connect readiness state so db-updater can mark pod ready after successful DB update
@@ -460,9 +471,10 @@ func main() {
 						Timeout: cfg.JobsRescanDatabaseTimeout,
 					},
 				); err != nil {
-					log.Fatalf("Failed to add rescan database job: %v", err)
+					logging.For(logging.ComponentK8s).Error("failed to add rescan database job", "error", err)
+					os.Exit(1)
 				}
-				log.Printf("Scheduled rescan-database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
+				logging.For(logging.ComponentK8s).Info("scheduled rescan-database job", "interval", cfg.JobsRescanDatabaseInterval, "timeout", cfg.JobsRescanDatabaseTimeout)
 			}
 		}
 
@@ -477,16 +489,18 @@ func main() {
 					Timeout: cfg.JobsCleanupTimeout,
 				},
 			); err != nil {
-				log.Fatalf("Failed to add cleanup job: %v", err)
+				logging.For(logging.ComponentK8s).Error("failed to add cleanup job", "error", err)
+				os.Exit(1)
 			}
-			log.Printf("Scheduled cleanup-orphaned-images job (interval: %v, timeout: %v)", cfg.JobsCleanupInterval, cfg.JobsCleanupTimeout)
+			logging.For(logging.ComponentK8s).Info("scheduled cleanup-orphaned-images job", "interval", cfg.JobsCleanupInterval, "timeout", cfg.JobsCleanupTimeout)
 		}
 
 		// Start scheduler
 		if err := sched.Start(ctx); err != nil {
-			log.Fatalf("Failed to start scheduler: %v", err)
+			logging.For(logging.ComponentK8s).Error("failed to start scheduler", "error", err)
+			os.Exit(1)
 		}
-		log.Println("Scheduler started")
+		logging.For(logging.ComponentK8s).Info("scheduler started")
 	}
 
 	// Setup HTTP server
@@ -534,7 +548,7 @@ func main() {
 	// Register node API handlers (if host scanning is enabled)
 	if cfg.HostScanningEnabled {
 		corehandlers.RegisterNodeHandlers(mux, db)
-		log.Println("Node API endpoints registered: /api/nodes, /api/nodes/{name}, /api/summary/by-node")
+		logging.For(logging.ComponentK8s).Info("node API endpoints registered", "endpoints", "/api/nodes, /api/nodes/{name}, /api/summary/by-node")
 	}
 
 	// Create collector config for metrics
@@ -561,7 +575,7 @@ func main() {
 		Store:           db,
 		StorageKey:      "metrics",
 	})
-	log.Printf("Metric staleness tracking enabled (window: %v)", cfg.MetricsStalenessWindow)
+	logging.For(logging.ComponentK8s).Info("metric staleness tracking enabled", "window", cfg.MetricsStalenessWindow)
 
 	// Register Prometheus metrics endpoint with node metrics support
 	metrics.RegisterMetricsHandlerWithNodes(mux, infoProvider, deploymentUUID.String(), db, collectorConfig, db, nodeCollectorConfig, metricTracker)
@@ -569,8 +583,10 @@ func main() {
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter
 	if cfg.OTELMetricsEnabled {
-		log.Printf("Initializing OpenTelemetry metrics exporter (endpoint: %s, protocol: %s, interval: %v)",
-			cfg.OTELMetricsEndpoint, cfg.OTELMetricsProtocol, cfg.OTELMetricsPushInterval)
+		logging.For(logging.ComponentK8s).Info("initializing OpenTelemetry metrics exporter",
+			"endpoint", cfg.OTELMetricsEndpoint,
+			"protocol", cfg.OTELMetricsProtocol,
+			"interval", cfg.OTELMetricsPushInterval)
 
 		otelConfig := metrics.OTELConfig{
 			Endpoint:        cfg.OTELMetricsEndpoint,
@@ -584,7 +600,7 @@ func main() {
 		var err error
 		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), db, collectorConfig, otelConfig)
 		if err != nil {
-			log.Printf("Warning: Failed to initialize OTEL exporter: %v (continuing without OTEL)", err)
+			logging.For(logging.ComponentK8s).Warn("failed to initialize OTEL exporter (continuing without OTEL)", "error", err)
 		} else {
 			// Set the same tracker for consistent staleness detection
 			otelExporter.SetTracker(metricTracker)
@@ -593,11 +609,11 @@ func main() {
 			if cfg.HostScanningEnabled {
 				nodeCollector := metrics.NewNodeCollector(deploymentUUID.String(), infoProvider.GetDeploymentName(), db, nodeCollectorConfig)
 				otelExporter.SetNodeCollector(nodeCollector)
-				log.Println("Node metrics added to OpenTelemetry exporter")
+				logging.For(logging.ComponentK8s).Info("node metrics added to OpenTelemetry exporter")
 			}
 
 			otelExporter.Start()
-			log.Println("OpenTelemetry metrics exporter started")
+			logging.For(logging.ComponentK8s).Info("OpenTelemetry metrics exporter started")
 		}
 	}
 
@@ -617,24 +633,25 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("k8s-scan-server listening on port %s", port)
+		logging.For(logging.ComponentK8s).Info("k8s-scan-server listening", "port", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logging.For(logging.ComponentK8s).Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	// Wait for shutdown signal
 	<-sigChan
-	log.Println("Shutdown signal received, shutting down gracefully...")
+	logging.For(logging.ComponentK8s).Info("shutdown signal received, shutting down gracefully")
 
 	// Cancel context to stop pod watcher
 	cancel()
 
 	// Shutdown OTEL exporter if running
 	if otelExporter != nil {
-		log.Println("Shutting down OpenTelemetry exporter...")
+		logging.For(logging.ComponentK8s).Info("shutting down OpenTelemetry exporter")
 		if err := otelExporter.Shutdown(); err != nil {
-			log.Printf("Error shutting down OTEL exporter: %v", err)
+			logging.For(logging.ComponentK8s).Error("error shutting down OTEL exporter", "error", err)
 		}
 	}
 
@@ -643,8 +660,8 @@ func main() {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+		logging.For(logging.ComponentK8s).Error("error during shutdown", "error", err)
 	}
 
-	log.Println("k8s-scan-server stopped")
+	logging.For(logging.ComponentK8s).Info("k8s-scan-server stopped")
 }

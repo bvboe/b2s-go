@@ -4,13 +4,13 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // ImageQueryProvider defines the interface for executing image queries
@@ -34,7 +34,7 @@ func FilterOptionsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		for key, query := range queries {
 			result, err := provider.ExecuteReadOnlyQuery(query)
 			if err != nil {
-				log.Printf("Error fetching %s: %v", key, err)
+				logging.For(logging.ComponentHTTP).Error("error fetching filter options", "key", key, "error", err)
 				continue
 			}
 
@@ -53,7 +53,7 @@ func FilterOptionsHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding filter options: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding filter options", "error", err)
 		}
 	}
 }
@@ -106,7 +106,7 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
 		if err != nil {
-			log.Printf("Error executing count query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing count query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -121,7 +121,7 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Printf("Error executing images query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing images query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -143,7 +143,7 @@ func ImagesHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding JSON: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding JSON", "error", err)
 		}
 	}
 }
@@ -323,7 +323,7 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
 		if err != nil {
-			log.Printf("Error executing count query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing count query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -338,7 +338,7 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Printf("Error executing pods query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing pods query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -360,7 +360,7 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding JSON: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding JSON", "error", err)
 		}
 	}
 }
@@ -492,7 +492,7 @@ func exportQueryResultAsCSV(w http.ResponseWriter, result *database.QueryResult,
 
 	// Write headers
 	if err := writer.Write(result.Columns); err != nil {
-		log.Printf("Error writing CSV headers: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error writing CSV headers", "error", err)
 		return
 	}
 
@@ -503,7 +503,7 @@ func exportQueryResultAsCSV(w http.ResponseWriter, result *database.QueryResult,
 			strRow[i] = fmt.Sprintf("%v", rowMap[col])
 		}
 		if err := writer.Write(strRow); err != nil {
-			log.Printf("Error writing CSV row: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing CSV row", "error", err)
 			return
 		}
 	}
@@ -515,18 +515,18 @@ func ImageDetailFullHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract digest from URL path
 		path := r.URL.Path
-		log.Printf("ImageDetailFullHandler: received path: %s", path)
+		logging.For(logging.ComponentHTTP).Debug("received image detail request", "path", path)
 
 		if len(path) <= 12 { // "/api/images/" is 12 characters
-			log.Printf("ImageDetailFullHandler: path too short: %d chars", len(path))
+			logging.For(logging.ComponentHTTP).Warn("path too short for image detail", "length", len(path))
 			http.Error(w, "Digest required", http.StatusBadRequest)
 			return
 		}
 		digest := path[12:] // Remove "/api/images/" prefix
-		log.Printf("ImageDetailFullHandler: extracted digest: %s", digest)
+		logging.For(logging.ComponentHTTP).Debug("extracted digest from path", "digest", digest)
 
 		if digest == "" {
-			log.Printf("ImageDetailFullHandler: empty digest")
+			logging.For(logging.ComponentHTTP).Warn("empty digest provided")
 			http.Error(w, "Digest required", http.StatusBadRequest)
 			return
 		}
@@ -546,21 +546,21 @@ FROM images images
 JOIN scan_status status ON images.status = status.status
 WHERE images.digest = '` + escapedDigest + `'`
 
-		log.Printf("ImageDetailFullHandler: executing image query for digest: %s", digest)
+		logging.For(logging.ComponentHTTP).Debug("executing image query", "digest", digest)
 		imageResult, err := provider.ExecuteReadOnlyQuery(imageQuery)
 		if err != nil {
-			log.Printf("Error querying image details for %s: %v", digest, err)
+			logging.For(logging.ComponentHTTP).Error("error querying image details", "digest", digest, "error", err)
 			http.Error(w, fmt.Sprintf("Error querying image: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		if len(imageResult.Rows) == 0 {
-			log.Printf("No image found with digest: %s", digest)
+			logging.For(logging.ComponentHTTP).Warn("no image found", "digest", digest)
 			http.Error(w, "Image not found", http.StatusNotFound)
 			return
 		}
 
-		log.Printf("ImageDetailFullHandler: found image")
+		logging.For(logging.ComponentHTTP).Debug("found image")
 		imageRow := imageResult.Rows[0]
 		imageID := imageRow["id"]
 
@@ -571,10 +571,10 @@ FROM containers
 WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
 ORDER BY reference`
 
-		log.Printf("ImageDetailFullHandler: fetching references for image_id: %v", imageID)
+		logging.For(logging.ComponentHTTP).Debug("fetching references", "image_id", imageID)
 		refResult, err := provider.ExecuteReadOnlyQuery(refQuery)
 		if err != nil {
-			log.Printf("Error querying references for image_id %v: %v", imageID, err)
+			logging.For(logging.ComponentHTTP).Error("error querying references", "image_id", imageID, "error", err)
 			http.Error(w, fmt.Sprintf("Error querying references: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -585,7 +585,7 @@ ORDER BY reference`
 				references = append(references, ref)
 			}
 		}
-		log.Printf("ImageDetailFullHandler: found %d references", len(references))
+		logging.For(logging.ComponentHTTP).Debug("found references", "count", len(references))
 
 		// Get distinct containers for this image
 		containerQuery := `
@@ -594,10 +594,10 @@ FROM containers
 WHERE image_id = ` + fmt.Sprintf("%v", imageID) + `
 ORDER BY namespace, pod, name`
 
-		log.Printf("ImageDetailFullHandler: fetching containers for image_id: %v", imageID)
+		logging.For(logging.ComponentHTTP).Debug("fetching containers", "image_id", imageID)
 		containerResult, err := provider.ExecuteReadOnlyQuery(containerQuery)
 		if err != nil {
-			log.Printf("Error querying containers for image_id %v: %v", imageID, err)
+			logging.For(logging.ComponentHTTP).Error("error querying containers", "image_id", imageID, "error", err)
 			http.Error(w, fmt.Sprintf("Error querying containers: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -608,7 +608,7 @@ ORDER BY namespace, pod, name`
 				containers = append(containers, c)
 			}
 		}
-		log.Printf("ImageDetailFullHandler: found %d containers", len(containers))
+		logging.For(logging.ComponentHTTP).Debug("found containers", "count", len(containers))
 
 		response := map[string]interface{}{
 			"image_id":            imageRow["image_id"],
@@ -623,7 +623,7 @@ ORDER BY namespace, pod, name`
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding image detail response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding image detail response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -693,7 +693,7 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
 		if err != nil {
-			log.Printf("Error executing vulnerability count query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing vulnerability count query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -708,7 +708,7 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Printf("Error executing vulnerability query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing vulnerability query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -730,7 +730,7 @@ func ImageVulnerabilitiesDetailHandler(provider ImageQueryProvider) http.Handler
 			"totalPages":      totalPages,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding vulnerabilities response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding vulnerabilities response", "error", err)
 		}
 	}
 }
@@ -866,7 +866,7 @@ func exportRawVulnerabilitiesJSON(w http.ResponseWriter, provider ImageQueryProv
 
 	result, err := provider.ExecuteReadOnlyQuery(query)
 	if err != nil || len(result.Rows) == 0 {
-		log.Printf("Error fetching raw vulnerabilities JSON: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error fetching raw vulnerabilities JSON", "error", err)
 		http.Error(w, "Vulnerabilities JSON not found", http.StatusNotFound)
 		return
 	}
@@ -880,7 +880,7 @@ func exportRawVulnerabilitiesJSON(w http.ResponseWriter, provider ImageQueryProv
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=grype-vulnerabilities.json")
 	if _, err := w.Write([]byte(vulnJSON)); err != nil {
-		log.Printf("Error writing vulnerabilities JSON: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error writing vulnerabilities JSON", "error", err)
 	}
 }
 
@@ -946,7 +946,7 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
 		if err != nil {
-			log.Printf("Error executing package count query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing package count query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -961,7 +961,7 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Printf("Error executing package query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing package query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -983,7 +983,7 @@ func ImagePackagesDetailHandler(provider ImageQueryProvider) http.HandlerFunc {
 			"totalPages": totalPages,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding packages response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding packages response", "error", err)
 		}
 	}
 }
@@ -1063,7 +1063,7 @@ func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, diges
 
 	result, err := provider.ExecuteReadOnlyQuery(query)
 	if err != nil || len(result.Rows) == 0 {
-		log.Printf("Error fetching raw SBOM JSON: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error fetching raw SBOM JSON", "error", err)
 		http.Error(w, "SBOM JSON not found", http.StatusNotFound)
 		return
 	}
@@ -1077,7 +1077,7 @@ func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, diges
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=syft-sbom.json")
 	if _, err := w.Write([]byte(sbomJSON)); err != nil {
-		log.Printf("Error writing SBOM JSON: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error writing SBOM JSON", "error", err)
 	}
 }
 
@@ -1087,28 +1087,28 @@ func VulnerabilityDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Extract vulnerability ID from URL path
 		// Expected format: /api/vulnerabilities/{id}/details
 		path := r.URL.Path
-		log.Printf("VulnerabilityDetailsHandler - full path: %s", path)
+		logging.For(logging.ComponentHTTP).Debug("vulnerability details handler", "path", path)
 
 		// Remove "/api/vulnerabilities/" prefix (21 characters) and "/details" suffix (8 characters)
 		// Minimum valid path is 29 chars (with 1-digit ID), so check for < 29
 		if len(path) < 29 {
-			log.Printf("VulnerabilityDetailsHandler - path too short: %d characters", len(path))
+			logging.For(logging.ComponentHTTP).Warn("path too short for vulnerability details", "length", len(path))
 			http.Error(w, "Invalid vulnerability ID", http.StatusBadRequest)
 			return
 		}
 
 		vulnIDStr := path[21 : len(path)-8] // Extract ID from path (21 = length of "/api/vulnerabilities/")
-		log.Printf("VulnerabilityDetailsHandler - extracted ID string: '%s'", vulnIDStr)
+		logging.For(logging.ComponentHTTP).Debug("extracted vulnerability ID", "id_string", vulnIDStr)
 
 		// Validate that the ID is a valid integer
 		vulnID, err := strconv.ParseInt(vulnIDStr, 10, 64)
 		if err != nil {
-			log.Printf("VulnerabilityDetailsHandler - invalid ID format: %s, error: %v", vulnIDStr, err)
+			logging.For(logging.ComponentHTTP).Warn("invalid vulnerability ID format", "id_string", vulnIDStr, "error", err)
 			http.Error(w, "Invalid vulnerability ID format", http.StatusBadRequest)
 			return
 		}
 
-		log.Printf("Fetching details for vulnerability ID: %d", vulnID)
+		logging.For(logging.ComponentHTTP).Debug("fetching vulnerability details", "vulnerability_id", vulnID)
 
 		// Query vulnerability_details table
 		query := fmt.Sprintf(`
@@ -1116,34 +1116,34 @@ func VulnerabilityDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 			FROM vulnerability_details vd
 			WHERE vd.vulnerability_id = %d`, vulnID)
 
-		log.Printf("VulnerabilityDetailsHandler - executing query: %s", query)
+		logging.For(logging.ComponentHTTP).Debug("executing vulnerability query", "query", query)
 
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Printf("Error fetching vulnerability details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error fetching vulnerability details", "error", err)
 			http.Error(w, "Failed to fetch vulnerability details", http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("VulnerabilityDetailsHandler - query returned %d rows", len(result.Rows))
+		logging.For(logging.ComponentHTTP).Debug("vulnerability query returned rows", "count", len(result.Rows))
 
 		if len(result.Rows) == 0 {
-			log.Printf("VulnerabilityDetailsHandler - no details found for ID %d", vulnID)
+			logging.For(logging.ComponentHTTP).Warn("no vulnerability details found", "vulnerability_id", vulnID)
 			http.Error(w, "Vulnerability details not found", http.StatusNotFound)
 			return
 		}
 
 		detailsJSON, ok := result.Rows[0]["details"].(string)
 		if !ok || detailsJSON == "" {
-			log.Printf("VulnerabilityDetailsHandler - details field is empty or wrong type")
+			logging.For(logging.ComponentHTTP).Warn("vulnerability details field is empty or wrong type")
 			http.Error(w, "No details available", http.StatusNotFound)
 			return
 		}
 
-		log.Printf("VulnerabilityDetailsHandler - returning %d bytes of JSON", len(detailsJSON))
+		logging.For(logging.ComponentHTTP).Debug("returning vulnerability details", "size_bytes", len(detailsJSON))
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(detailsJSON)); err != nil {
-			log.Printf("Error writing vulnerability details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing vulnerability details", "error", err)
 		}
 	}
 }
@@ -1154,28 +1154,28 @@ func PackageDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Extract package ID from URL path
 		// Expected format: /api/packages/{id}/details
 		path := r.URL.Path
-		log.Printf("PackageDetailsHandler - full path: %s", path)
+		logging.For(logging.ComponentHTTP).Debug("package details handler", "path", path)
 
 		// Remove "/api/packages/" prefix (14 characters) and "/details" suffix (8 characters)
 		// Minimum valid path is 22 chars (with 1-digit ID), so check for < 22
 		if len(path) < 22 {
-			log.Printf("PackageDetailsHandler - path too short: %d characters", len(path))
+			logging.For(logging.ComponentHTTP).Warn("path too short for package details", "length", len(path))
 			http.Error(w, "Invalid package ID", http.StatusBadRequest)
 			return
 		}
 
 		pkgIDStr := path[14 : len(path)-8] // Extract ID from path
-		log.Printf("PackageDetailsHandler - extracted ID string: '%s'", pkgIDStr)
+		logging.For(logging.ComponentHTTP).Debug("extracted package ID", "id_string", pkgIDStr)
 
 		// Validate that the ID is a valid integer
 		pkgID, err := strconv.ParseInt(pkgIDStr, 10, 64)
 		if err != nil {
-			log.Printf("PackageDetailsHandler - invalid ID format: %s, error: %v", pkgIDStr, err)
+			logging.For(logging.ComponentHTTP).Warn("invalid package ID format", "id_string", pkgIDStr, "error", err)
 			http.Error(w, "Invalid package ID format", http.StatusBadRequest)
 			return
 		}
 
-		log.Printf("Fetching details for package ID: %d", pkgID)
+		logging.For(logging.ComponentHTTP).Debug("fetching package details", "package_id", pkgID)
 
 		// Query package_details table
 		query := fmt.Sprintf(`
@@ -1183,34 +1183,34 @@ func PackageDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 			FROM package_details pd
 			WHERE pd.package_id = %d`, pkgID)
 
-		log.Printf("PackageDetailsHandler - executing query: %s", query)
+		logging.For(logging.ComponentHTTP).Debug("executing package query", "query", query)
 
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Printf("Error fetching package details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error fetching package details", "error", err)
 			http.Error(w, "Failed to fetch package details", http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("PackageDetailsHandler - query returned %d rows", len(result.Rows))
+		logging.For(logging.ComponentHTTP).Debug("package query returned rows", "count", len(result.Rows))
 
 		if len(result.Rows) == 0 {
-			log.Printf("PackageDetailsHandler - no details found for ID %d", pkgID)
+			logging.For(logging.ComponentHTTP).Warn("no package details found", "package_id", pkgID)
 			http.Error(w, "Package details not found", http.StatusNotFound)
 			return
 		}
 
 		detailsJSON, ok := result.Rows[0]["details"].(string)
 		if !ok || detailsJSON == "" {
-			log.Printf("PackageDetailsHandler - details field is empty or wrong type")
+			logging.For(logging.ComponentHTTP).Warn("package details field is empty or wrong type")
 			http.Error(w, "No details available", http.StatusNotFound)
 			return
 		}
 
-		log.Printf("PackageDetailsHandler - returning %d bytes of JSON", len(detailsJSON))
+		logging.For(logging.ComponentHTTP).Debug("returning package details", "size_bytes", len(detailsJSON))
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(detailsJSON)); err != nil {
-			log.Printf("Error writing package details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing package details", "error", err)
 		}
 	}
 }

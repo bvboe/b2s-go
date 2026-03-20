@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // HTTPDownloader handles downloading release assets via direct HTTP
@@ -97,6 +99,8 @@ func (hd *HTTPDownloader) DownloadAsset(ctx context.Context, version, filename, 
 	var lastErr error
 	var lastStatusCode int
 
+	log := logging.For(logging.ComponentHTTP)
+
 	for attempt := 0; attempt <= hd.maxRetries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff: 2s, 4s, 8s, 16s, max 30s
@@ -105,7 +109,7 @@ func (hd *HTTPDownloader) DownloadAsset(ctx context.Context, version, filename, 
 				backoff = 30 * time.Second
 			}
 
-			fmt.Printf("Retry attempt %d/%d for %s after %v...\n", attempt, hd.maxRetries, filename, backoff)
+			log.Info("retry attempt", "attempt", attempt, "max_retries", hd.maxRetries, "filename", filename, "backoff", backoff)
 
 			select {
 			case <-time.After(backoff):
@@ -118,7 +122,7 @@ func (hd *HTTPDownloader) DownloadAsset(ctx context.Context, version, filename, 
 		err := hd.downloadAssetOnce(ctx, url, filename, destPath)
 		if err == nil {
 			if attempt > 0 {
-				fmt.Printf("Download succeeded on retry attempt %d\n", attempt)
+				log.Info("download succeeded on retry", "attempt", attempt)
 			}
 			return nil // Success
 		}
@@ -137,8 +141,10 @@ func (hd *HTTPDownloader) DownloadAsset(ctx context.Context, version, filename, 
 
 // downloadAssetOnce performs a single download attempt
 func (hd *HTTPDownloader) downloadAssetOnce(ctx context.Context, url, filename, destPath string) error {
+	log := logging.For(logging.ComponentHTTP)
+
 	if filename != "" {
-		fmt.Printf("Downloading %s from %s...\n", filename, url)
+		log.Info("downloading", "filename", filename, "url", url)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -194,6 +200,8 @@ func (hd *HTTPDownloader) extractStatusCode(err error) int {
 
 // DownloadReleaseAssets downloads all required assets for a release
 func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, workDir string) (string, error) {
+	log := logging.For(logging.ComponentHTTP)
+
 	// Determine asset names based on OS and architecture
 	arch := runtime.GOARCH
 	binaryName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz", arch)
@@ -203,7 +211,7 @@ func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, wo
 
 	// Validate all required assets are available before downloading
 	if hd.enableValidation {
-		fmt.Println("Validating release asset availability...")
+		log.Info("validating release asset availability")
 		requiredAssets := []string{binaryName, checksumName}
 
 		for _, asset := range requiredAssets {
@@ -211,7 +219,7 @@ func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, wo
 				return "", fmt.Errorf("required asset %s not available: %w", asset, err)
 			}
 		}
-		fmt.Println("All required assets available ✓")
+		log.Info("all required assets available")
 	}
 
 	// Download binary (required)
@@ -229,14 +237,14 @@ func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, wo
 	// Download signature (optional - may not exist)
 	sigPath := filepath.Join(workDir, signatureName)
 	if err := hd.DownloadAsset(ctx, version, signatureName, sigPath); err != nil {
-		fmt.Printf("Note: Signature not available: %v\n", err)
+		log.Info("signature not available", "error", err)
 		// Not fatal - signature is optional
 	}
 
 	// Download certificate (optional - may not exist)
 	certPath := filepath.Join(workDir, certName)
 	if err := hd.DownloadAsset(ctx, version, certName, certPath); err != nil {
-		fmt.Printf("Note: Certificate not available: %v\n", err)
+		log.Info("certificate not available", "error", err)
 		// Not fatal - certificate is optional
 	}
 

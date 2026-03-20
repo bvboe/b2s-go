@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -49,7 +49,7 @@ func (cfg *HostSBOMConfig) BuildExclusions() []string {
 	}
 	result, err := exclusions.BuildExclusions(excCfg)
 	if err != nil {
-		log.Printf("Warning: failed to detect network mounts: %v", err)
+		slog.Default().With("component", "pod-scanner").Warn("failed to detect network mounts", "error", err)
 	}
 	return result
 }
@@ -61,15 +61,17 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 	exclusionPatterns := cfg.BuildExclusions()
 
 	// Log exclusion configuration for debugging
-	log.Printf("Host SBOM exclusion config: autoDetectNFS=%v, extraExclusions=%d, extraNetworkFSTypes=%d",
-		cfg.AutoDetectNFS, len(cfg.ExtraExclusions), len(cfg.ExtraNetworkFSTypes))
-	log.Printf("Host SBOM handler configured with %d exclusion patterns:", len(exclusionPatterns))
+	slog.Default().With("component", "pod-scanner").Info("host SBOM exclusion config",
+		"autoDetectNFS", cfg.AutoDetectNFS,
+		"extraExclusions", len(cfg.ExtraExclusions),
+		"extraNetworkFSTypes", len(cfg.ExtraNetworkFSTypes),
+		"totalPatterns", len(exclusionPatterns))
 	for _, pattern := range exclusionPatterns {
-		log.Printf("  - %s", pattern)
+		slog.Default().With("component", "pod-scanner").Debug("exclusion pattern", "pattern", pattern)
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Host SBOM request received")
+		slog.Default().With("component", "pod-scanner").Info("host SBOM request received")
 
 		// Set timeout for SBOM generation
 		ctx, cancel := context.WithTimeout(r.Context(), cfg.Timeout)
@@ -87,10 +89,10 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 			})
 
 		// Get source for the host filesystem
-		log.Printf("Scanning host filesystem: %s (excluding %d patterns)", cfg.HostPath, len(exclusionPatterns))
+		slog.Default().With("component", "pod-scanner").Info("scanning host filesystem", "path", cfg.HostPath, "excludePatterns", len(exclusionPatterns))
 		src, err := syft.GetSource(ctx, cfg.HostPath, sourceCfg)
 		if err != nil {
-			log.Printf("Error getting source for host filesystem: %v", err)
+			slog.Default().With("component", "pod-scanner").Error("error getting source for host filesystem", "error", err)
 			http.Error(w, "Failed to access host filesystem", http.StatusInternalServerError)
 			return
 		}
@@ -98,7 +100,7 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 		// Ensure cleanup of source
 		defer func() {
 			if cleanupErr := src.Close(); cleanupErr != nil {
-				log.Printf("Warning: failed to cleanup source: %v", cleanupErr)
+				slog.Default().With("component", "pod-scanner").Warn("failed to cleanup source", "error", cleanupErr)
 			}
 		}()
 
@@ -108,7 +110,7 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 
 		s, err := syft.CreateSBOM(ctx, src, sbomCfg)
 		if err != nil {
-			log.Printf("Error creating SBOM for host filesystem: %v", err)
+			slog.Default().With("component", "pod-scanner").Error("error creating SBOM for host filesystem", "error", err)
 
 			// Check if it's a timeout
 			if ctx.Err() == context.DeadlineExceeded {
@@ -124,7 +126,7 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 		encoder := syftjson.NewFormatEncoder()
 		sbomBytes, err := format.Encode(*s, encoder)
 		if err != nil {
-			log.Printf("Error encoding host SBOM to JSON: %v", err)
+			slog.Default().With("component", "pod-scanner").Error("error encoding host SBOM to JSON", "error", err)
 			http.Error(w, "Failed to encode host SBOM", http.StatusInternalServerError)
 			return
 		}
@@ -145,10 +147,12 @@ func HostSBOMHandler(cfg HostSBOMConfig) http.HandlerFunc {
 
 		// Write SBOM data
 		if _, err := w.Write(sbomBytes); err != nil {
-			log.Printf("Error writing host SBOM response: %v", err)
+			slog.Default().With("component", "pod-scanner").Error("error writing host SBOM response", "error", err)
 		} else {
-			log.Printf("Successfully served host SBOM for node %s (%d bytes, %d packages)",
-				nodeName, len(sbomBytes), s.Artifacts.Packages.PackageCount())
+			slog.Default().With("component", "pod-scanner").Info("successfully served host SBOM",
+				"node", nodeName,
+				"size", len(sbomBytes),
+				"packages", s.Artifacts.Packages.PackageCount())
 		}
 	}
 }

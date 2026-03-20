@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -56,6 +57,8 @@ func (hc *HelmClient) GetCurrentRelease() (*release.Release, error) {
 
 // UpgradeRelease performs a Helm upgrade
 func (hc *HelmClient) UpgradeRelease(ctx context.Context, chartPath string, version string) error {
+	log := slog.Default().With("component", "k8s-update-controller")
+
 	actionConfig, err := hc.getActionConfig()
 	if err != nil {
 		return err
@@ -79,12 +82,14 @@ func (hc *HelmClient) UpgradeRelease(ctx context.Context, chartPath string, vers
 		return fmt.Errorf("failed to upgrade release: %w", err)
 	}
 
-	fmt.Printf("Upgraded %s to version %s\n", rel.Name, rel.Chart.Metadata.Version)
+	log.Info("upgraded release", "name", rel.Name, "version", rel.Chart.Metadata.Version)
 	return nil
 }
 
 // RollbackRelease rolls back to the previous release
 func (hc *HelmClient) RollbackRelease() error {
+	log := slog.Default().With("component", "k8s-update-controller")
+
 	actionConfig, err := hc.getActionConfig()
 	if err != nil {
 		return err
@@ -98,7 +103,7 @@ func (hc *HelmClient) RollbackRelease() error {
 		return fmt.Errorf("failed to rollback release: %w", err)
 	}
 
-	fmt.Printf("Rolled back %s to previous version\n", hc.releaseName)
+	log.Info("rolled back release", "name", hc.releaseName)
 	return nil
 }
 
@@ -137,11 +142,12 @@ func (hc *HelmClient) IsReleaseHealthy() (bool, error) {
 
 // getActionConfig creates a Helm action configuration
 func (hc *HelmClient) getActionConfig() (*action.Configuration, error) {
+	log := slog.Default().With("component", "k8s-update-controller")
 	actionConfig := new(action.Configuration)
 
 	// Initialize with Kubernetes client
 	if err := actionConfig.Init(hc.settings.RESTClientGetter(), hc.namespace, os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
-		fmt.Printf(format+"\n", v...)
+		log.Debug("helm debug", "message", fmt.Sprintf(format, v...))
 	}); err != nil {
 		return nil, fmt.Errorf("failed to initialize Helm action config: %w", err)
 	}

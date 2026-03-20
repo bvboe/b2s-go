@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,7 @@ func (rc *RegistryClient) VerifySignature(ctx context.Context, chartPath string,
 	// For now, we'll skip this in the initial implementation
 	// This will be added in a follow-up as it requires cosign library integration
 
-	fmt.Println("Note: Signature verification not yet implemented")
+	log := slog.Default().With("component", "k8s-update-controller")
+	log.Info("signature verification not yet implemented")
 	return nil
 }

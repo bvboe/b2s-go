@@ -1,7 +1,7 @@
 package updater
 
 import (
-	"fmt"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // Verifier handles signature verification
@@ -25,6 +25,7 @@ func (v *Verifier) VerifySignature(binaryPath, sigPath, certPath string) error {
 	// For now, we'll skip this in the initial implementation
 	// and add it in a follow-up
 
-	fmt.Println("Note: Signature verification not yet implemented")
+	log := logging.For(logging.ComponentHTTP)
+	log.Info("signature verification not yet implemented")
 	return nil
 }

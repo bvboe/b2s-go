@@ -2,10 +2,10 @@ package docker
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -28,7 +28,7 @@ func NewRefreshTrigger(manager *containers.Manager) *RefreshTrigger {
 // This is called periodically by the refresh-images job to ensure the container
 // list stays in sync with reality, catching any missed Docker events
 func (t *RefreshTrigger) TriggerRefresh() error {
-	log.Println("[refresh-trigger] Starting Docker container reconciliation...")
+	logging.For(logging.ComponentContainers).Info("starting Docker container reconciliation")
 
 	// Create a new Docker client for this refresh operation
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -59,7 +59,7 @@ func (t *RefreshTrigger) TriggerRefresh() error {
 	for _, dc := range containerList {
 		c, err := extractContainer(ctx, cli, dc.ID)
 		if err != nil {
-			log.Printf("[refresh-trigger] Warning: failed to extract container %s: %v", dc.ID[:12], err)
+			logging.For(logging.ComponentContainers).Warn("failed to extract container", "container_id", dc.ID[:12], "error", err)
 			continue
 		}
 		allContainers = append(allContainers, c)
@@ -69,7 +69,7 @@ func (t *RefreshTrigger) TriggerRefresh() error {
 	// This will reconcile with the database and enqueue scans for new images
 	t.manager.SetContainers(allContainers)
 
-	log.Printf("[refresh-trigger] Reconciliation complete: %d running containers", len(allContainers))
+	logging.For(logging.ComponentContainers).Info("reconciliation complete", "running_containers", len(allContainers))
 	return nil
 }
 

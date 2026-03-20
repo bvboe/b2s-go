@@ -1,8 +1,10 @@
 package nodes
 
 import (
-	"log"
+	"log/slog"
 	"sync"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // NodeDatabaseInterface defines the interface for node database operations
@@ -44,7 +46,7 @@ func (m *Manager) SetDatabase(db NodeDatabaseInterface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.db = db
-	log.Println("Node manager: database persistence enabled")
+	logging.For(logging.ComponentNodes).Info("database persistence enabled")
 }
 
 // SetScanQueue configures the manager to use a scan queue for host SBOM generation
@@ -53,12 +55,12 @@ func (m *Manager) SetDatabase(db NodeDatabaseInterface) {
 func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 	m.mu.Lock()
 	m.scanQueue = queue
-	log.Println("Node manager: scan queue enabled")
+	logging.For(logging.ComponentNodes).Info("scan queue enabled")
 
 	// Catch-up: enqueue scans for nodes discovered before queue was connected
 	if m.db != nil && len(m.nodes) > 0 {
 		nodeCount := len(m.nodes)
-		log.Printf("Checking %d nodes for pending scans...", nodeCount)
+		logging.For(logging.ComponentNodes).Info("checking nodes for pending scans", "count", nodeCount)
 
 		// Build map of node name -> node
 		nodeMap := make(map[string]Node)
@@ -70,14 +72,14 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 		m.mu.Unlock()
 
 		if len(nodeNames) == 0 {
-			log.Printf("No nodes to check for pending scans")
+			logging.For(logging.ComponentNodes).Debug("no nodes to check for pending scans")
 			return
 		}
 
 		// Get status for all nodes in a single bulk query
 		scanStatuses, err := m.db.GetNodeScanStatusBulk(nodeNames)
 		if err != nil {
-			log.Printf("Error fetching bulk node scan status: %v", err)
+			logging.For(logging.ComponentNodes).Error("failed to fetch bulk node scan status", slog.Any("error", err))
 			return
 		}
 
@@ -94,7 +96,7 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 		if len(scannedNodes) > 0 {
 			completenessStatus, err = m.db.IsNodeScanCompleteBulk(scannedNodes)
 			if err != nil {
-				log.Printf("Error fetching bulk node completeness status: %v", err)
+				logging.For(logging.ComponentNodes).Error("failed to fetch bulk node completeness status", slog.Any("error", err))
 				completenessStatus = make(map[string]bool)
 			}
 		} else {
@@ -102,38 +104,39 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 		}
 
 		// Enqueue scans based on status (using actual database status values)
+		log := logging.For(logging.ComponentNodes)
 		enqueuedCount := 0
 		for name, status := range scanStatuses {
 			switch status {
 			case "pending":
 				// New node, enqueue normal scan
-				log.Printf("Enqueuing scan for new node: %s", name)
+				log.Debug("enqueuing scan for new node", "node", name)
 				m.scanQueue.EnqueueHostScan(name)
 				enqueuedCount++
 
 			case "sbom_failed", "sbom_unavailable", "vuln_scan_failed":
 				// Previous scan failed, retry with force scan
-				log.Printf("Retrying failed scan for node: %s (status=%s)", name, status)
+				log.Debug("retrying failed scan", "node", name, "status", status)
 				m.scanQueue.EnqueueHostForceScan(name)
 				enqueuedCount++
 
 			case "completed":
 				// Check if data is actually complete
 				if !completenessStatus[name] {
-					log.Printf("Retrying scan for node with incomplete data: %s", name)
+					log.Debug("retrying scan for incomplete data", "node", name)
 					m.scanQueue.EnqueueHostForceScan(name)
 					enqueuedCount++
 				}
 
 			case "generating_sbom", "scanning_vulnerabilities":
 				// Node is in an intermediate state (previous scan was interrupted)
-				log.Printf("Retrying interrupted scan for node: %s", name)
+				log.Debug("retrying interrupted scan", "node", name)
 				m.scanQueue.EnqueueHostForceScan(name)
 				enqueuedCount++
 			}
 		}
 
-		log.Printf("Queued catch-up scans for %d of %d nodes", enqueuedCount, len(nodeNames))
+		log.Info("queued catch-up scans", "enqueued", enqueuedCount, "total", len(nodeNames))
 		return
 	}
 	m.mu.Unlock()
@@ -146,14 +149,15 @@ func (m *Manager) AddNode(n Node) {
 
 	m.nodes[n.Name] = n
 
-	log.Printf("Add node: name=%s, hostname=%s, os=%s, arch=%s",
-		n.Name, n.Hostname, n.OSRelease, n.Architecture)
+	logging.For(logging.ComponentNodes).Info("add node",
+		"name", n.Name, "hostname", n.Hostname, "os", n.OSRelease, "arch", n.Architecture)
 
 	// Persist to database if configured
 	if m.db != nil {
 		isNew, err := m.db.AddNode(n)
 		if err != nil {
-			log.Printf("Error adding node to database: %v", err)
+			logging.For(logging.ComponentNodes).Error("failed to add node to database",
+				"node", n.Name, slog.Any("error", err))
 			return
 		}
 
@@ -175,18 +179,19 @@ func (m *Manager) UpdateNode(n Node) {
 	// Check if node exists
 	_, exists := m.nodes[n.Name]
 	if !exists {
-		log.Printf("Update node: node %s not found, adding instead", n.Name)
+		logging.For(logging.ComponentNodes).Debug("node not found, adding instead", "node", n.Name)
 	}
 
 	m.nodes[n.Name] = n
 
-	log.Printf("Update node: name=%s, hostname=%s, os=%s, arch=%s",
-		n.Name, n.Hostname, n.OSRelease, n.Architecture)
+	logging.For(logging.ComponentNodes).Info("update node",
+		"name", n.Name, "hostname", n.Hostname, "os", n.OSRelease, "arch", n.Architecture)
 
 	// Update in database if configured
 	if m.db != nil {
 		if err := m.db.UpdateNode(n); err != nil {
-			log.Printf("Error updating node in database: %v", err)
+			logging.For(logging.ComponentNodes).Error("failed to update node in database",
+				"node", n.Name, slog.Any("error", err))
 		}
 	}
 }
@@ -198,12 +203,13 @@ func (m *Manager) RemoveNode(name string) {
 
 	delete(m.nodes, name)
 
-	log.Printf("Remove node: name=%s", name)
+	logging.For(logging.ComponentNodes).Info("remove node", "name", name)
 
 	// Remove from database if configured
 	if m.db != nil {
 		if err := m.db.RemoveNode(name); err != nil {
-			log.Printf("Error removing node from database: %v", err)
+			logging.For(logging.ComponentNodes).Error("failed to remove node from database",
+				"node", name, slog.Any("error", err))
 		}
 	}
 }
@@ -221,7 +227,8 @@ func (m *Manager) SetNodes(nodeList []Node) {
 		m.nodes[n.Name] = n
 	}
 
-	log.Printf("Set nodes: %d nodes", len(nodeList))
+	log := logging.For(logging.ComponentNodes)
+	log.Info("set nodes", "count", len(nodeList))
 
 	// Log first 3 nodes as samples for debugging
 	if len(nodeList) > 0 {
@@ -229,14 +236,14 @@ func (m *Manager) SetNodes(nodeList []Node) {
 		if len(nodeList) < sampleCount {
 			sampleCount = len(nodeList)
 		}
-		log.Printf("Sample nodes:")
+		log.Debug("sample nodes:")
 		for i := 0; i < sampleCount; i++ {
 			n := nodeList[i]
-			log.Printf("  [%d] name=%s, hostname=%s, os=%s, arch=%s",
-				i, n.Name, n.Hostname, n.OSRelease, n.Architecture)
+			log.Debug("sample node", "index", i,
+				"name", n.Name, "hostname", n.Hostname, "os", n.OSRelease, "arch", n.Architecture)
 		}
 		if len(nodeList) > sampleCount {
-			log.Printf("  ... and %d more nodes", len(nodeList)-sampleCount)
+			log.Debug("additional nodes not shown", "count", len(nodeList)-sampleCount)
 		}
 	}
 

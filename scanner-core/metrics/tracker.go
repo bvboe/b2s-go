@@ -2,11 +2,12 @@ package metrics
 
 import (
 	"encoding/json"
-	"log"
 	"math"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // DefaultStalenessWindow is the default duration after which metrics are considered stale
@@ -61,7 +62,7 @@ func NewMetricTracker(cfg MetricTrackerConfig) *MetricTracker {
 	// Load persisted data from database
 	if cfg.Store != nil {
 		if err := mt.loadFromStore(); err != nil {
-			log.Printf("[metric-tracker] Warning: failed to load persisted data: %v", err)
+			logging.For(logging.ComponentMetrics).Warn("failed to load persisted metric staleness data", "error", err)
 		}
 	}
 
@@ -90,13 +91,16 @@ func (mt *MetricTracker) loadFromStore() error {
 	for key, ts := range timestamps {
 		t, err := time.Parse(time.RFC3339, ts)
 		if err != nil {
-			log.Printf("[metric-tracker] Warning: invalid timestamp for key %s: %v", key, err)
+			logging.For(logging.ComponentMetrics).Warn("invalid timestamp in persisted data",
+				"key", key,
+				"error", err)
 			continue
 		}
 		mt.lastSeen[key] = t
 	}
 
-	log.Printf("[metric-tracker] Loaded %d metric timestamps from database", len(mt.lastSeen))
+	logging.For(logging.ComponentMetrics).Debug("loaded metric timestamps from database",
+		"count", len(mt.lastSeen))
 	return nil
 }
 
@@ -207,16 +211,18 @@ func (mt *MetricTracker) ProcessMetrics(data *MetricsData) *MetricsData {
 
 	// Persist to database (only if changed)
 	if err := mt.saveToStore(); err != nil {
-		log.Printf("[metric-tracker] Warning: failed to persist data: %v", err)
+		logging.For(logging.ComponentMetrics).Warn("failed to persist metric staleness data", "error", err)
 	}
 
 	// Add stale metrics to the output with NaN value
 	if len(staleMetrics) > 0 {
 		data = mt.addStaleMetrics(data, staleMetrics)
-		log.Printf("[metric-tracker] Marked %d metrics as stale (NaN)", len(staleMetrics))
+		logging.For(logging.ComponentMetrics).Debug("marked metrics as stale (NaN)",
+			"count", len(staleMetrics))
 	}
 	if len(expiredMetrics) > 0 {
-		log.Printf("[metric-tracker] Purged %d expired metrics", len(expiredMetrics))
+		logging.For(logging.ComponentMetrics).Debug("purged expired metrics",
+			"count", len(expiredMetrics))
 	}
 
 	return data

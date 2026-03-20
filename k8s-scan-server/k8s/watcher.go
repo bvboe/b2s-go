@@ -2,11 +2,12 @@ package k8s
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -108,14 +109,14 @@ func extractContainers(pod *corev1.Pod) []containers.Container {
 		if digest == "" {
 			// Skip containers without digest - they're not fully initialized yet
 			// The watcher will pick them up again when status becomes available
-			log.Printf("Skipping container without digest: namespace=%s, pod=%s, name=%s, image=%s",
-				pod.Namespace, pod.Name, container.Name, container.Image)
+			logging.For(logging.ComponentK8s).Debug("skipping container without digest",
+				"namespace", pod.Namespace, "pod", pod.Name, "container", container.Name, "image", container.Image)
 			continue
 		}
 
 		if reference == "" {
-			log.Printf("Warning: container has empty reference: namespace=%s, pod=%s, name=%s",
-				pod.Namespace, pod.Name, container.Name)
+			logging.For(logging.ComponentK8s).Warn("container has empty reference",
+				"namespace", pod.Namespace, "pod", pod.Name, "container", container.Name)
 			continue
 		}
 
@@ -155,11 +156,12 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 	podInformer := factory.Core().V1().Pods().Informer()
 
 	// Add event handlers
+	log := logging.For(logging.ComponentK8s)
 	_, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod, ok := obj.(*corev1.Pod)
 			if !ok {
-				log.Printf("Unexpected object type in AddFunc: %T", obj)
+				log.Warn("unexpected object type in pod add", "type", slog.Any("type", obj))
 				return
 			}
 			handlePodAddOrUpdate(pod, manager)
@@ -167,7 +169,7 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			pod, ok := newObj.(*corev1.Pod)
 			if !ok {
-				log.Printf("Unexpected object type in UpdateFunc: %T", newObj)
+				log.Warn("unexpected object type in pod update", "type", slog.Any("type", newObj))
 				return
 			}
 			handlePodAddOrUpdate(pod, manager)
@@ -178,12 +180,12 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 				// Handle tombstone (object deleted from cache but we got notification late)
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					log.Printf("Unexpected object type in DeleteFunc: %T", obj)
+					log.Warn("unexpected object type in pod delete", "type", slog.Any("type", obj))
 					return
 				}
 				pod, ok = tombstone.Obj.(*corev1.Pod)
 				if !ok {
-					log.Printf("Tombstone contained unexpected object: %T", tombstone.Obj)
+					log.Warn("tombstone contained unexpected object", "type", slog.Any("type", tombstone.Obj))
 					return
 				}
 			}
@@ -191,27 +193,27 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 		},
 	})
 	if err != nil {
-		log.Printf("Error adding event handler: %v", err)
+		log.Error("failed to add event handler", slog.Any("error", err))
 		return
 	}
 
-	log.Println("Starting pod informer...")
+	log.Info("starting pod informer")
 
 	// Start the informer (runs in background goroutine)
 	go factory.Start(ctx.Done())
 
 	// Wait for cache to sync before considering the informer ready
-	log.Println("Waiting for pod informer cache to sync...")
+	log.Info("waiting for pod informer cache to sync")
 	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
-		log.Println("Failed to sync pod informer cache")
+		log.Error("failed to sync pod informer cache")
 		return
 	}
 
-	log.Println("Pod informer cache synced and ready")
+	log.Info("pod informer cache synced and ready")
 
 	// Block until context is cancelled
 	<-ctx.Done()
-	log.Println("Pod watcher shutting down")
+	log.Info("pod watcher shutting down")
 }
 
 // handlePodAddOrUpdate processes pod additions and updates
@@ -238,7 +240,8 @@ func handlePodDelete(pod *corev1.Pod, manager *containers.Manager) {
 	for _, c := range podContainers {
 		manager.RemoveContainer(c.ID)
 	}
-	log.Printf("Removed containers from deleted pod: namespace=%s, pod=%s", pod.Namespace, pod.Name)
+	logging.For(logging.ComponentK8s).Debug("removed containers from deleted pod",
+		"namespace", pod.Namespace, "pod", pod.Name, "containers", len(podContainers))
 }
 
 // SyncInitialPods performs an initial sync of all existing pods.
@@ -246,7 +249,8 @@ func handlePodDelete(pod *corev1.Pod, manager *containers.Manager) {
 // since the informer automatically performs an initial list and sync (via cache.WaitForCacheSync).
 // This function is kept for explicit synchronization use cases or testing.
 func SyncInitialPods(ctx context.Context, clientset kubernetes.Interface, manager *containers.Manager) error {
-	log.Println("Performing initial pod sync...")
+	log := logging.For(logging.ComponentK8s)
+	log.Info("performing initial pod sync")
 
 	podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -263,7 +267,7 @@ func SyncInitialPods(ctx context.Context, clientset kubernetes.Interface, manage
 	}
 
 	manager.SetContainers(allContainers)
-	log.Printf("Initial sync complete: %d containers", manager.GetContainerCount())
+	log.Info("initial sync complete", "containers", manager.GetContainerCount())
 
 	return nil
 }

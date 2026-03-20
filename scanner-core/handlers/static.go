@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"io/fs"
-	"log"
 	"net/http"
 
 	scanner_core "github.com/bvboe/b2s-go/scanner-core"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // RegisterStaticHandlers registers handlers for serving the embedded web UI
@@ -13,7 +13,7 @@ func RegisterStaticHandlers(mux *http.ServeMux) {
 	// Get the static subdirectory from embedded FS
 	staticFS, err := fs.Sub(scanner_core.WebContent, "static")
 	if err != nil {
-		log.Printf("Warning: failed to access embedded static content: %v", err)
+		logging.For(logging.ComponentHTTP).Warn("failed to access embedded static content", "error", err)
 		return
 	}
 
@@ -21,5 +21,5 @@ func RegisterStaticHandlers(mux *http.ServeMux) {
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.Handle("/", fileServer)
 
-	log.Println("Static web UI registered at /")
+	logging.For(logging.ComponentHTTP).Info("static web UI registered", "path", "/")
 }

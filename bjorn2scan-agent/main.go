@@ -27,6 +27,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/grype"
 	"github.com/bvboe/b2s-go/scanner-core/handlers"
 	"github.com/bvboe/b2s-go/scanner-core/jobs"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/metrics"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
@@ -128,12 +129,12 @@ func (a *AgentInfo) detectOutboundIP() string {
 	// This determines which local IP would be used for outbound connections
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
-		log.Printf("Warning: failed to determine primary outbound IP: %v", err)
+		logging.For(logging.ComponentHTTP).Warn("failed to determine primary outbound IP", "error", err)
 		return ""
 	}
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close connection: %v", closeErr)
+			logging.For(logging.ComponentHTTP).Warn("failed to close connection", "error", closeErr)
 		}
 	}()
 
@@ -245,7 +246,7 @@ func setupLogging() (*os.File, error) {
 	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		// If we can't create the log file, just log to stdout
-		log.Printf("Warning: could not open log file %s: %v (logging to stdout only)", logFile, err)
+		logging.For(logging.ComponentHTTP).Warn("could not open log file (logging to stdout only)", "path", logFile, "error", err)
 		return nil, nil
 	}
 
@@ -264,10 +265,14 @@ func main() {
 		defer func() { _ = logFile.Close() }()
 	}
 
+	// Initialize logging first
+	logging.InitFromEnv()
+
 	// Load configuration from file with environment variable overrides
 	cfg, err := config.LoadConfigWithDefaults()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		logging.For(logging.ComponentHTTP).Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	port := cfg.Port
@@ -276,19 +281,20 @@ func main() {
 	// Initialize debug configuration
 	debugConfig := debug.NewDebugConfig(cfg.DebugEnabled)
 	if debugConfig.IsEnabled() {
-		log.Println("Debug mode ENABLED - /debug endpoints available")
+		logging.For(logging.ComponentHTTP).Info("debug mode ENABLED - /debug endpoints available")
 	}
 
-	log.Printf("bjorn2scan-agent v%s starting", version)
-	log.Printf("Configuration: port=%s, db_path=%s, debug=%v", port, dbPath, cfg.DebugEnabled)
+	logging.For(logging.ComponentHTTP).Info("bjorn2scan-agent starting", "version", version)
+	logging.For(logging.ComponentHTTP).Info("configuration loaded", "port", port, "db_path", dbPath, "debug", cfg.DebugEnabled)
 
 	// Initialize deployment UUID
 	dbDir := filepath.Dir(dbPath)
 	deploymentUUID, err := deployment.NewUUID(dbDir)
 	if err != nil {
-		log.Fatalf("Failed to initialize deployment UUID: %v", err)
+		logging.For(logging.ComponentHTTP).Error("failed to initialize deployment UUID", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("Deployment UUID: %s", deploymentUUID)
+	logging.For(logging.ComponentHTTP).Info("deployment UUID initialized", "uuid", deploymentUUID)
 
 	// Create container manager
 	manager := containers.NewManager()
@@ -296,7 +302,8 @@ func main() {
 	// Initialize database
 	db, err := database.New(dbPath)
 	if err != nil {
-		log.Fatalf("Error initializing database: %v", err)
+		logging.For(logging.ComponentDatabase).Error("failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = database.Close(db) }()
 
@@ -321,14 +328,14 @@ func main() {
 		TimestampStore: db,
 	})
 	if err != nil {
-		log.Printf("Warning: failed to create database updater: %v", err)
+		logging.For(logging.ComponentVulnDB).Warn("failed to create database updater", "error", err)
 	}
 
 	// Initialize grype database status at startup (for metrics)
 	// This ensures grype_db_built is available in metrics immediately
 	if dbUpdater != nil {
 		if _, err := dbUpdater.GetCurrentStatus(context.Background()); err != nil {
-			log.Printf("Warning: failed to get initial database status: %v", err)
+			logging.For(logging.ComponentVulnDB).Warn("failed to get initial database status", "error", err)
 		}
 	}
 
@@ -350,7 +357,7 @@ func main() {
 
 	// Configure host scanning if enabled
 	if cfg.HostScanningEnabled {
-		log.Println("Host scanning enabled, configuring host SBOM retriever")
+		logging.For(logging.ComponentNodes).Info("host scanning enabled, configuring host SBOM retriever")
 
 		// Configure host scan exclusions
 		hostScanCfg := syft.HostScanConfig{
@@ -360,10 +367,10 @@ func main() {
 		}
 		syft.SetHostScanConfig(hostScanCfg)
 		if len(cfg.HostScanningExtraExclusions) > 0 {
-			log.Printf("Host scanning extra exclusions: %v", cfg.HostScanningExtraExclusions)
+			logging.For(logging.ComponentNodes).Info("host scanning extra exclusions configured", "exclusions", cfg.HostScanningExtraExclusions)
 		}
 		if len(cfg.HostScanningExtraNetworkFSTypes) > 0 {
-			log.Printf("Host scanning extra network FS types: %v", cfg.HostScanningExtraNetworkFSTypes)
+			logging.For(logging.ComponentNodes).Info("host scanning extra network FS types configured", "fs_types", cfg.HostScanningExtraNetworkFSTypes)
 		}
 
 		// Create host SBOM retriever that uses syft to scan local filesystem
@@ -413,11 +420,11 @@ func main() {
 
 			// AddNode returns (isNew, error) - we don't care if it already exists
 			if _, err := db.AddNode(nodeInfo); err != nil {
-				log.Printf("Error creating node entry: %v", err)
+				logging.For(logging.ComponentNodes).Error("failed to create node entry", "error", err)
 				return
 			}
 
-			log.Printf("Host node registered: %s (%s, %s)", hostname, nodeInfo.OSRelease, nodeInfo.Architecture)
+			logging.For(logging.ComponentNodes).Info("host node registered", "hostname", hostname, "os_release", nodeInfo.OSRelease, "arch", nodeInfo.Architecture)
 
 			// Enqueue initial host scan
 			scanQueue.EnqueueHostScan(hostname)
@@ -426,20 +433,20 @@ func main() {
 
 	// Check if Docker is available and start watcher
 	if docker.IsDockerAvailable() {
-		log.Println("Docker detected, starting container watcher")
+		logging.For(logging.ComponentContainers).Info("Docker detected, starting container watcher")
 		go func() {
 			if err := docker.WatchContainers(ctx, manager); err != nil {
-				log.Printf("Docker watcher error: %v", err)
+				logging.For(logging.ComponentContainers).Error("Docker watcher error", "error", err)
 			}
 		}()
 	} else {
-		log.Println("Docker not available or not accessible, container watching disabled")
+		logging.For(logging.ComponentContainers).Info("Docker not available or not accessible, container watching disabled")
 	}
 
 	// Initialize auto-updater if enabled
 	var agentUpdater *updater.Updater
 	if cfg.AutoUpdateEnabled {
-		log.Println("Initializing auto-updater...")
+		logging.For(logging.ComponentHTTP).Info("initializing auto-updater")
 		updaterConfig := &updater.Config{
 			Enabled:                cfg.AutoUpdateEnabled,
 			CheckInterval:          cfg.AutoUpdateCheckInterval,
@@ -465,34 +472,34 @@ func main() {
 		var err error
 		agentUpdater, err = updater.New(updaterConfig)
 		if err != nil {
-			log.Printf("Warning: failed to initialize updater: %v", err)
+			logging.For(logging.ComponentHTTP).Warn("failed to initialize updater", "error", err)
 		} else {
 			// Check if there's a pending update from previous run
 			// This must be done BEFORE starting the HTTP server and before starting the updater
 			installer := updater.NewInstaller("", "", cfg.UpdateHealthCheckTimeout)
 			if installer.ShouldCheckRollback() {
-				log.Println("Pending update detected from previous run")
+				logging.For(logging.ComponentHTTP).Info("pending update detected from previous run")
 				// Perform health check in background after server starts
 				// We can't do it now because the server isn't running yet
 				go func() {
 					// Wait for server to be ready
 					time.Sleep(3 * time.Second)
 					if err := installer.PerformPostUpdateHealthCheck(); err != nil {
-						log.Printf("Post-update verification failed: %v", err)
+						logging.For(logging.ComponentHTTP).Error("post-update verification failed", "error", err)
 					}
 				}()
 			}
 
 			// Start updater in background
 			go agentUpdater.Start()
-			log.Println("Auto-updater started")
+			logging.For(logging.ComponentHTTP).Info("auto-updater started")
 		}
 	}
 
 	// Initialize scheduler for periodic jobs
 	var sched *scheduler.Scheduler
 	if cfg.JobsEnabled {
-		log.Println("Initializing scheduled jobs...")
+		logging.For(logging.ComponentJobs).Info("initializing scheduled jobs")
 		sched = scheduler.New()
 
 		// Add rescan database job - uses grype's native update mechanism
@@ -510,9 +517,10 @@ func main() {
 					Timeout: cfg.JobsRescanDatabaseTimeout,
 				},
 			); err != nil {
-				log.Fatalf("Failed to add rescan database job: %v", err)
+				logging.For(logging.ComponentJobs).Error("failed to add rescan database job", "error", err)
+				os.Exit(1)
 			}
-			log.Printf("Scheduled rescan-database job (interval: %v, timeout: %v)", cfg.JobsRescanDatabaseInterval, cfg.JobsRescanDatabaseTimeout)
+			logging.For(logging.ComponentJobs).Info("scheduled rescan-database job", "interval", cfg.JobsRescanDatabaseInterval, "timeout", cfg.JobsRescanDatabaseTimeout)
 		}
 
 		// Add cleanup orphaned images job
@@ -526,9 +534,10 @@ func main() {
 					Timeout: cfg.JobsCleanupTimeout,
 				},
 			); err != nil {
-				log.Fatalf("Failed to add cleanup job: %v", err)
+				logging.For(logging.ComponentJobs).Error("failed to add cleanup job", "error", err)
+				os.Exit(1)
 			}
-			log.Printf("Scheduled cleanup-orphaned-images job (interval: %v, timeout: %v)", cfg.JobsCleanupInterval, cfg.JobsCleanupTimeout)
+			logging.For(logging.ComponentJobs).Info("scheduled cleanup-orphaned-images job", "interval", cfg.JobsCleanupInterval, "timeout", cfg.JobsCleanupTimeout)
 		}
 
 		// Add refresh images job - periodic container reconciliation
@@ -544,16 +553,18 @@ func main() {
 					Timeout: cfg.JobsRefreshImagesTimeout,
 				},
 			); err != nil {
-				log.Fatalf("Failed to add refresh images job: %v", err)
+				logging.For(logging.ComponentJobs).Error("failed to add refresh images job", "error", err)
+				os.Exit(1)
 			}
-			log.Printf("Scheduled refresh-images job (interval: %v, timeout: %v)", cfg.JobsRefreshImagesInterval, cfg.JobsRefreshImagesTimeout)
+			logging.For(logging.ComponentJobs).Info("scheduled refresh-images job", "interval", cfg.JobsRefreshImagesInterval, "timeout", cfg.JobsRefreshImagesTimeout)
 		}
 
 		// Start scheduler
 		if err := sched.Start(ctx); err != nil {
-			log.Fatalf("Failed to start scheduler: %v", err)
+			logging.For(logging.ComponentJobs).Error("failed to start scheduler", "error", err)
+			os.Exit(1)
 		}
-		log.Println("Scheduler started")
+		logging.For(logging.ComponentJobs).Info("scheduler started")
 	}
 
 	// Setup HTTP server
@@ -583,7 +594,7 @@ func main() {
 	// Register node handlers if host scanning is enabled
 	if cfg.HostScanningEnabled {
 		handlers.RegisterNodeHandlers(mux, db)
-		log.Println("Node API endpoints registered: /api/nodes, /api/nodes/{name}, /api/summary/by-node")
+		logging.For(logging.ComponentHTTP).Info("node API endpoints registered: /api/nodes, /api/nodes/{name}, /api/summary/by-node")
 	}
 
 	// Register updater API endpoints if updater is initialized
@@ -621,7 +632,7 @@ func main() {
 		Store:           db,
 		StorageKey:      "metrics",
 	})
-	log.Printf("Metric staleness tracking enabled (window: %v)", cfg.MetricsStalenessWindow)
+	logging.For(logging.ComponentMetrics).Info("metric staleness tracking enabled", "window", cfg.MetricsStalenessWindow)
 
 	// Register Prometheus metrics endpoint with node metrics support
 	metrics.RegisterMetricsHandlerWithNodes(mux, infoProvider, deploymentUUID.String(), db, collectorConfig, db, nodeCollectorConfig, metricTracker)
@@ -629,8 +640,10 @@ func main() {
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter
 	if cfg.OTELMetricsEnabled {
-		log.Printf("Initializing OpenTelemetry metrics exporter (endpoint: %s, protocol: %s, interval: %v)",
-			cfg.OTELMetricsEndpoint, cfg.OTELMetricsProtocol, cfg.OTELMetricsPushInterval)
+		logging.For(logging.ComponentMetrics).Info("initializing OpenTelemetry metrics exporter",
+			"endpoint", cfg.OTELMetricsEndpoint,
+			"protocol", cfg.OTELMetricsProtocol,
+			"interval", cfg.OTELMetricsPushInterval)
 
 		otelConfig := metrics.OTELConfig{
 			Endpoint:        cfg.OTELMetricsEndpoint,
@@ -644,12 +657,12 @@ func main() {
 		var err error
 		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), db, collectorConfig, otelConfig)
 		if err != nil {
-			log.Printf("Warning: Failed to initialize OTEL exporter: %v (continuing without OTEL)", err)
+			logging.For(logging.ComponentMetrics).Warn("failed to initialize OTEL exporter (continuing without OTEL)", "error", err)
 		} else {
 			// Set the same tracker for consistent staleness detection
 			otelExporter.SetTracker(metricTracker)
 			otelExporter.Start()
-			log.Println("OpenTelemetry metrics exporter started")
+			logging.For(logging.ComponentMetrics).Info("OpenTelemetry metrics exporter started")
 		}
 	}
 
@@ -669,24 +682,25 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("bjorn2scan-agent listening on port %s", port)
+		logging.For(logging.ComponentHTTP).Info("bjorn2scan-agent listening", "port", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logging.For(logging.ComponentHTTP).Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	// Wait for shutdown signal
 	<-sigChan
-	log.Println("Shutdown signal received, shutting down gracefully...")
+	logging.For(logging.ComponentHTTP).Info("shutdown signal received, shutting down gracefully")
 
 	// Cancel context to stop Docker watcher
 	cancel()
 
 	// Shutdown OTEL exporter if running
 	if otelExporter != nil {
-		log.Println("Shutting down OpenTelemetry exporter...")
+		logging.For(logging.ComponentMetrics).Info("shutting down OpenTelemetry exporter")
 		if err := otelExporter.Shutdown(); err != nil {
-			log.Printf("Error shutting down OTEL exporter: %v", err)
+			logging.For(logging.ComponentMetrics).Error("error shutting down OTEL exporter", "error", err)
 		}
 	}
 
@@ -695,8 +709,8 @@ func main() {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error during shutdown", "error", err)
 	}
 
-	log.Println("bjorn2scan-agent stopped")
+	logging.For(logging.ComponentHTTP).Info("bjorn2scan-agent stopped")
 }

@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype"
@@ -36,33 +38,34 @@ type Config struct {
 }
 
 // logDirectoryContents logs the contents of a directory for debugging
-func logDirectoryContents(dir string, prefix string) {
+func logDirectoryContents(dir string, phase string) {
+	log := logging.For(logging.ComponentGrype)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("%s Directory does not exist: %s", prefix, dir)
+			log.Debug("directory does not exist", "phase", phase, "dir", dir)
 		} else {
-			log.Printf("%s Error reading directory %s: %v", prefix, dir, err)
+			log.Error("failed to read directory", "phase", phase, "dir", dir, slog.Any("error", err))
 		}
 		return
 	}
 
 	if len(entries) == 0 {
-		log.Printf("%s Directory is empty: %s", prefix, dir)
+		log.Debug("directory is empty", "phase", phase, "dir", dir)
 		return
 	}
 
-	log.Printf("%s Directory %s contains %d entries:", prefix, dir, len(entries))
+	log.Debug("directory contents", "phase", phase, "dir", dir, "entries", len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
-			log.Printf("%s   - %s (error getting info: %v)", prefix, entry.Name(), err)
+			log.Debug("entry info error", "phase", phase, "name", entry.Name(), slog.Any("error", err))
 			continue
 		}
 		if info.IsDir() {
-			log.Printf("%s   - %s/ (directory)", prefix, entry.Name())
+			log.Debug("directory entry", "phase", phase, "name", entry.Name()+"/")
 		} else {
-			log.Printf("%s   - %s (%d bytes)", prefix, entry.Name(), info.Size())
+			log.Debug("file entry", "phase", phase, "name", entry.Name(), "size", info.Size())
 		}
 	}
 }
@@ -86,7 +89,8 @@ type ScanResult struct {
 // This should be called at startup before accepting scan requests.
 // Returns the database status and any error encountered.
 func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
-	log.Printf("[grype-init] Initializing vulnerability database...")
+	log := logging.For(logging.ComponentGrype)
+	log.Info("initializing vulnerability database")
 
 	identification := clio.Identification{
 		Name:    "bjorn2scan-grype",
@@ -104,13 +108,13 @@ func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
 				fmt.Errorf("failed to create database directory %s: %w", dbDir, err)
 		}
 		installCfg.DBRootDir = dbDir
-		log.Printf("[grype-init] Using database directory: %s", dbDir)
+		log.Info("using database directory", "dir", dbDir)
 	}
 
 	// Log directory contents before initialization
-	logDirectoryContents(installCfg.DBRootDir, "[grype-init-pre]")
+	logDirectoryContents(installCfg.DBRootDir, "init-pre")
 
-	log.Printf("[grype-init] Loading/downloading vulnerability database...")
+	log.Info("loading/downloading vulnerability database")
 	startTime := time.Now()
 
 	// Progress indicator
@@ -124,7 +128,7 @@ func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
 				return
 			case <-ticker.C:
 				elapsed := time.Since(startTime).Round(time.Second)
-				log.Printf("[grype-init] Still initializing database... (%v elapsed)", elapsed)
+				log.Info("still initializing database", "elapsed", elapsed)
 			}
 		}
 	}()
@@ -135,8 +139,8 @@ func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
 	loadDuration := time.Since(startTime).Round(time.Millisecond)
 
 	if err != nil {
-		log.Printf("[grype-init] Failed to initialize database after %v: %v", loadDuration, err)
-		logDirectoryContents(installCfg.DBRootDir, "[grype-init-fail]")
+		log.Error("failed to initialize database", "duration", loadDuration, slog.Any("error", err))
+		logDirectoryContents(installCfg.DBRootDir, "init-fail")
 
 		status := &DatabaseStatus{Available: false, Error: err.Error()}
 		if dbStatus != nil {
@@ -145,8 +149,8 @@ func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
 		return status, fmt.Errorf("failed to initialize vulnerability database: %w", err)
 	}
 
-	log.Printf("[grype-init] Database initialized successfully in %v", loadDuration)
-	logDirectoryContents(installCfg.DBRootDir, "[grype-init-post]")
+	log.Info("database initialized successfully", "duration", loadDuration)
+	logDirectoryContents(installCfg.DBRootDir, "init-post")
 
 	status := &DatabaseStatus{
 		Available:     true,
@@ -155,7 +159,7 @@ func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
 		Built:         dbStatus.Built,
 	}
 
-	log.Printf("[grype-init] Database ready: schema=%s, built=%v", status.SchemaVersion, status.Built)
+	log.Info("database ready", "schema", status.SchemaVersion, "built", status.Built)
 	return status, nil
 }
 
@@ -237,6 +241,7 @@ func isNumericDir(name string) bool {
 // DeleteDatabase removes the vulnerability database, forcing a re-download on next use.
 // This is useful for testing database initialization.
 func DeleteDatabase(cfg Config) error {
+	log := logging.For(logging.ComponentGrype)
 	dbDir := cfg.DBRootDir
 	if dbDir != "" {
 		dbDir = filepath.Join(dbDir, "grype")
@@ -245,16 +250,16 @@ func DeleteDatabase(cfg Config) error {
 		dbDir = filepath.Join(homeDir, ".cache", "grype", "db")
 	}
 
-	log.Printf("[grype-db] Deleting database directory: %s", dbDir)
+	log.Info("deleting database directory", "dir", dbDir)
 
 	// Log contents before deletion
-	logDirectoryContents(dbDir, "[grype-db-delete-pre]")
+	logDirectoryContents(dbDir, "delete-pre")
 
 	if err := os.RemoveAll(dbDir); err != nil {
 		return fmt.Errorf("failed to delete database directory: %w", err)
 	}
 
-	log.Printf("[grype-db] Database directory deleted successfully")
+	log.Info("database directory deleted successfully")
 	return nil
 }
 
@@ -302,7 +307,8 @@ func ScanVulnerabilities(ctx context.Context, sbomJSON []byte) (*ScanResult, err
 // ScanVulnerabilitiesWithConfig scans an SBOM for vulnerabilities using Grype library with custom configuration
 // Returns a ScanResult containing both the vulnerability JSON and information about the database used
 func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Config) (*ScanResult, error) {
-	log.Printf("Starting vulnerability scan on SBOM (%d bytes)", len(sbomJSON))
+	log := logging.For(logging.ComponentGrype)
+	log.Debug("starting vulnerability scan", "sbom_size", len(sbomJSON))
 
 	// Write SBOM to temp file so we can use Grype's Provide function
 	// This ensures we get all the proper processing (distro, relationships, etc.)
@@ -322,7 +328,7 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		return nil, fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	log.Printf("Using Grype's SBOM provider for complete processing")
+	log.Debug("using grype SBOM provider for complete processing")
 
 	// Configure the vulnerability database location
 	identification := clio.Identification{
@@ -341,18 +347,18 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 			return nil, fmt.Errorf("failed to create database directory %s: %w", dbDir, err)
 		}
 		installCfg.DBRootDir = dbDir
-		log.Printf("Using Grype database directory: %s", dbDir)
+		log.Debug("using grype database directory", "dir", dbDir)
 	}
 
 	// Check if database exists, if not download it
-	log.Printf("Checking vulnerability database status...")
-	log.Printf("Database config: DBRootDir=%s, LatestURL=%s", installCfg.DBRootDir, distCfg.LatestURL)
+	log.Debug("checking vulnerability database status")
+	log.Debug("database config", "db_root", installCfg.DBRootDir, "latest_url", distCfg.LatestURL)
 
 	// Log directory contents before loading (helps diagnose issues)
-	logDirectoryContents(installCfg.DBRootDir, "[grype-db-pre]")
+	logDirectoryContents(installCfg.DBRootDir, "db-pre")
 
 	// Load the database with auto-update enabled, with progress logging
-	log.Printf("Loading vulnerability database (will download if missing)...")
+	log.Debug("loading vulnerability database (will download if missing)")
 	startTime := time.Now()
 
 	// Start a progress indicator goroutine
@@ -366,7 +372,7 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 				return
 			case <-ticker.C:
 				elapsed := time.Since(startTime).Round(time.Second)
-				log.Printf("[grype-db] Still loading database... (%v elapsed)", elapsed)
+				log.Info("still loading database", "elapsed", elapsed)
 			}
 		}
 	}()
@@ -377,33 +383,39 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 	loadDuration := time.Since(startTime).Round(time.Millisecond)
 
 	if err != nil {
-		log.Printf("Failed to load vulnerability database after %v: %v", loadDuration, err)
+		log.Error("failed to load vulnerability database", "duration", loadDuration, slog.Any("error", err))
 		if dbStatus != nil {
-			log.Printf("Database status: Built=%v, SchemaVersion=%s, From=%s, Path=%s, Error=%v",
-				dbStatus.Built, dbStatus.SchemaVersion, dbStatus.From, dbStatus.Path, dbStatus.Error)
+			log.Debug("database status on failure",
+				"built", dbStatus.Built,
+				"schema", dbStatus.SchemaVersion,
+				"from", dbStatus.From,
+				"path", dbStatus.Path,
+				"db_error", dbStatus.Error)
 		}
 		// Log directory contents after failure to see what state we're in
-		logDirectoryContents(installCfg.DBRootDir, "[grype-db-post-fail]")
+		logDirectoryContents(installCfg.DBRootDir, "db-post-fail")
 		return nil, fmt.Errorf("failed to load vulnerability database: %w", err)
 	}
 
-	log.Printf("Loaded vulnerability database successfully in %v", loadDuration)
+	log.Info("loaded vulnerability database successfully", "duration", loadDuration)
 	if dbStatus != nil {
-		log.Printf("Database status: Built=%v, SchemaVersion=%s, From=%s",
-			dbStatus.Built, dbStatus.SchemaVersion, dbStatus.From)
+		log.Debug("database status",
+			"built", dbStatus.Built,
+			"schema", dbStatus.SchemaVersion,
+			"from", dbStatus.From)
 	}
 
 	// Log directory contents after successful load
-	logDirectoryContents(installCfg.DBRootDir, "[grype-db-post]")
+	logDirectoryContents(installCfg.DBRootDir, "db-post")
 
 	// Read the actual timestamp from the SQLite database file.
 	// The grype loader may return a cached/stale timestamp that doesn't reflect
 	// the actual database on disk, so we read it directly to get the true value.
 	actualBuilt, err := readActualDBTimestamp(dbStatus.Path)
 	if err != nil {
-		log.Printf("Warning: failed to read actual DB timestamp: %v (using loader value)", err)
+		log.Warn("failed to read actual DB timestamp, using loader value", slog.Any("error", err))
 	} else if !actualBuilt.Equal(dbStatus.Built) {
-		log.Printf("Corrected stale timestamp: loader=%v, actual=%v", dbStatus.Built, actualBuilt)
+		log.Info("corrected stale timestamp", "loader", dbStatus.Built, "actual", actualBuilt)
 		dbStatus.Built = actualBuilt
 	}
 
@@ -415,11 +427,11 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		return nil, fmt.Errorf("failed to provide packages from SBOM: %w", err)
 	}
 
-	log.Printf("Scanning %d packages for vulnerabilities...", len(packages))
+	log.Debug("scanning packages for vulnerabilities", "packages", len(packages))
 	if len(packages) > 0 {
-		log.Printf("Sample package PURL: %s", packages[0].PURL)
+		log.Debug("sample package", "purl", packages[0].PURL)
 		if context.Distro != nil {
-			log.Printf("Context distro: %s", context.Distro.String())
+			log.Debug("context distro", "distro", context.Distro.String())
 		}
 	}
 
@@ -444,13 +456,15 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		return nil, fmt.Errorf("vulnerability matches are nil")
 	}
 
-	log.Printf("Found %d vulnerability matches (%d ignored)", remainingMatches.Count(), len(ignoredMatches))
+	log.Debug("vulnerability scan complete",
+		"matches", remainingMatches.Count(),
+		"ignored", len(ignoredMatches))
 
 	// Collect EOL distro packages for alerting (maintains parity with grype CLI)
 	eolPackages := vulnerabilityMatcher.EOLDistroPackages()
 	var distroAlertData *models.DistroAlertData
 	if len(eolPackages) > 0 {
-		log.Printf("Detected %d packages from EOL distribution", len(eolPackages))
+		log.Info("detected packages from EOL distribution", "eol_packages", len(eolPackages))
 		distroAlertData = &models.DistroAlertData{
 			EOLDistroPackages: eolPackages,
 		}
@@ -483,7 +497,7 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		return nil, fmt.Errorf("failed to encode vulnerability report to JSON: %w", err)
 	}
 
-	log.Printf("Vulnerability scan complete (%d bytes)", len(reportJSON))
+	log.Debug("vulnerability scan complete", "report_size", len(reportJSON))
 
 	// Build result with vulnerability JSON and DB status
 	result := &ScanResult{

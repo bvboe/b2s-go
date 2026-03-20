@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 
+	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/debug"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 )
 
@@ -61,13 +62,13 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Parse JSON body
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				log.Printf("Warning: failed to close request body: %v", err)
+				logging.For(logging.ComponentHTTP).Warn("failed to close request body", "error", err)
 			}
 		}()
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("Error reading request body: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error reading request body", "error", err)
 			http.Error(w, "Failed to read request body", http.StatusBadRequest)
 			return
 		}
@@ -77,7 +78,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		}
 
 		if err := json.Unmarshal(body, &request); err != nil {
-			log.Printf("Error parsing JSON: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error parsing JSON", "error", err)
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
@@ -90,7 +91,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Validate SQL query
 		valid, err := debug.ValidateQuery(request.Query)
 		if !valid {
-			log.Printf("Invalid SQL query rejected: %v", err)
+			logging.For(logging.ComponentHTTP).Warn("invalid SQL query rejected", "error", err)
 			http.Error(w, fmt.Sprintf("Invalid query: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -98,7 +99,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Execute query
 		result, err := db.ExecuteQuery(request.Query)
 		if err != nil {
-			log.Printf("Error executing query: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error executing query", "error", err)
 			http.Error(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -118,7 +119,7 @@ func DebugSQLHandler(db *database.DB, debugConfig *debug.DebugConfig) http.Handl
 		// Return JSON response
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}
@@ -192,8 +193,293 @@ func DebugMetricsHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.Job
 		// Return JSON response
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	}
+}
+
+// DebugQueueHandler handles GET /api/debug/queue requests to get queue contents.
+//
+// Response format:
+//
+//	{
+//	  "current_depth": 5,
+//	  "peak_depth": 12,
+//	  "total_enqueued": 1547,
+//	  "total_dropped": 3,
+//	  "total_processed": 1539,
+//	  "jobs": [
+//	    {"type": "image", "image": "nginx:latest", "digest": "sha256:...", "node_name": "worker-1", "force_scan": false},
+//	    {"type": "host", "node_name": "worker-1", "force_scan": true, "full_rescan": false}
+//	  ]
+//	}
+func DebugQueueHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.JobQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !debugConfig.IsEnabled() {
+			http.Error(w, "Debug mode not enabled", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if scanQueue == nil {
+			http.Error(w, "Scan queue not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		contents := scanQueue.GetQueueContents()
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(contents); err != nil {
+			logging.For(logging.ComponentHTTP).Error("error encoding queue contents", "error", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	}
+}
+
+// DebugRescanNodeHandler handles POST /api/debug/rescan/node/{name} to manually trigger a node rescan.
+//
+// Optional request body:
+//
+//	{"full_rescan": true}
+//
+// Response: {"status": "queued", "node": "worker-1"}
+func DebugRescanNodeHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.JobQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !debugConfig.IsEnabled() {
+			http.Error(w, "Debug mode not enabled", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if scanQueue == nil {
+			http.Error(w, "Scan queue not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Extract node name from URL path: /api/debug/rescan/node/{name}
+		nodeName := r.URL.Path[len("/api/debug/rescan/node/"):]
+		if nodeName == "" {
+			http.Error(w, "Node name required", http.StatusBadRequest)
+			return
+		}
+
+		// Parse optional body for full_rescan flag
+		fullRescan := false
+		if r.Body != nil && r.ContentLength > 0 {
+			var body struct {
+				FullRescan bool `json:"full_rescan"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				fullRescan = body.FullRescan
+			}
+		}
+
+		// Enqueue the host scan
+		if fullRescan {
+			scanQueue.EnqueueHostFullRescan(nodeName)
+		} else {
+			scanQueue.EnqueueHostForceScan(nodeName)
+		}
+
+		logging.For(logging.ComponentHTTP).Debug("enqueued manual node rescan", "node_name", nodeName, "full_rescan", fullRescan)
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"status":      "queued",
+			"node":        nodeName,
+			"full_rescan": fullRescan,
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+		}
+	}
+}
+
+// DebugRescanImageHandler handles POST /api/debug/rescan/image/{digest} to manually trigger an image rescan.
+//
+// Optional request body:
+//
+//	{"force_sbom": true}
+//
+// Response: {"status": "queued", "digest": "sha256:..."}
+func DebugRescanImageHandler(debugConfig *debug.DebugConfig, db *database.DB, scanQueue *scanning.JobQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !debugConfig.IsEnabled() {
+			http.Error(w, "Debug mode not enabled", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if scanQueue == nil {
+			http.Error(w, "Scan queue not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Extract digest from URL path: /api/debug/rescan/image/{digest}
+		digest := r.URL.Path[len("/api/debug/rescan/image/"):]
+		if digest == "" {
+			http.Error(w, "Image digest required", http.StatusBadRequest)
+			return
+		}
+
+		// Parse optional body for force_sbom flag
+		forceSBOM := false
+		if r.Body != nil && r.ContentLength > 0 {
+			var body struct {
+				ForceSBOM bool `json:"force_sbom"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				forceSBOM = body.ForceSBOM
+			}
+		}
+
+		// Look up image info from database to get a reference
+		// We need at least a digest to create an ImageID
+		imageID := containers.ImageID{
+			Digest:    digest,
+			Reference: digest, // Use digest as reference if we don't have one
+		}
+
+		// Enqueue the image scan
+		job := scanning.ScanJob{
+			Image:     imageID,
+			ForceScan: true, // Always force since this is a manual rescan
+		}
+
+		// If force_sbom is set, we need to clear the SBOM status first
+		// For now, just use ForceScan which will rescan vulnerabilities
+		// A full SBOM regeneration would require additional queue changes
+		_ = forceSBOM // Reserved for future enhancement
+
+		scanQueue.Enqueue(job)
+
+		logging.For(logging.ComponentHTTP).Debug("enqueued manual image rescan", "digest", digest)
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"status": "queued",
+			"digest": digest,
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+		}
+	}
+}
+
+// DebugRescanAllNodesHandler handles POST /api/debug/rescan/all-nodes to trigger rescan of all nodes.
+//
+// Response: {"status": "queued", "count": 5}
+func DebugRescanAllNodesHandler(debugConfig *debug.DebugConfig, db *database.DB, scanQueue *scanning.JobQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !debugConfig.IsEnabled() {
+			http.Error(w, "Debug mode not enabled", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if scanQueue == nil {
+			http.Error(w, "Scan queue not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Get all nodes from database
+		nodes, err := db.GetAllNodes()
+		if err != nil {
+			logging.For(logging.ComponentHTTP).Error("error getting nodes for rescan", "error", err)
+			http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
+			return
+		}
+
+		// Enqueue rescan for each node
+		for _, node := range nodes {
+			scanQueue.EnqueueHostForceScan(node.Name)
+		}
+
+		logging.For(logging.ComponentHTTP).Debug("enqueued node rescan batch", "count", len(nodes))
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"status": "queued",
+			"count":  len(nodes),
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
+		}
+	}
+}
+
+// DebugRescanAllImagesHandler handles POST /api/debug/rescan/all-images to trigger rescan of all images.
+//
+// Response: {"status": "queued", "count": 50}
+func DebugRescanAllImagesHandler(debugConfig *debug.DebugConfig, db *database.DB, scanQueue *scanning.JobQueue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !debugConfig.IsEnabled() {
+			http.Error(w, "Debug mode not enabled", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if scanQueue == nil {
+			http.Error(w, "Scan queue not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Get all images from database
+		imagesRaw, err := db.GetAllImages()
+		if err != nil {
+			logging.For(logging.ComponentHTTP).Error("error getting images for rescan", "error", err)
+			http.Error(w, "Failed to get images", http.StatusInternalServerError)
+			return
+		}
+
+		images, ok := imagesRaw.([]database.ContainerImage)
+		if !ok {
+			http.Error(w, "Failed to convert images", http.StatusInternalServerError)
+			return
+		}
+
+		// Enqueue rescan for each image
+		for _, img := range images {
+			job := scanning.ScanJob{
+				Image: containers.ImageID{
+					Digest:    img.Digest,
+					Reference: img.Digest,
+				},
+				ForceScan: true,
+			}
+			scanQueue.Enqueue(job)
+		}
+
+		logging.For(logging.ComponentHTTP).Debug("enqueued image rescan batch", "count", len(images))
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"status": "queued",
+			"count":  len(images),
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			logging.For(logging.ComponentHTTP).Error("error encoding response", "error", err)
 		}
 	}
 }
@@ -204,6 +490,11 @@ func DebugMetricsHandler(debugConfig *debug.DebugConfig, scanQueue *scanning.Job
 // Endpoints:
 //   - POST /api/debug/sql - Execute SQL queries (SELECT, INSERT, UPDATE, DELETE, etc.)
 //   - GET /api/debug/metrics - Retrieve performance metrics
+//   - GET /api/debug/queue - Get current queue contents
+//   - POST /api/debug/rescan/node/{name} - Rescan a specific node
+//   - POST /api/debug/rescan/image/{digest} - Rescan a specific image
+//   - POST /api/debug/rescan/all-nodes - Rescan all nodes
+//   - POST /api/debug/rescan/all-images - Rescan all images
 func RegisterDebugHandlers(mux *http.ServeMux, db *database.DB, debugConfig *debug.DebugConfig, scanQueue *scanning.JobQueue) {
 	if debugConfig == nil || !debugConfig.IsEnabled() {
 		// Don't register handlers if debug not enabled
@@ -212,6 +503,11 @@ func RegisterDebugHandlers(mux *http.ServeMux, db *database.DB, debugConfig *deb
 
 	mux.HandleFunc("/api/debug/sql", DebugSQLHandler(db, debugConfig))
 	mux.HandleFunc("/api/debug/metrics", DebugMetricsHandler(debugConfig, scanQueue))
+	mux.HandleFunc("/api/debug/queue", DebugQueueHandler(debugConfig, scanQueue))
+	mux.HandleFunc("/api/debug/rescan/node/", DebugRescanNodeHandler(debugConfig, scanQueue))
+	mux.HandleFunc("/api/debug/rescan/image/", DebugRescanImageHandler(debugConfig, db, scanQueue))
+	mux.HandleFunc("/api/debug/rescan/all-nodes", DebugRescanAllNodesHandler(debugConfig, db, scanQueue))
+	mux.HandleFunc("/api/debug/rescan/all-images", DebugRescanAllImagesHandler(debugConfig, db, scanQueue))
 
-	log.Println("Debug handlers registered at /api/debug/sql and /api/debug/metrics")
+	logging.For(logging.ComponentHTTP).Info("debug handlers registered", "endpoints", "/api/debug/sql, /api/debug/metrics, /api/debug/queue, /api/debug/rescan/*")
 }

@@ -6,12 +6,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -418,7 +418,9 @@ func (e *DirectOTLPExporter) StreamNodeVulnerabilityMetrics(
 		return err
 	}
 
-	log.Printf("[otel-direct] Sent %d data points in %d batches", totalPoints, batchCount)
+	logging.For(logging.ComponentMetrics).Debug("sent data points to OTLP",
+		"total_points", totalPoints,
+		"batch_count", batchCount)
 	return nil
 }
 

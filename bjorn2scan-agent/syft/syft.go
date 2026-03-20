@@ -3,7 +3,6 @@ package syft
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/format"
@@ -11,6 +10,7 @@ import (
 	"github.com/anchore/syft/syft/source"
 	"github.com/bvboe/b2s-go/sbom-generator-shared/exclusions"
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // GenerateSBOM generates an SBOM for a Docker image using syft library
@@ -21,7 +21,7 @@ func GenerateSBOM(ctx context.Context, image containers.ImageID) ([]byte, error)
 	// Since we only scan locally running containers, the reference is always available
 	imageRef := image.Reference
 
-	log.Printf("Generating SBOM for image: %s", imageRef)
+	logging.For(logging.ComponentQueue).Info("generating SBOM for image", "image", imageRef)
 
 	// Configure source to use Docker daemon exclusively
 	// This ensures we ONLY scan locally cached images and never attempt registry pulls
@@ -36,7 +36,7 @@ func GenerateSBOM(ctx context.Context, image containers.ImageID) ([]byte, error)
 	// Ensure cleanup of source
 	defer func() {
 		if cleanupErr := src.Close(); cleanupErr != nil {
-			log.Printf("Warning: failed to cleanup source: %v", cleanupErr)
+			logging.For(logging.ComponentQueue).Warn("failed to cleanup source", "error", cleanupErr)
 		}
 	}()
 
@@ -53,8 +53,10 @@ func GenerateSBOM(ctx context.Context, image containers.ImageID) ([]byte, error)
 		return nil, fmt.Errorf("failed to encode SBOM to JSON: %w", err)
 	}
 
-	log.Printf("Successfully generated SBOM for %s (%d bytes, %d packages)",
-		imageRef, len(sbomBytes), s.Artifacts.Packages.PackageCount())
+	logging.For(logging.ComponentQueue).Info("successfully generated SBOM",
+		"image", imageRef,
+		"size_bytes", len(sbomBytes),
+		"package_count", s.Artifacts.Packages.PackageCount())
 
 	return sbomBytes, nil
 }
@@ -117,15 +119,19 @@ func GenerateHostSBOM(ctx context.Context) ([]byte, error) {
 	}
 	exclusionPatterns, err := exclusions.BuildExclusions(excCfg)
 	if err != nil {
-		log.Printf("Warning: failed to detect network mounts: %v", err)
+		logging.For(logging.ComponentQueue).Warn("failed to detect network mounts", "error", err)
 	}
 
 	// Log exclusion configuration for debugging
-	log.Printf("Host SBOM exclusion config: autoDetectNFS=%v, extraExclusions=%d, extraNetworkFSTypes=%d",
-		hostScanConfig.AutoDetectNFS, len(hostScanConfig.ExtraExclusions), len(hostScanConfig.ExtraNetworkFSTypes))
-	log.Printf("Generating SBOM for host filesystem: %s (excluding %d patterns):", hostPath, len(exclusionPatterns))
+	logging.For(logging.ComponentQueue).Info("host SBOM exclusion config",
+		"auto_detect_nfs", hostScanConfig.AutoDetectNFS,
+		"extra_exclusions_count", len(hostScanConfig.ExtraExclusions),
+		"extra_network_fs_types_count", len(hostScanConfig.ExtraNetworkFSTypes))
+	logging.For(logging.ComponentQueue).Info("generating SBOM for host filesystem",
+		"path", hostPath,
+		"exclusion_pattern_count", len(exclusionPatterns))
 	for _, pattern := range exclusionPatterns {
-		log.Printf("  - %s", pattern)
+		logging.For(logging.ComponentQueue).Debug("exclusion pattern", "pattern", pattern)
 	}
 
 	// Configure source with exclusions for container filesystems
@@ -143,7 +149,7 @@ func GenerateHostSBOM(ctx context.Context) ([]byte, error) {
 	// Ensure cleanup of source
 	defer func() {
 		if cleanupErr := src.Close(); cleanupErr != nil {
-			log.Printf("Warning: failed to cleanup source: %v", cleanupErr)
+			logging.For(logging.ComponentQueue).Warn("failed to cleanup source", "error", cleanupErr)
 		}
 	}()
 
@@ -160,8 +166,9 @@ func GenerateHostSBOM(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("failed to encode host SBOM to JSON: %w", err)
 	}
 
-	log.Printf("Successfully generated host SBOM (%d bytes, %d packages)",
-		len(sbomBytes), s.Artifacts.Packages.PackageCount())
+	logging.For(logging.ComponentQueue).Info("successfully generated host SBOM",
+		"size_bytes", len(sbomBytes),
+		"package_count", s.Artifacts.Packages.PackageCount())
 
 	return sbomBytes, nil
 }

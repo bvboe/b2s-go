@@ -3,8 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // DatabaseProvider defines the interface for querying database contents
@@ -37,7 +38,7 @@ func DatabaseContainersHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		containers, err := provider.GetAllContainers()
 		if err != nil {
-			log.Printf("Error querying containers: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error querying containers", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -49,7 +50,7 @@ func DatabaseContainersHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding containers response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding containers response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -60,7 +61,7 @@ func DatabaseImagesHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		images, err := provider.GetAllImages()
 		if err != nil {
-			log.Printf("Error querying images: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error querying images", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -72,7 +73,7 @@ func DatabaseImagesHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding images response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding images response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -99,7 +100,7 @@ func SBOMDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
 		// Get SBOM from database
 		sbomData, err := provider.GetSBOM(digest)
 		if err != nil {
-			log.Printf("Error retrieving SBOM for %s: %v", digest, err)
+			logging.For(logging.ComponentHTTP).Error("error retrieving SBOM", "digest", digest, "error", err)
 			http.Error(w, "SBOM not found", http.StatusNotFound)
 			return
 		}
@@ -119,7 +120,7 @@ func SBOMDownloadHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		// Write SBOM data
 		if _, err := w.Write(sbomData); err != nil {
-			log.Printf("Error writing SBOM response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing SBOM response", "error", err)
 		}
 	}
 }
@@ -145,7 +146,7 @@ func VulnerabilitiesDownloadHandler(provider DatabaseProvider) http.HandlerFunc 
 		// Get vulnerabilities from database
 		vulnData, err := provider.GetVulnerabilities(digest)
 		if err != nil {
-			log.Printf("Error retrieving vulnerabilities for %s: %v", digest, err)
+			logging.For(logging.ComponentHTTP).Error("error retrieving vulnerabilities", "digest", digest, "error", err)
 			http.Error(w, "Vulnerabilities not found", http.StatusNotFound)
 			return
 		}
@@ -165,7 +166,7 @@ func VulnerabilitiesDownloadHandler(provider DatabaseProvider) http.HandlerFunc 
 
 		// Write vulnerability data
 		if _, err := w.Write(vulnData); err != nil {
-			log.Printf("Error writing vulnerabilities response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing vulnerabilities response", "error", err)
 		}
 	}
 }
@@ -176,7 +177,7 @@ func ImageDetailsHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		images, err := provider.GetAllImageDetails()
 		if err != nil {
-			log.Printf("Error querying image details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error querying image details", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -187,7 +188,7 @@ func ImageDetailsHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding image details response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding image details response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -212,14 +213,14 @@ func ImageDetailHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		details, err := provider.GetImageDetails(digest)
 		if err != nil {
-			log.Printf("Error querying image details for %s: %v", digest, err)
+			logging.For(logging.ComponentHTTP).Error("error querying image details", "digest", digest, "error", err)
 			http.Error(w, "Image not found", http.StatusNotFound)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(details); err != nil {
-			log.Printf("Error encoding image detail response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding image detail response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -246,7 +247,7 @@ func PackagesHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		packages, err := provider.GetPackagesByImage(digest)
 		if err != nil {
-			log.Printf("Error querying packages for %s: %v", digest, err)
+			logging.For(logging.ComponentHTTP).Error("error querying packages", "digest", digest, "error", err)
 			http.Error(w, "Packages not found", http.StatusNotFound)
 			return
 		}
@@ -257,7 +258,7 @@ func PackagesHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding packages response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding packages response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -285,7 +286,7 @@ func VulnerabilitiesHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		vulns, err := provider.GetVulnerabilitiesByImage(digest)
 		if err != nil {
-			log.Printf("Error querying vulnerabilities for %s: %v", digest, err)
+			logging.For(logging.ComponentHTTP).Error("error querying vulnerabilities", "digest", digest, "error", err)
 			http.Error(w, "Vulnerabilities not found", http.StatusNotFound)
 			return
 		}
@@ -296,7 +297,7 @@ func VulnerabilitiesHandler(provider DatabaseProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding vulnerabilities response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding vulnerabilities response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
@@ -331,19 +332,19 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 		mux.HandleFunc("/api/vulnerabilities/", func(w http.ResponseWriter, r *http.Request) {
 			// Check if this is a request for vulnerability details
 			path := r.URL.Path
-			log.Printf("Vulnerability route handler - path: %s", path)
+			logging.For(logging.ComponentHTTP).Debug("vulnerability route handler", "path", path)
 			if len(path) > 8 && path[len(path)-8:] == "/details" {
-				log.Printf("Path ends with /details, checking for ImageQueryProvider")
+				logging.For(logging.ComponentHTTP).Debug("path ends with /details, checking for ImageQueryProvider")
 				// Route to details handler if ImageQueryProvider is available
 				if queryProvider, ok := provider.(ImageQueryProvider); ok {
-					log.Printf("Routing to VulnerabilityDetailsHandler")
+					logging.For(logging.ComponentHTTP).Debug("routing to VulnerabilityDetailsHandler")
 					VulnerabilityDetailsHandler(queryProvider)(w, r)
 					return
 				}
-				log.Printf("ImageQueryProvider not available, falling through")
+				logging.For(logging.ComponentHTTP).Debug("ImageQueryProvider not available, falling through")
 			}
 			// Otherwise, use the download handler
-			log.Printf("Routing to VulnerabilitiesDownloadHandler")
+			logging.For(logging.ComponentHTTP).Debug("routing to VulnerabilitiesDownloadHandler")
 			VulnerabilitiesDownloadHandler(provider)(w, r)
 		})
 	}
@@ -370,32 +371,32 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 	mux.HandleFunc("/api/images/", func(w http.ResponseWriter, r *http.Request) {
 		// Route to appropriate handler based on path suffix
 		path := r.URL.Path
-		log.Printf("Routing /api/images/ - path: %s", path)
+		logging.For(logging.ComponentHTTP).Debug("routing /api/images/", "path", path)
 
 		// "/api/images/" is 12 characters
 		if len(path) > 12 {
 			pathWithoutPrefix := path[12:]
-			log.Printf("Routing /api/images/ - pathWithoutPrefix: %s", pathWithoutPrefix)
+			logging.For(logging.ComponentHTTP).Debug("routing /api/images/", "path_without_prefix", pathWithoutPrefix)
 
 			// Check if we have ImageQueryProvider for enhanced handlers
 			if queryProvider, ok := provider.(ImageQueryProvider); ok {
-				log.Printf("Routing /api/images/ - using ImageQueryProvider")
+				logging.For(logging.ComponentHTTP).Debug("routing /api/images/ - using ImageQueryProvider")
 
 				// Check for /packages suffix
 				if len(pathWithoutPrefix) > 9 && pathWithoutPrefix[len(pathWithoutPrefix)-9:] == "/packages" {
-					log.Printf("Routing to ImagePackagesDetailHandler")
+					logging.For(logging.ComponentHTTP).Debug("routing to ImagePackagesDetailHandler")
 					ImagePackagesDetailHandler(queryProvider)(w, r)
 					return
 				}
 				// Check for /vulnerabilities suffix
 				// "/vulnerabilities" is 16 characters
 				if len(pathWithoutPrefix) > 16 && pathWithoutPrefix[len(pathWithoutPrefix)-16:] == "/vulnerabilities" {
-					log.Printf("Routing to ImageVulnerabilitiesDetailHandler")
+					logging.For(logging.ComponentHTTP).Debug("routing to ImageVulnerabilitiesDetailHandler")
 					ImageVulnerabilitiesDetailHandler(queryProvider)(w, r)
 					return
 				}
 				// Single image detail with full info (references and containers)
-				log.Printf("Routing to ImageDetailFullHandler")
+				logging.For(logging.ComponentHTTP).Debug("routing to ImageDetailFullHandler")
 				ImageDetailFullHandler(queryProvider)(w, r)
 			} else {
 				// Fallback to basic handlers if provider doesn't support ExecuteReadOnlyQuery
@@ -420,7 +421,7 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 		if len(path) > 8 && path[len(path)-8:] == "/details" {
 			// Route to details handler if ImageQueryProvider is available
 			if queryProvider, ok := provider.(ImageQueryProvider); ok {
-				log.Printf("Routing to PackageDetailsHandler")
+				logging.For(logging.ComponentHTTP).Debug("routing to PackageDetailsHandler")
 				PackageDetailsHandler(queryProvider)(w, r)
 				return
 			}

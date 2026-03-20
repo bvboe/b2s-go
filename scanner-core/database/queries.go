@@ -3,8 +3,9 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // Package represents a package from the packages table
@@ -81,7 +82,7 @@ func (db *DB) GetPackagesByImage(digest string) (interface{}, error) {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -123,7 +124,7 @@ func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -170,7 +171,7 @@ func (db *DB) GetImageSummary(digest string) (interface{}, error) {
 
 // GetImageDetails returns detailed information including vulnerability counts
 func (db *DB) GetImageDetails(digest string) (interface{}, error) {
-	log.Printf("DEBUG GetImageDetails: digest=%q len=%d", digest, len(digest))
+	logging.For(logging.ComponentDatabase).Debug("get image details", "digest", digest, "digest_len", len(digest))
 	var details ImageDetails
 	var scannedAt sql.NullString
 	var osName, osVersion sql.NullString
@@ -220,7 +221,7 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -293,7 +294,7 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 		images = append(images, details)
 	}
 	if err := rows.Close(); err != nil {
-		log.Printf("Warning: Failed to close rows: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 	}
 
 	// Now get vulnerability counts for each image
@@ -327,7 +328,7 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 			}
 			images[i].VulnerabilityCount = totalVulns
 			if err := vulnRows.Close(); err != nil {
-				log.Printf("Warning: Failed to close vulnerability rows: %v", err)
+				logging.For(logging.ComponentDatabase).Warn("failed to close vulnerability rows", "error", err)
 			}
 		}
 	}
@@ -406,7 +407,7 @@ func (db *DB) GetScannedContainers() ([]ScannedContainer, error) {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -459,7 +460,7 @@ func (db *DB) GetImageScanStatusCounts() ([]ImageScanStatusCount, error) {
 		allStatuses = append(allStatuses, status)
 	}
 	if err := statusRows.Close(); err != nil {
-		log.Printf("Warning: Failed to close status rows: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to close status rows", "error", err)
 	}
 
 	// Get counts for running images (images with at least one container)
@@ -552,7 +553,7 @@ func (db *DB) GetContainerVulnerabilities() ([]ContainerVulnerability, error) {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 

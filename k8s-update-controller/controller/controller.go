@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/bvboe/b2s-go/k8s-update-controller/config"
@@ -50,27 +51,28 @@ func New(cfg *config.Config) (*Controller, error) {
 
 // CheckAndUpdate performs a single update check and applies updates if needed
 func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) {
+	log := slog.Default().With("component", "k8s-update-controller")
 	result := &UpdateResult{}
 
 	// 1. Get current release version
-	fmt.Println("Step 1: Getting current release...")
+	log.Info("step 1: getting current release")
 	currentRelease, err := c.helmClient.GetCurrentRelease()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current release: %w", err)
 	}
 	result.CurrentVersion = currentRelease.Chart.Metadata.Version
-	fmt.Printf("Current version: %s\n", result.CurrentVersion)
+	log.Info("current version", "version", result.CurrentVersion)
 
 	// 2. List available versions from registry
-	fmt.Println("\nStep 2: Querying registry for available versions...")
+	log.Info("step 2: querying registry for available versions")
 	versions, err := c.registryClient.ListVersions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list versions: %w", err)
 	}
-	fmt.Printf("Found %d versions in registry\n", len(versions))
+	log.Info("found versions in registry", "count", len(versions))
 
 	// 3. Find latest version matching constraints
-	fmt.Println("\nStep 3: Evaluating version constraints...")
+	log.Info("step 3: evaluating version constraints")
 	latestVersion, err := c.versionChecker.FindLatestVersion(result.CurrentVersion, versions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find latest version: %w", err)
@@ -79,7 +81,7 @@ func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) 
 
 	// 4. Check if update should be performed
 	shouldUpdate, reason := c.versionChecker.ShouldUpdate(result.CurrentVersion, latestVersion)
-	fmt.Printf("Should update: %v (%s)\n", shouldUpdate, reason)
+	log.Info("update evaluation", "should_update", shouldUpdate, "reason", reason)
 
 	if !shouldUpdate {
 		result.UpdateAvailable = false
@@ -90,7 +92,7 @@ func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) 
 	result.UpdateAvailable = true
 
 	// 5. Download chart
-	fmt.Printf("\nStep 4: Downloading chart version %s...\n", latestVersion)
+	log.Info("step 4: downloading chart", "version", latestVersion)
 	chartPath, err := c.registryClient.DownloadChart(ctx, latestVersion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download chart: %w", err)
@@ -104,40 +106,41 @@ func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) 
 			_ = c.cleanupTempDir(dir)
 		}
 	}()
-	fmt.Printf("Chart downloaded to: %s\n", chartPath)
+	log.Info("chart downloaded", "path", chartPath)
 
 	// 6. Verify signature (if enabled)
 	if c.config.Verification.Enabled {
-		fmt.Println("\nStep 5: Verifying chart signature...")
+		log.Info("step 5: verifying chart signature")
 		if err := c.registryClient.VerifySignature(ctx, chartPath,
 			c.config.Verification.CosignIdentityRegexp,
 			c.config.Verification.CosignOIDCIssuer); err != nil {
 			return nil, fmt.Errorf("signature verification failed: %w", err)
 		}
-		fmt.Println("Signature verified ✓")
+		log.Info("signature verified")
 	}
 
 	// 7. Perform Helm upgrade
-	fmt.Printf("\nStep 6: Upgrading release to version %s...\n", latestVersion)
+	log.Info("step 6: upgrading release", "version", latestVersion)
 	if err := c.helmClient.UpgradeRelease(ctx, chartPath, latestVersion); err != nil {
 		return nil, fmt.Errorf("helm upgrade failed: %w", err)
 	}
-	fmt.Println("Upgrade completed ✓")
+	log.Info("upgrade completed")
 
 	result.UpdatePerformed = true
 	result.UpdatedToVersion = latestVersion
 
 	// 8. Wait for health check
 	if c.config.Rollback.Enabled {
-		fmt.Printf("\nStep 7: Waiting %v for health check...\n", c.config.Rollback.HealthCheckDelay())
-		time.Sleep(c.config.Rollback.HealthCheckDelay())
+		delay := c.config.Rollback.HealthCheckDelay()
+		log.Info("step 7: waiting for health check", "delay", delay)
+		time.Sleep(delay)
 
 		healthy, err := c.helmClient.IsReleaseHealthy()
 		if err != nil || !healthy {
-			fmt.Printf("Health check failed: %v\n", err)
+			log.Error("health check failed", "error", err)
 
 			if c.config.Rollback.AutoRollback {
-				fmt.Println("Performing automatic rollback...")
+				log.Info("performing automatic rollback")
 				if rbErr := c.helmClient.RollbackRelease(); rbErr != nil {
 					return nil, fmt.Errorf("rollback failed after upgrade failure: %w", rbErr)
 				}
@@ -147,7 +150,7 @@ func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) 
 			return nil, fmt.Errorf("health check failed but auto-rollback is disabled")
 		}
 
-		fmt.Println("Health check passed ✓")
+		log.Info("health check passed")
 	}
 
 	return result, nil

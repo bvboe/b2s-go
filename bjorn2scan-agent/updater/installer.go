@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 const (
@@ -44,11 +46,13 @@ func NewInstaller(binaryPath, healthURL string, healthTimeout time.Duration) *In
 // The health check and rollback decision happen on the next startup
 // The cleanup function is called after the binary is copied but before exit
 func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
-	fmt.Println("Starting installation...")
+	log := logging.For(logging.ComponentHTTP)
+
+	log.Info("starting installation")
 
 	// 1. Backup current binary
 	backupPath := i.binaryPath + backupSuffix
-	fmt.Printf("Backing up current binary to %s...\n", backupPath)
+	log.Info("backing up current binary", "backup_path", backupPath)
 	if err := i.copyFile(i.binaryPath, backupPath); err != nil {
 		return fmt.Errorf("failed to backup binary: %w", err)
 	}
@@ -59,7 +63,7 @@ func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
 	}
 
 	// 3. Atomic replace (rename is atomic on most filesystems)
-	fmt.Printf("Installing new binary to %s...\n", i.binaryPath)
+	log.Info("installing new binary", "path", i.binaryPath)
 	// First copy to a temp location in the same directory (ensures same filesystem)
 	tempPath := i.binaryPath + ".new"
 	if err := i.copyFile(newBinaryPath, tempPath); err != nil {
@@ -78,18 +82,18 @@ func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
 		return fmt.Errorf("failed to install new binary: %w", err)
 	}
 
-	fmt.Println("Binary installed successfully ✓")
+	log.Info("binary installed successfully")
 
 	// 4. Cleanup temp directory (binary has been copied, no longer needed)
 	if cleanup != nil {
 		if err := cleanup(); err != nil {
-			fmt.Printf("Warning: failed to cleanup temp directory: %v\n", err)
+			log.Warn("failed to cleanup temp directory", "error", err)
 			// Continue anyway - cleanup failure shouldn't block the update
 		}
 	}
 
-	fmt.Println("Update installed, exiting for restart...")
-	fmt.Println("New version will be verified on startup")
+	log.Info("update installed, exiting for restart")
+	log.Info("new version will be verified on startup")
 
 	// Exit gracefully - systemd will restart the service with Restart=always
 	// The new binary will run, perform health check, and either commit or rollback
@@ -100,7 +104,9 @@ func (i *Installer) Install(newBinaryPath string, cleanup func() error) error {
 
 // Rollback restores the previous binary and exits for restart
 func (i *Installer) Rollback() error {
-	fmt.Println("Performing rollback...")
+	log := logging.For(logging.ComponentHTTP)
+
+	log.Info("performing rollback")
 
 	backupPath := i.binaryPath + backupSuffix
 	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
@@ -115,7 +121,7 @@ func (i *Installer) Rollback() error {
 	// Remove rollback marker
 	_ = os.Remove(rollbackMarker) // Best effort cleanup
 
-	fmt.Println("Rollback completed, exiting for restart...")
+	log.Info("rollback completed, exiting for restart")
 
 	// Exit - systemd will restart with the old version
 	os.Exit(1)
@@ -126,25 +132,29 @@ func (i *Installer) Rollback() error {
 // PerformPostUpdateHealthCheck checks if update was successful and commits or rolls back
 // This should be called on startup if ShouldCheckRollback() returns true
 func (i *Installer) PerformPostUpdateHealthCheck() error {
-	fmt.Println("Pending update detected, performing health check...")
+	log := logging.For(logging.ComponentHTTP)
+
+	log.Info("pending update detected, performing health check")
 
 	// Give the service a moment to fully start
 	time.Sleep(2 * time.Second)
 
 	// Perform health check
 	if err := i.checkHealth(); err != nil {
-		fmt.Printf("Health check failed: %v\n", err)
-		fmt.Println("Rolling back to previous version...")
+		log.Error("health check failed", "error", err)
+		log.Info("rolling back to previous version")
 		return i.Rollback()
 	}
 
 	// Health check passed - commit the update
-	fmt.Println("Health check passed ✓")
+	log.Info("health check passed")
 	return i.CommitUpdate()
 }
 
 // CommitUpdate removes the rollback marker and backup after successful update
 func (i *Installer) CommitUpdate() error {
+	log := logging.For(logging.ComponentHTTP)
+
 	backupPath := i.binaryPath + backupSuffix
 
 	// Remove rollback marker
@@ -157,7 +167,7 @@ func (i *Installer) CommitUpdate() error {
 		return fmt.Errorf("failed to remove backup: %w", err)
 	}
 
-	fmt.Println("Update committed successfully!")
+	log.Info("update committed successfully")
 	return nil
 }
 

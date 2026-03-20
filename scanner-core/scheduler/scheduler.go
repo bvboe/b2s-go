@@ -3,10 +3,11 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // randInt63n returns a random int64 in [0, n)
@@ -54,7 +55,8 @@ func (s *Scheduler) AddJob(job Job, schedule Schedule, config JobConfig) error {
 	}
 
 	if !config.Enabled {
-		log.Printf("[scheduler] Job %s is disabled, skipping", name)
+		logging.For(logging.ComponentScheduler).Info("job is disabled, skipping",
+			"job", name)
 		return nil
 	}
 
@@ -65,7 +67,9 @@ func (s *Scheduler) AddJob(job Job, schedule Schedule, config JobConfig) error {
 		nextRun:  schedule.Next(time.Now()),
 	}
 
-	log.Printf("[scheduler] Registered job: %s, next run: %s", name, s.jobs[name].nextRun.Format(time.RFC3339))
+	logging.For(logging.ComponentScheduler).Info("registered job",
+		"job", name,
+		"next_run", s.jobs[name].nextRun.Format(time.RFC3339))
 	return nil
 }
 
@@ -83,12 +87,13 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Start each job's timer
 	s.mu.RLock()
 	for name, sj := range s.jobs {
-		log.Printf("[scheduler] Starting job: %s", name)
+		logging.For(logging.ComponentScheduler).Info("starting job", "job", name)
 		s.scheduleJob(name, sj)
 	}
 	s.mu.RUnlock()
 
-	log.Printf("[scheduler] Started with %d jobs", len(s.jobs))
+	logging.For(logging.ComponentScheduler).Info("scheduler started",
+		"job_count", len(s.jobs))
 	return nil
 }
 
@@ -127,21 +132,28 @@ func (s *Scheduler) executeJob(name string, sj *scheduledJob) {
 
 	// Execute the job
 	start := time.Now()
-	log.Printf("[scheduler] Executing job: %s", name)
+	logging.For(logging.ComponentScheduler).Info("executing job", "job", name)
 
 	err := sj.job.Run(ctx)
 	duration := time.Since(start)
 
 	if err != nil {
-		log.Printf("[scheduler] Job %s failed after %v: %v", name, duration, err)
+		logging.For(logging.ComponentScheduler).Error("job failed",
+			"job", name,
+			"duration", duration,
+			"error", err)
 	} else {
-		log.Printf("[scheduler] Job %s completed successfully in %v", name, duration)
+		logging.For(logging.ComponentScheduler).Info("job completed successfully",
+			"job", name,
+			"duration", duration)
 	}
 
 	// Schedule next run
 	s.mu.Lock()
 	sj.nextRun = sj.schedule.Next(time.Now())
-	log.Printf("[scheduler] Job %s next run: %s", name, sj.nextRun.Format(time.RFC3339))
+	logging.For(logging.ComponentScheduler).Debug("scheduled next run",
+		"job", name,
+		"next_run", sj.nextRun.Format(time.RFC3339))
 	s.scheduleJob(name, sj)
 	s.mu.Unlock()
 }
@@ -155,7 +167,7 @@ func (s *Scheduler) Stop() error {
 		return fmt.Errorf("scheduler not started")
 	}
 
-	log.Printf("[scheduler] Stopping scheduler...")
+	logging.For(logging.ComponentScheduler).Info("stopping scheduler")
 
 	// Cancel context to signal all jobs to stop
 	s.cancel()
@@ -164,7 +176,7 @@ func (s *Scheduler) Stop() error {
 	for name, sj := range s.jobs {
 		if sj.timer != nil {
 			sj.timer.Stop()
-			log.Printf("[scheduler] Stopped timer for job: %s", name)
+			logging.For(logging.ComponentScheduler).Debug("stopped timer for job", "job", name)
 		}
 	}
 	s.mu.Unlock()
@@ -178,9 +190,9 @@ func (s *Scheduler) Stop() error {
 
 	select {
 	case <-done:
-		log.Printf("[scheduler] All jobs stopped gracefully")
+		logging.For(logging.ComponentScheduler).Info("all jobs stopped gracefully")
 	case <-time.After(30 * time.Second):
-		log.Printf("[scheduler] Timeout waiting for jobs to stop")
+		logging.For(logging.ComponentScheduler).Warn("timeout waiting for jobs to stop")
 	}
 
 	return nil
@@ -207,15 +219,20 @@ func (s *Scheduler) RunJobNow(name string) error {
 			defer cancel()
 		}
 
-		log.Printf("[scheduler] Manually executing job: %s", name)
+		logging.For(logging.ComponentScheduler).Info("manually executing job", "job", name)
 		start := time.Now()
 		err := sj.job.Run(ctx)
 		duration := time.Since(start)
 
 		if err != nil {
-			log.Printf("[scheduler] Manual execution of job %s failed after %v: %v", name, duration, err)
+			logging.For(logging.ComponentScheduler).Error("manual execution of job failed",
+				"job", name,
+				"duration", duration,
+				"error", err)
 		} else {
-			log.Printf("[scheduler] Manual execution of job %s completed successfully in %v", name, duration)
+			logging.For(logging.ComponentScheduler).Info("manual execution of job completed successfully",
+				"job", name,
+				"duration", duration)
 		}
 	}()
 

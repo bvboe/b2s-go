@@ -3,8 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // InfoProvider is an interface for components to provide their specific information
@@ -23,7 +24,7 @@ type AppInfoProvider interface {
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := fmt.Fprintln(w, "OK"); err != nil {
-		log.Printf("Error writing health response: %v", err)
+		logging.For(logging.ComponentHTTP).Error("error writing health response", "error", err)
 	}
 }
 
@@ -35,7 +36,7 @@ func InfoHandler(provider InfoProvider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(info); err != nil {
-			log.Printf("Error encoding info response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding info response", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}

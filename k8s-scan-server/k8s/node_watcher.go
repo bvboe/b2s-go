@@ -2,9 +2,10 @@ package k8s
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 
 	corev1 "k8s.io/api/core/v1"
@@ -80,11 +81,12 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 	nodeInformer := factory.Core().V1().Nodes().Informer()
 
 	// Add event handlers
+	log := logging.For(logging.ComponentK8s)
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*corev1.Node)
 			if !ok {
-				log.Printf("Unexpected object type in AddFunc: %T", obj)
+				log.Warn("unexpected object type in node add", "type", slog.Any("type", obj))
 				return
 			}
 			handleNodeAddOrUpdate(node, manager)
@@ -92,7 +94,7 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			node, ok := newObj.(*corev1.Node)
 			if !ok {
-				log.Printf("Unexpected object type in UpdateFunc: %T", newObj)
+				log.Warn("unexpected object type in node update", "type", slog.Any("type", newObj))
 				return
 			}
 			handleNodeAddOrUpdate(node, manager)
@@ -103,12 +105,12 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 				// Handle tombstone (object deleted from cache but we got notification late)
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					log.Printf("Unexpected object type in DeleteFunc: %T", obj)
+					log.Warn("unexpected object type in node delete", "type", slog.Any("type", obj))
 					return
 				}
 				node, ok = tombstone.Obj.(*corev1.Node)
 				if !ok {
-					log.Printf("Tombstone contained unexpected object: %T", tombstone.Obj)
+					log.Warn("tombstone contained unexpected object", "type", slog.Any("type", tombstone.Obj))
 					return
 				}
 			}
@@ -116,27 +118,27 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 		},
 	})
 	if err != nil {
-		log.Printf("Error adding event handler: %v", err)
+		log.Error("failed to add event handler", slog.Any("error", err))
 		return
 	}
 
-	log.Println("Starting node informer...")
+	log.Info("starting node informer")
 
 	// Start the informer (runs in background goroutine)
 	go factory.Start(ctx.Done())
 
 	// Wait for cache to sync before considering the informer ready
-	log.Println("Waiting for node informer cache to sync...")
+	log.Info("waiting for node informer cache to sync")
 	if !cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced) {
-		log.Println("Failed to sync node informer cache")
+		log.Error("failed to sync node informer cache")
 		return
 	}
 
-	log.Println("Node informer cache synced and ready")
+	log.Info("node informer cache synced and ready")
 
 	// Block until context is cancelled
 	<-ctx.Done()
-	log.Println("Node watcher shutting down")
+	log.Info("node watcher shutting down")
 }
 
 // handleNodeAddOrUpdate processes node additions and updates
@@ -148,14 +150,14 @@ func handleNodeAddOrUpdate(node *corev1.Node, manager *nodes.Manager) {
 	} else {
 		// If node is not ready, we might want to track it differently
 		// For now, just log it
-		log.Printf("Skipping non-ready node: %s", node.Name)
+		logging.For(logging.ComponentK8s).Debug("skipping non-ready node", "node", node.Name)
 	}
 }
 
 // handleNodeDelete processes node deletions
 func handleNodeDelete(node *corev1.Node, manager *nodes.Manager) {
 	manager.RemoveNode(node.Name)
-	log.Printf("Removed node: %s", node.Name)
+	logging.For(logging.ComponentK8s).Debug("removed node", "node", node.Name)
 }
 
 // SyncInitialNodes performs an initial sync of all existing nodes.
@@ -163,7 +165,8 @@ func handleNodeDelete(node *corev1.Node, manager *nodes.Manager) {
 // since the informer automatically performs an initial list and sync (via cache.WaitForCacheSync).
 // This function is kept for explicit synchronization use cases or testing.
 func SyncInitialNodes(ctx context.Context, clientset kubernetes.Interface, manager *nodes.Manager) error {
-	log.Println("Performing initial node sync...")
+	log := logging.For(logging.ComponentK8s)
+	log.Info("performing initial node sync")
 
 	nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -180,7 +183,7 @@ func SyncInitialNodes(ctx context.Context, clientset kubernetes.Interface, manag
 	}
 
 	manager.SetNodes(allNodes)
-	log.Printf("Initial node sync complete: %d nodes", manager.GetNodeCount())
+	log.Info("initial node sync complete", "nodes", manager.GetNodeCount())
 
 	return nil
 }

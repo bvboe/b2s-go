@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	v6 "github.com/anchore/grype/grype/db/v6"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	// Note: sqlite driver is registered by grype's dependencies (modernc.org/sqlite)
 )
 
@@ -192,7 +192,7 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	du.mu.Lock()
 	defer du.mu.Unlock()
 
-	log.Printf("[db-updater] Checking for vulnerability database updates...")
+	logging.For(logging.ComponentVulnDB).Info("checking for vulnerability database updates")
 
 	grypeDir := filepath.Join(du.dbRootDir, "grype")
 	dbPath := filepath.Join(grypeDir, "6", "vulnerability.db")
@@ -203,10 +203,10 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	if du.timestampStore != nil {
 		if t, err := du.timestampStore.LoadGrypeDBTimestamp(); err == nil && !t.IsZero() {
 			lastKnownTimestamp = t
-			log.Printf("[db-updater] Last known DB timestamp (from persistent store): %s",
-				lastKnownTimestamp.Format(time.RFC3339))
+			logging.For(logging.ComponentVulnDB).Debug("loaded last known database timestamp from persistent store",
+				"timestamp", lastKnownTimestamp.Format(time.RFC3339))
 		} else if err != nil {
-			log.Printf("[db-updater] Warning: failed to load last known timestamp: %v", err)
+			logging.For(logging.ComponentVulnDB).Warn("failed to load last known timestamp", "error", err)
 		}
 	}
 
@@ -216,49 +216,52 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		dbExisted = true
 		desc, err := v6.ReadDescription(dbPath)
 		if err != nil {
-			log.Printf("[db-updater] Warning: failed to read database description: %v", err)
+			logging.For(logging.ComponentVulnDB).Warn("failed to read database description", "error", err)
 		} else {
-			log.Printf("[db-updater] Current database file: built=%s, schema=%s",
-				desc.Built.Format(time.RFC3339), desc.SchemaVersion.String())
+			logging.For(logging.ComponentVulnDB).Debug("current database file",
+				"built", desc.Built.Format(time.RFC3339),
+				"schema", desc.SchemaVersion.String())
 
 			// Check if a newer archive is available
 			client, err := distribution.NewClient(du.distCfg)
 			if err != nil {
-				log.Printf("[db-updater] Warning: failed to create distribution client: %v", err)
+				logging.For(logging.ComponentVulnDB).Warn("failed to create distribution client", "error", err)
 			} else {
 				archive, err := client.IsUpdateAvailable(desc)
 				if err != nil {
-					log.Printf("[db-updater] Warning: failed to check for updates: %v", err)
+					logging.For(logging.ComponentVulnDB).Warn("failed to check for updates", "error", err)
 				} else if archive != nil {
 					// Use persistent timestamp for comparison if available, as v6.ReadDescription
 					// may return stale cached values that don't match the actual database
 					compareTimestamp := desc.Built.Time
 					if !lastKnownTimestamp.IsZero() {
 						compareTimestamp = lastKnownTimestamp
-						log.Printf("[db-updater] Using persistent timestamp for comparison: %s",
-							compareTimestamp.Format(time.RFC3339))
+						logging.For(logging.ComponentVulnDB).Debug("using persistent timestamp for comparison",
+							"timestamp", compareTimestamp.Format(time.RFC3339))
 					}
 
 					if archive.Built.After(compareTimestamp) {
 						// Newer database available - delete existing to force re-download
-						log.Printf("[db-updater] Update available: archive built=%s (current=%s)",
-							archive.Built.Format(time.RFC3339), compareTimestamp.Format(time.RFC3339))
-						log.Printf("[db-updater] Removing existing database to force update...")
+						logging.For(logging.ComponentVulnDB).Info("update available",
+							"archive_built", archive.Built.Format(time.RFC3339),
+							"current", compareTimestamp.Format(time.RFC3339))
+						logging.For(logging.ComponentVulnDB).Info("removing existing database to force update")
 						schemaDir := filepath.Join(grypeDir, "6")
 						if err := os.RemoveAll(schemaDir); err != nil {
-							log.Printf("[db-updater] Warning: failed to remove schema dir: %v", err)
+							logging.For(logging.ComponentVulnDB).Warn("failed to remove schema directory", "error", err)
 						}
 					} else {
-						log.Printf("[db-updater] Archive available but not newer: archive=%s, current=%s",
-							archive.Built.Format(time.RFC3339), compareTimestamp.Format(time.RFC3339))
+						logging.For(logging.ComponentVulnDB).Debug("archive available but not newer",
+							"archive", archive.Built.Format(time.RFC3339),
+							"current", compareTimestamp.Format(time.RFC3339))
 					}
 				} else {
-					log.Printf("[db-updater] No update available")
+					logging.For(logging.ComponentVulnDB).Debug("no update available")
 				}
 			}
 		}
 	} else {
-		log.Printf("[db-updater] No existing database found, will download")
+		logging.For(logging.ComponentVulnDB).Info("no existing database found, will download")
 	}
 
 	// 3. Load/download the database
@@ -277,7 +280,8 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 				return
 			case <-ticker.C:
 				elapsed := time.Since(startTime).Round(time.Second)
-				log.Printf("[db-updater] Still updating database... (%v elapsed)", elapsed)
+				logging.For(logging.ComponentVulnDB).Debug("still updating database",
+					"elapsed", elapsed)
 			}
 		}
 	}()
@@ -289,9 +293,10 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("failed to update vulnerability database: %w", err)
 	}
 
-	log.Printf("[db-updater] Loader returned: built=%s, schema=%s (took %v)",
-		dbStatus.Built.Format(time.RFC3339), dbStatus.SchemaVersion,
-		time.Since(startTime).Round(time.Millisecond))
+	logging.For(logging.ComponentVulnDB).Debug("loader returned",
+		"built", dbStatus.Built.Format(time.RFC3339),
+		"schema", dbStatus.SchemaVersion,
+		"duration", time.Since(startTime).Round(time.Millisecond))
 
 	// 4. Read the actual database timestamp directly from SQLite
 	// This bypasses grype's library which may cache stale values
@@ -301,7 +306,7 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		if t, err := du.descriptionReader(dbPath); err == nil {
 			actualBuilt = t
 		} else {
-			log.Printf("[db-updater] Warning: descriptionReader failed: %v", err)
+			logging.For(logging.ComponentVulnDB).Warn("description reader failed", "error", err)
 			actualBuilt = dbStatus.Built
 		}
 	} else {
@@ -309,16 +314,17 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		if t, err := readGrypeDBTimestampFromSQLite(dbPath); err == nil {
 			actualBuilt = t
 			if !actualBuilt.Equal(dbStatus.Built) {
-				log.Printf("[db-updater] Corrected timestamp: loader=%s, actual=%s",
-					dbStatus.Built.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
+				logging.For(logging.ComponentVulnDB).Debug("corrected timestamp",
+					"loader_timestamp", dbStatus.Built.Format(time.RFC3339),
+					"actual_timestamp", actualBuilt.Format(time.RFC3339))
 			}
 		} else {
-			log.Printf("[db-updater] Warning: failed to read timestamp from SQLite: %v", err)
+			logging.For(logging.ComponentVulnDB).Warn("failed to read timestamp from SQLite", "error", err)
 			// Fall back to v6.ReadDescription
 			if desc, err := v6.ReadDescription(dbPath); err == nil {
 				actualBuilt = desc.Built.Time
 			} else {
-				log.Printf("[db-updater] Warning: failed to re-read database description: %v", err)
+				logging.For(logging.ComponentVulnDB).Warn("failed to re-read database description", "error", err)
 				actualBuilt = dbStatus.Built
 			}
 		}
@@ -331,39 +337,41 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		Path:          dbStatus.Path,
 	}
 
-	log.Printf("[db-updater] Database ready: built=%s, schema=%s",
-		actualBuilt.Format(time.RFC3339), dbStatus.SchemaVersion)
+	logging.For(logging.ComponentVulnDB).Info("database ready",
+		"built", actualBuilt.Format(time.RFC3339),
+		"schema", dbStatus.SchemaVersion)
 
 	// 5. Determine if database changed by comparing against persistent timestamp
 	// This is more reliable than comparing against in-memory values which may be stale
 	var hasChanged bool
 	if !dbExisted && lastKnownTimestamp.IsZero() {
 		// First run - database was just downloaded, nothing to rescan yet
-		log.Printf("[db-updater] Initial database download complete, no rescan needed")
+		logging.For(logging.ComponentVulnDB).Info("initial database download complete, no rescan needed")
 		hasChanged = false
 	} else if lastKnownTimestamp.IsZero() {
 		// Database existed but we have no persistent record - this is a migration scenario
 		// Don't trigger rescan, just record the current timestamp
-		log.Printf("[db-updater] No persistent timestamp record, initializing tracking")
+		logging.For(logging.ComponentVulnDB).Info("no persistent timestamp record, initializing tracking")
 		hasChanged = false
 	} else {
 		// Compare actual timestamp against persisted last known timestamp
 		hasChanged = !actualBuilt.Equal(lastKnownTimestamp)
 		if hasChanged {
-			log.Printf("[db-updater] Database updated: %s -> %s",
-				lastKnownTimestamp.Format(time.RFC3339), actualBuilt.Format(time.RFC3339))
+			logging.For(logging.ComponentVulnDB).Info("database updated",
+				"previous", lastKnownTimestamp.Format(time.RFC3339),
+				"current", actualBuilt.Format(time.RFC3339))
 		} else {
-			log.Printf("[db-updater] No database changes (persistent comparison)")
+			logging.For(logging.ComponentVulnDB).Debug("no database changes (persistent comparison)")
 		}
 	}
 
 	// 6. Save the current timestamp to persistent storage
 	if du.timestampStore != nil {
 		if err := du.timestampStore.SaveGrypeDBTimestamp(actualBuilt); err != nil {
-			log.Printf("[db-updater] Warning: failed to save timestamp to persistent store: %v", err)
+			logging.For(logging.ComponentVulnDB).Warn("failed to save timestamp to persistent store", "error", err)
 		} else {
-			log.Printf("[db-updater] Saved DB timestamp to persistent store: %s",
-				actualBuilt.Format(time.RFC3339))
+			logging.For(logging.ComponentVulnDB).Debug("saved database timestamp to persistent store",
+				"timestamp", actualBuilt.Format(time.RFC3339))
 		}
 	}
 

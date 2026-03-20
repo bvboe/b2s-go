@@ -3,9 +3,9 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // ContainerRow represents a container in the database
@@ -79,8 +79,8 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 				return false, fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			log.Printf("Updated container in database: namespace=%s, pod=%s, name=%s (image_id=%d)",
-				c.ID.Namespace, c.ID.Pod, c.ID.Name, imageID)
+			logging.For(logging.ComponentDatabase).Info("updated container in database",
+				"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
 			return true, nil
 		}
 
@@ -111,8 +111,8 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("New container added to database: namespace=%s, pod=%s, name=%s (image_id=%d)",
-		c.ID.Namespace, c.ID.Pod, c.ID.Name, imageID)
+	logging.For(logging.ComponentDatabase).Info("new container added to database",
+		"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
 
 	return true, nil
 }
@@ -134,8 +134,8 @@ func (db *DB) RemoveContainer(id containers.ContainerID) error {
 	}
 
 	if rowsAffected > 0 {
-		log.Printf("Container removed from database: namespace=%s, pod=%s, name=%s",
-			id.Namespace, id.Pod, id.Name)
+		logging.For(logging.ComponentDatabase).Info("container removed from database",
+			"namespace", id.Namespace, "pod", id.Pod, "name", id.Name)
 	}
 
 	return nil
@@ -215,8 +215,8 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("Reconciliation complete: added=%d, removed=%d, new_images=%d",
-		stats.ContainersAdded, stats.ContainersRemoved, stats.ImagesAdded)
+	logging.For(logging.ComponentDatabase).Info("reconciliation complete",
+		"added", stats.ContainersAdded, "removed", stats.ContainersRemoved, "new_images", stats.ImagesAdded)
 	return stats, nil
 }
 
@@ -294,7 +294,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 
 	if orphanedCount == 0 {
 		// No cleanup needed
-		log.Printf("Cleanup: no orphaned images found")
+		logging.For(logging.ComponentDatabase).Info("cleanup: no orphaned images found")
 		return &CleanupStats{}, nil
 	}
 
@@ -481,9 +481,12 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		VulnerabilityDetailsRemoved: vulnerabilityDetailsCount,
 	}
 
-	log.Printf("Cleanup complete: removed %d images, %d packages (%d details), %d vulnerabilities (%d details)",
-		stats.ImagesRemoved, stats.PackagesRemoved, stats.PackageDetailsRemoved,
-		stats.VulnerabilitiesRemoved, stats.VulnerabilityDetailsRemoved)
+	logging.For(logging.ComponentDatabase).Info("cleanup complete",
+		"images_removed", stats.ImagesRemoved,
+		"packages_removed", stats.PackagesRemoved,
+		"package_details_removed", stats.PackageDetailsRemoved,
+		"vulnerabilities_removed", stats.VulnerabilitiesRemoved,
+		"vulnerability_details_removed", stats.VulnerabilityDetailsRemoved)
 
 	return stats, nil
 }

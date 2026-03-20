@@ -3,10 +3,10 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // RefreshImagesJob triggers a refresh of all running container images
@@ -31,7 +31,7 @@ func (j *RefreshImagesJob) Name() string {
 }
 
 func (j *RefreshImagesJob) Run(ctx context.Context) error {
-	log.Printf("[refresh-images] Starting periodic reconciliation of running containers")
+	logging.For(logging.ComponentJobs).Info("starting periodic reconciliation of running containers")
 
 	// Trigger the refresh - this will call back to agent/k8s-scan-server
 	// which will gather running container data and call SetContainers
@@ -40,7 +40,7 @@ func (j *RefreshImagesJob) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to trigger refresh: %w", err)
 	}
 
-	log.Printf("[refresh-images] Reconciliation completed successfully")
+	logging.For(logging.ComponentJobs).Info("reconciliation completed successfully")
 	return nil
 }
 
@@ -70,7 +70,7 @@ func (j *CleanupOrphanedImagesJob) Name() string {
 }
 
 func (j *CleanupOrphanedImagesJob) Run(ctx context.Context) error {
-	log.Printf("[cleanup] Starting cleanup of orphaned container images")
+	logging.For(logging.ComponentJobs).Info("starting cleanup of orphaned container images")
 
 	stats, err := j.db.CleanupOrphanedImages()
 	if err != nil {
@@ -78,10 +78,12 @@ func (j *CleanupOrphanedImagesJob) Run(ctx context.Context) error {
 	}
 
 	if stats != nil && stats.ImagesRemoved > 0 {
-		log.Printf("[cleanup] Cleanup completed: removed %d images, %d packages, %d vulnerabilities",
-			stats.ImagesRemoved, stats.PackagesRemoved, stats.VulnerabilitiesRemoved)
+		logging.For(logging.ComponentJobs).Info("cleanup completed",
+			"images_removed", stats.ImagesRemoved,
+			"packages_removed", stats.PackagesRemoved,
+			"vulnerabilities_removed", stats.VulnerabilitiesRemoved)
 	} else {
-		log.Printf("[cleanup] Cleanup completed: no orphaned images found")
+		logging.For(logging.ComponentJobs).Info("cleanup completed: no orphaned images found")
 	}
 
 	return nil

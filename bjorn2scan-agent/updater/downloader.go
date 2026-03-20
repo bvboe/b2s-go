@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // Downloader handles downloading and verifying release assets
@@ -63,15 +65,16 @@ func (d *Downloader) DownloadRelease(ctx context.Context, version string) (strin
 	}
 
 	// Verify checksum
+	log := logging.For(logging.ComponentHTTP)
 	arch := runtime.GOARCH
 	checksumName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz.sha256", arch)
 	checksumPath := filepath.Join(d.workDir, checksumName)
 
-	fmt.Println("Verifying checksum...")
+	log.Info("verifying checksum")
 	if err := d.VerifyChecksum(binaryPath, checksumPath); err != nil {
 		return "", fmt.Errorf("checksum verification failed: %w", err)
 	}
-	fmt.Println("Checksum verified ✓")
+	log.Info("checksum verified")
 
 	return binaryPath, nil
 }

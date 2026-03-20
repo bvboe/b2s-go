@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
@@ -103,18 +103,18 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 		return err
 	}
 
-	log.Println("Docker watcher: connected to Docker daemon")
+	logging.For(logging.ComponentContainers).Info("Docker watcher connected to Docker daemon")
 
 	// Perform initial sync of running containers
 	if err := syncInitialContainers(ctx, cli, manager); err != nil {
-		log.Printf("Warning: initial container sync failed: %v", err)
+		logging.For(logging.ComponentContainers).Warn("initial container sync failed", "error", err)
 	}
 
 	// Start watching for events
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Docker watcher shutting down")
+			logging.For(logging.ComponentContainers).Info("Docker watcher shutting down")
 			return nil
 		default:
 			// Watch for container events
@@ -125,18 +125,18 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 				Filters: eventFilters,
 			})
 
-			log.Println("Docker watcher started")
+			logging.For(logging.ComponentContainers).Info("Docker watcher started")
 
 		eventLoop:
 			for {
 				select {
 				case <-ctx.Done():
-					log.Println("Docker watcher shutting down")
+					logging.For(logging.ComponentContainers).Info("Docker watcher shutting down")
 					return nil
 
 				case err := <-errChan:
 					if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-						log.Printf("Docker events error: %v", err)
+						logging.For(logging.ComponentContainers).Error("Docker events error", "error", err)
 					}
 					break eventLoop
 
@@ -146,7 +146,7 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 						// Container started
 						c, err := extractContainer(ctx, cli, event.Actor.ID)
 						if err != nil {
-							log.Printf("Error extracting container for %s: %v", event.Actor.ID[:12], err)
+							logging.For(logging.ComponentContainers).Error("failed to extract container", "container_id", event.Actor.ID[:12], "error", err)
 							continue
 						}
 						manager.AddContainer(c)
@@ -179,7 +179,7 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 				}
 			}
 
-			log.Println("Docker watcher connection closed, reconnecting...")
+			logging.For(logging.ComponentContainers).Info("Docker watcher connection closed, reconnecting")
 			time.Sleep(1 * time.Second)
 		}
 	}
@@ -187,7 +187,7 @@ func WatchContainers(ctx context.Context, manager *containers.Manager) error {
 
 // syncInitialContainers performs an initial sync of all running containers
 func syncInitialContainers(ctx context.Context, cli *client.Client, manager *containers.Manager) error {
-	log.Println("Docker watcher: performing initial container sync...")
+	logging.For(logging.ComponentContainers).Info("Docker watcher performing initial container sync")
 
 	containerList, err := cli.ContainerList(ctx, containertypes.ListOptions{
 		All: false, // Only running containers
@@ -200,14 +200,14 @@ func syncInitialContainers(ctx context.Context, cli *client.Client, manager *con
 	for _, dc := range containerList {
 		c, err := extractContainer(ctx, cli, dc.ID)
 		if err != nil {
-			log.Printf("Warning: failed to extract container %s: %v", dc.ID[:12], err)
+			logging.For(logging.ComponentContainers).Warn("failed to extract container", "container_id", dc.ID[:12], "error", err)
 			continue
 		}
 		allContainers = append(allContainers, c)
 	}
 
 	manager.SetContainers(allContainers)
-	log.Printf("Docker watcher: initial sync complete: %d containers", manager.GetContainerCount())
+	logging.For(logging.ComponentContainers).Info("Docker watcher initial sync complete", "container_count", manager.GetContainerCount())
 
 	return nil
 }

@@ -3,10 +3,10 @@ package metrics
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -157,10 +157,12 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 
 		directExporter, err := NewDirectOTLPExporter(directConfig)
 		if err != nil {
-			log.Printf("Warning: failed to create direct OTLP exporter: %v (falling back to SDK)", err)
+			logging.For(logging.ComponentMetrics).Warn("failed to create direct OTLP exporter, falling back to SDK",
+				"error", err)
 		} else {
 			otelExporter.directExporter = directExporter
-			log.Printf("Direct OTLP exporter initialized (batch size: %d)", batchSize)
+			logging.For(logging.ComponentMetrics).Info("direct OTLP exporter initialized",
+				"batch_size", batchSize)
 		}
 	}
 
@@ -205,7 +207,7 @@ func (e *OTELExporter) recordMetrics() {
 	// Collect image metrics using the same method as /metrics endpoint
 	data, err := e.collector.Collect()
 	if err != nil {
-		log.Printf("Error collecting metrics for OTEL: %v", err)
+		logging.For(logging.ComponentMetrics).Error("error collecting metrics for OTEL", "error", err)
 		return
 	}
 
@@ -217,7 +219,7 @@ func (e *OTELExporter) recordMetrics() {
 		// First, collect node_scanned metrics (small dataset) via SDK
 		nodeScannedData, err := e.nodeCollector.CollectNodeScannedOnly()
 		if err != nil {
-			log.Printf("Error collecting node scanned metrics for OTEL: %v", err)
+			logging.For(logging.ComponentMetrics).Error("error collecting node scanned metrics for OTEL", "error", err)
 		} else {
 			e.recordMetricFamilies(nodeScannedData.Families)
 		}
@@ -234,18 +236,18 @@ func (e *OTELExporter) recordMetrics() {
 					e.deploymentUUID,
 					e.infoProvider.GetDeploymentName(),
 				); err != nil {
-					log.Printf("Error streaming node vulnerability metrics via direct OTLP: %v", err)
+					logging.For(logging.ComponentMetrics).Error("error streaming node vulnerability metrics via direct OTLP", "error", err)
 				}
 			} else {
-				log.Printf("Warning: database does not support streaming, falling back to SDK export")
+				logging.For(logging.ComponentMetrics).Warn("database does not support streaming, falling back to SDK export")
 				if err := e.streamNodeVulnerabilityMetrics(); err != nil {
-					log.Printf("Error streaming node vulnerability metrics for OTEL: %v", err)
+					logging.For(logging.ComponentMetrics).Error("error streaming node vulnerability metrics for OTEL", "error", err)
 				}
 			}
 		} else {
 			// Fallback to SDK-based export (will OOM with large datasets)
 			if err := e.streamNodeVulnerabilityMetrics(); err != nil {
-				log.Printf("Error streaming node vulnerability metrics for OTEL: %v", err)
+				logging.For(logging.ComponentMetrics).Error("error streaming node vulnerability metrics for OTEL", "error", err)
 			}
 		}
 	}
@@ -281,7 +283,9 @@ func (e *OTELExporter) recordMetricFamilies(families []MetricFamily) {
 		// Get or create gauge for this metric
 		gauge, err := e.getOrCreateGauge(family.Name, family.Help)
 		if err != nil {
-			log.Printf("Error creating gauge for %s: %v", family.Name, err)
+			logging.For(logging.ComponentMetrics).Error("error creating gauge",
+				"metric_name", family.Name,
+				"error", err)
 			continue
 		}
 
@@ -324,7 +328,7 @@ func (e *OTELExporter) Shutdown() error {
 	// Close direct exporter if it was initialized
 	if e.directExporter != nil {
 		if err := e.directExporter.Close(); err != nil {
-			log.Printf("Error closing direct OTLP exporter: %v", err)
+			logging.For(logging.ComponentMetrics).Error("error closing direct OTLP exporter", "error", err)
 		}
 	}
 
@@ -332,7 +336,7 @@ func (e *OTELExporter) Shutdown() error {
 	defer cancel()
 
 	if err := e.meterProvider.Shutdown(ctx); err != nil {
-		log.Printf("Error shutting down OTEL meter provider: %v", err)
+		logging.For(logging.ComponentMetrics).Error("error shutting down OTEL meter provider", "error", err)
 		return err
 	}
 

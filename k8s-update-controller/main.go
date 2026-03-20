@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bvboe/b2s-go/k8s-update-controller/config"
@@ -12,37 +13,71 @@ import (
 
 var version = "dev" // Set via ldflags at build time
 
+// initLogging initializes structured logging for k8s-update-controller
+// This is a standalone implementation since k8s-update-controller doesn't import scanner-core
+func initLogging() {
+	level := slog.LevelInfo
+	jsonFormat := false
+
+	// Check environment variable overrides
+	if envLevel := os.Getenv("LOG_LEVEL"); envLevel != "" {
+		switch strings.ToLower(envLevel) {
+		case "debug":
+			level = slog.LevelDebug
+		case "warn", "warning":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+	}
+	if envFormat := os.Getenv("LOG_FORMAT"); envFormat != "" {
+		jsonFormat = strings.ToLower(envFormat) == "json"
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if jsonFormat {
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
 func main() {
+	// Initialize structured logging from environment variables
+	initLogging()
+
+	log := slog.Default().With("component", "k8s-update-controller")
 	ctx := context.Background()
 
-	fmt.Printf("Bjorn2Scan Update Controller %s\n", version)
-	fmt.Println("Starting update check...")
+	log.Info("Bjorn2Scan Update Controller", "version", version)
+	log.Info("starting update check")
 
 	// Load configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
+		log.Error("error loading configuration", "error", err)
 		os.Exit(1)
 	}
 
 	if !cfg.Enabled {
-		fmt.Println("Auto-update is disabled in configuration")
+		log.Info("auto-update is disabled in configuration")
 		os.Exit(0)
 	}
 
-	fmt.Printf("Configuration loaded:\n")
-	fmt.Printf("  Release: %s/%s\n", cfg.Helm.Namespace, cfg.Helm.ReleaseName)
-	fmt.Printf("  Chart Registry: %s\n", cfg.Helm.ChartRegistry)
-	fmt.Printf("  Auto-update minor: %v\n", cfg.VersionConstraints.AutoUpdateMinor)
-	fmt.Printf("  Auto-update major: %v\n", cfg.VersionConstraints.AutoUpdateMajor)
-	if cfg.VersionConstraints.PinnedVersion != "" {
-		fmt.Printf("  Pinned version: %s\n", cfg.VersionConstraints.PinnedVersion)
-	}
+	log.Info("configuration loaded",
+		"namespace", cfg.Helm.Namespace,
+		"release", cfg.Helm.ReleaseName,
+		"chart_registry", cfg.Helm.ChartRegistry,
+		"auto_update_minor", cfg.VersionConstraints.AutoUpdateMinor,
+		"auto_update_major", cfg.VersionConstraints.AutoUpdateMajor,
+		"pinned_version", cfg.VersionConstraints.PinnedVersion)
 
 	// Create controller
 	ctrl, err := controller.New(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating controller: %v\n", err)
+		log.Error("error creating controller", "error", err)
 		os.Exit(1)
 	}
 
@@ -52,22 +87,25 @@ func main() {
 	duration := time.Since(startTime)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error during update check: %v\n", err)
+		log.Error("error during update check", "error", err)
 		os.Exit(1)
 	}
 
 	// Print results
-	fmt.Printf("\nUpdate check completed in %v\n", duration.Round(time.Second))
-	fmt.Printf("Current version: %s\n", result.CurrentVersion)
-	fmt.Printf("Latest available: %s\n", result.LatestVersion)
+	log.Info("update check completed",
+		"duration", duration.Round(time.Second),
+		"current_version", result.CurrentVersion,
+		"latest_version", result.LatestVersion)
 
 	if result.UpdatePerformed {
-		fmt.Printf("✓ Update performed: %s → %s\n", result.CurrentVersion, result.UpdatedToVersion)
-		fmt.Println("Next scheduled run will use the new version!")
+		log.Info("update performed",
+			"from_version", result.CurrentVersion,
+			"to_version", result.UpdatedToVersion,
+			"message", "next scheduled run will use the new version")
 	} else if result.UpdateAvailable {
-		fmt.Printf("Update available but not applied: %s\n", result.Reason)
+		log.Info("update available but not applied", "reason", result.Reason)
 	} else {
-		fmt.Println("System is up to date")
+		log.Info("system is up to date")
 	}
 
 	os.Exit(0)

@@ -1,9 +1,10 @@
 package debug
 
 import (
-	"log"
 	"net/http"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // responseWriter wraps http.ResponseWriter to capture status code and response size.
@@ -35,8 +36,8 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 //
 // Example output:
 //
-//	[DEBUG] Request: method=GET path=/api/images remote=127.0.0.1:54321
-//	[DEBUG] Response: method=GET path=/api/images status=200 size=1234 duration=45.2ms
+//	level=DEBUG msg=request component=http method=GET path=/api/images remote=127.0.0.1:54321
+//	level=DEBUG msg=response component=http method=GET path=/api/images status=200 size=1234 duration=45.2ms
 func LoggingMiddleware(debugConfig *DebugConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// If debug not enabled, pass through immediately with zero overhead
@@ -48,8 +49,8 @@ func LoggingMiddleware(debugConfig *DebugConfig, next http.Handler) http.Handler
 		start := time.Now()
 
 		// Log request
-		log.Printf("[DEBUG] Request: method=%s path=%s remote=%s",
-			r.Method, r.URL.Path, r.RemoteAddr)
+		log := logging.For(logging.ComponentHTTP)
+		log.Debug("request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 
 		// Wrap response writer to capture status and size
 		rw := &responseWriter{
@@ -63,8 +64,8 @@ func LoggingMiddleware(debugConfig *DebugConfig, next http.Handler) http.Handler
 		duration := time.Since(start)
 
 		// Log response
-		log.Printf("[DEBUG] Response: method=%s path=%s status=%d size=%d duration=%v",
-			r.Method, r.URL.Path, rw.status, rw.size, duration)
+		log.Debug("response", "method", r.Method, "path", r.URL.Path,
+			"status", rw.status, "size", rw.size, "duration", duration)
 
 		// Record metrics
 		debugConfig.RecordRequest(r.URL.Path, duration)

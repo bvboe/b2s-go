@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 )
 
@@ -74,7 +74,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 	}
 
 	id, _ := result.LastInsertId()
-	log.Printf("New node added to database: %s (id=%d)", n.Name, id)
+	logging.For(logging.ComponentDatabase).Info("new node added to database", "name", n.Name, "id", id)
 	return true, nil
 }
 
@@ -146,7 +146,7 @@ func (db *DB) RemoveNode(name string) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("Removed node from database: %s (id=%d)", name, nodeID)
+	logging.For(logging.ComponentDatabase).Info("removed node from database", "name", name, "id", nodeID)
 	return nil
 }
 
@@ -515,7 +515,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 			PURL     string `json:"purl"`
 		}
 		if err := json.Unmarshal(artifactRaw, &pkg); err != nil {
-			log.Printf("Warning: Failed to parse artifact: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to parse artifact", "error", err)
 			continue
 		}
 
@@ -584,7 +584,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		// Serialize all instances as JSON array for details
 		detailsJSON, err := json.Marshal(data.Instances)
 		if err != nil {
-			log.Printf("Warning: Failed to marshal package details for %s: %v", key.Name, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to marshal package details", "package", key.Name, "error", err)
 			detailsJSON = []byte("[]")
 		}
 
@@ -611,7 +611,8 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("Stored SBOM for node %s: %d unique packages (%d total artifacts)", name, len(packageGroups), len(sbom.Artifacts))
+	logging.For(logging.ComponentDatabase).Info("stored SBOM for node",
+		"node", name, "unique_packages", len(packageGroups), "total_artifacts", len(sbom.Artifacts))
 	return nil
 }
 
@@ -698,7 +699,7 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	for _, matchRaw := range report.Matches {
 		var pm parsedMatch
 		if err := json.Unmarshal(matchRaw, &pm); err != nil {
-			log.Printf("Warning: Failed to parse vulnerability match: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to parse vulnerability match", "error", err)
 			continue
 		}
 		pm.Raw = matchRaw
@@ -773,27 +774,27 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		// Insert vulnerability (without details column)
 		result, err := vulnStmt.Exec(nodeID, key.PackageID, key.CVEID, data.Severity, data.Risk, data.FixStatus, data.FixVersion, data.KnownExploited, len(data.Instances))
 		if err != nil {
-			log.Printf("Warning: failed to insert vulnerability %s: %v", key.CVEID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to insert vulnerability", "cve_id", key.CVEID, "error", err)
 			continue
 		}
 
 		vulnID, err := result.LastInsertId()
 		if err != nil {
-			log.Printf("Warning: failed to get vulnerability ID for %s: %v", key.CVEID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to get vulnerability ID", "cve_id", key.CVEID, "error", err)
 			continue
 		}
 
 		// Serialize all instances as JSON array for details
 		detailsJSON, err := json.Marshal(data.Instances)
 		if err != nil {
-			log.Printf("Warning: Failed to marshal vulnerability details for %s: %v", key.CVEID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to marshal vulnerability details", "cve_id", key.CVEID, "error", err)
 			detailsJSON = []byte("[]")
 		}
 
 		// Insert details into separate table
 		_, err = detailsStmt.Exec(vulnID, string(detailsJSON))
 		if err != nil {
-			log.Printf("Warning: failed to insert vulnerability details for %s: %v", key.CVEID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to insert vulnerability details", "cve_id", key.CVEID, "error", err)
 		}
 
 		totalInserted++
@@ -817,7 +818,8 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
-	log.Printf("Stored vulnerabilities for node %s: %d unique (from %d matches)", name, totalInserted, len(report.Matches))
+	logging.For(logging.ComponentDatabase).Info("stored vulnerabilities for node",
+		"node", name, "unique", totalInserted, "total_matches", len(report.Matches))
 	return nil
 }
 

@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -43,7 +43,7 @@ type InfoResponse struct {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := fmt.Fprintln(w, "OK"); err != nil {
-		log.Printf("Error writing health response: %v", err)
+		slog.Default().With("component", "pod-scanner").Error("error writing health response", "error", err)
 	}
 }
 
@@ -59,12 +59,46 @@ func infoHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(info); err != nil {
-		log.Printf("Error encoding info response: %v", err)
+		slog.Default().With("component", "pod-scanner").Error("error encoding info response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
+// initLogging initializes structured logging for pod-scanner
+// This is a standalone implementation since pod-scanner doesn't import scanner-core
+func initLogging() {
+	level := slog.LevelInfo
+	jsonFormat := false
+
+	// Check environment variable overrides
+	if envLevel := os.Getenv("LOG_LEVEL"); envLevel != "" {
+		switch strings.ToLower(envLevel) {
+		case "debug":
+			level = slog.LevelDebug
+		case "warn", "warning":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+	}
+	if envFormat := os.Getenv("LOG_FORMAT"); envFormat != "" {
+		jsonFormat = strings.ToLower(envFormat) == "json"
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if jsonFormat {
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
 func main() {
+	// Initialize structured logging from environment variables
+	initLogging()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -73,15 +107,16 @@ func main() {
 	// Initialize runtime manager for SBOM generation
 	runtimeMgr, err := runtime.NewManager()
 	if err != nil {
-		log.Fatalf("Failed to initialize container runtime: %v", err)
+		slog.Default().With("component", "pod-scanner").Error("failed to initialize container runtime", "error", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if err := runtimeMgr.Close(); err != nil {
-			log.Printf("Warning: failed to close runtime manager: %v", err)
+			slog.Default().With("component", "pod-scanner").Warn("failed to close runtime manager", "error", err)
 		}
 	}()
 
-	log.Printf("Using container runtime: %s", runtimeMgr.ActiveRuntime())
+	slog.Default().With("component", "pod-scanner").Info("using container runtime", "runtime", runtimeMgr.ActiveRuntime())
 
 	// Register HTTP endpoints
 	http.HandleFunc("/health", healthHandler)
@@ -95,7 +130,7 @@ func main() {
 	// Apply configuration from environment variables
 	if extraExclusions := os.Getenv("HOST_SCANNING_EXTRA_EXCLUSIONS"); extraExclusions != "" {
 		hostSBOMCfg.ExtraExclusions = parseCommaSeparated(extraExclusions)
-		log.Printf("Host scanning extra exclusions: %v", hostSBOMCfg.ExtraExclusions)
+		slog.Default().With("component", "pod-scanner").Info("host scanning extra exclusions configured", "exclusions", hostSBOMCfg.ExtraExclusions)
 	}
 	if autoDetectNFS := os.Getenv("HOST_SCANNING_AUTO_DETECT_NFS"); autoDetectNFS != "" {
 		val := strings.ToLower(autoDetectNFS)
@@ -103,12 +138,15 @@ func main() {
 	}
 	if extraNetworkFSTypes := os.Getenv("HOST_SCANNING_EXTRA_NETWORK_FS_TYPES"); extraNetworkFSTypes != "" {
 		hostSBOMCfg.ExtraNetworkFSTypes = parseCommaSeparated(extraNetworkFSTypes)
-		log.Printf("Host scanning extra network FS types: %v", hostSBOMCfg.ExtraNetworkFSTypes)
+		slog.Default().With("component", "pod-scanner").Info("host scanning extra network FS types configured", "types", hostSBOMCfg.ExtraNetworkFSTypes)
 	}
 
 	http.HandleFunc("/host-sbom", handlers.HostSBOMHandler(hostSBOMCfg))
 
-	log.Printf("pod-scanner v%s starting on port %s (node: %s)", version, port, os.Getenv("NODE_NAME"))
-	log.Printf("Endpoints: /health, /info, /sbom/{digest}, /host-sbom")
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	slog.Default().With("component", "pod-scanner").Info("pod-scanner starting", "version", version, "port", port, "node", os.Getenv("NODE_NAME"))
+	slog.Default().With("component", "pod-scanner").Info("endpoints registered", "endpoints", "/health, /info, /sbom/{digest}, /host-sbom")
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		slog.Default().With("component", "pod-scanner").Error("server error", "error", err)
+		os.Exit(1)
+	}
 }

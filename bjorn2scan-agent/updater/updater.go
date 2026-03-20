@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // Status represents the current state of the updater
@@ -77,12 +79,14 @@ func New(config *Config) (*Updater, error) {
 
 // Start begins the update checker loop
 func (u *Updater) Start() {
+	log := logging.For(logging.ComponentHTTP)
+
 	if !u.config.Enabled {
-		fmt.Println("Auto-update is disabled")
+		log.Info("auto-update is disabled")
 		return
 	}
 
-	fmt.Printf("Auto-updater started (check interval: %v)\n", u.config.CheckInterval)
+	log.Info("auto-updater started", "check_interval", u.config.CheckInterval)
 
 	// Check immediately on start, then on schedule
 	u.checkForUpdate()
@@ -101,12 +105,12 @@ func (u *Updater) Start() {
 			u.paused = paused
 			u.mu.Unlock()
 			if paused {
-				fmt.Println("Auto-updater paused")
+				log.Info("auto-updater paused")
 			} else {
-				fmt.Println("Auto-updater resumed")
+				log.Info("auto-updater resumed")
 			}
 		case <-u.stopChan:
-			fmt.Println("Auto-updater stopped")
+			log.Info("auto-updater stopped")
 			return
 		}
 	}
@@ -114,6 +118,8 @@ func (u *Updater) Start() {
 
 // checkForUpdate checks for and applies updates
 func (u *Updater) checkForUpdate() {
+	log := logging.For(logging.ComponentHTTP)
+
 	u.setStatus(StatusChecking, "")
 	u.mu.Lock()
 	u.lastCheck = time.Now()
@@ -122,7 +128,7 @@ func (u *Updater) checkForUpdate() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	fmt.Println("Checking for updates...")
+	log.Info("checking for updates")
 
 	// Get latest release from feed
 	release, err := u.feedParser.GetLatestRelease(ctx)
@@ -137,22 +143,22 @@ func (u *Updater) checkForUpdate() {
 	u.latestVersion = version
 	u.mu.Unlock()
 
-	fmt.Printf("Current version: %s, Latest version: %s\n", u.config.CurrentVersion, version)
+	log.Info("version check", "current_version", u.config.CurrentVersion, "latest_version", version)
 
 	// Check if update should be performed
 	shouldUpdate, reason := u.versionChecker.ShouldUpdate(u.config.CurrentVersion, version)
 	if !shouldUpdate {
-		fmt.Printf("No update needed: %s\n", reason)
+		log.Info("no update needed", "reason", reason)
 		u.setStatus(StatusIdle, "")
 		return
 	}
 
-	fmt.Printf("Update available: %s → %s\n", u.config.CurrentVersion, version)
+	log.Info("update available", "from_version", u.config.CurrentVersion, "to_version", version)
 
 	// Perform update
 	if err := u.performUpdate(ctx, release); err != nil {
 		u.setStatus(StatusFailed, fmt.Sprintf("update failed: %v", err))
-		fmt.Printf("Update failed: %v\n", err)
+		log.Error("update failed", "error", err)
 		return
 	}
 
@@ -161,14 +167,16 @@ func (u *Updater) checkForUpdate() {
 	u.mu.Unlock()
 
 	u.setStatus(StatusIdle, "")
-	fmt.Println("Update completed successfully!")
+	log.Info("update completed successfully")
 }
 
 // performUpdate downloads and installs an update
 func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
+	log := logging.For(logging.ComponentHTTP)
+
 	// Download
 	u.setStatus(StatusDownloading, "")
-	fmt.Println("Downloading update...")
+	log.Info("downloading update")
 
 	// Configure downloader with retry and validation settings
 	downloaderConfig := &DownloaderConfig{
@@ -190,7 +198,7 @@ func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 	}
 
 	// Extract binary from tarball
-	fmt.Println("Extracting binary...")
+	log.Info("extracting binary")
 	extractedPath, err := downloader.ExtractBinary(binaryPath)
 	if err != nil {
 		return fmt.Errorf("extraction failed: %w", err)
@@ -199,7 +207,7 @@ func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 	// Verify signature
 	if u.config.VerifySignatures {
 		u.setStatus(StatusVerifying, "")
-		fmt.Println("Verifying signature...")
+		log.Info("verifying signature")
 
 		verifier := NewVerifier(u.config.CosignIdentityRegexp, u.config.CosignOIDCIssuer)
 		sigPath := fmt.Sprintf("%s.sig", binaryPath)
@@ -208,7 +216,7 @@ func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 		if err := verifier.VerifySignature(extractedPath, sigPath, certPath); err != nil {
 			return fmt.Errorf("signature verification failed: %w", err)
 		}
-		fmt.Println("Signature verified ✓")
+		log.Info("signature verified")
 	}
 
 	// Install

@@ -3,9 +3,9 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 )
 
@@ -56,7 +56,7 @@ func (j *RescanNodesJob) Name() string {
 // Run executes the rescan-nodes job
 // It retrieves all completed nodes and enqueues a full rescan (fresh SBOM + vuln scan) for each
 func (j *RescanNodesJob) Run(ctx context.Context) error {
-	log.Printf("[rescan-nodes] Starting periodic node rescan with fresh SBOMs...")
+	logging.For(logging.ComponentJobs).Info("starting periodic node rescan with fresh SBOMs")
 
 	// Get all nodes (regardless of when they were last scanned)
 	nodeList, err := j.db.GetAllNodes()
@@ -65,7 +65,7 @@ func (j *RescanNodesJob) Run(ctx context.Context) error {
 	}
 
 	if len(nodeList) == 0 {
-		log.Printf("[rescan-nodes] No nodes found, nothing to rescan")
+		logging.For(logging.ComponentJobs).Info("no nodes found, nothing to rescan")
 		return nil
 	}
 
@@ -78,11 +78,12 @@ func (j *RescanNodesJob) Run(ctx context.Context) error {
 	}
 
 	if len(completedNodes) == 0 {
-		log.Printf("[rescan-nodes] No completed nodes found, nothing to rescan")
+		logging.For(logging.ComponentJobs).Info("no completed nodes found, nothing to rescan")
 		return nil
 	}
 
-	log.Printf("[rescan-nodes] Found %d completed nodes, triggering full rescan with fresh SBOMs", len(completedNodes))
+	logging.For(logging.ComponentJobs).Info("found completed nodes, triggering full rescan with fresh SBOMs",
+		"count", len(completedNodes))
 
 	// Enqueue full rescan for each node
 	// FullRescan=true forces fresh SBOM retrieval (node packages may have changed)
@@ -90,7 +91,8 @@ func (j *RescanNodesJob) Run(ctx context.Context) error {
 		j.scanQueue.EnqueueHostFullRescan(node.Name)
 	}
 
-	log.Printf("[rescan-nodes] Enqueued %d nodes for full rescan", len(completedNodes))
+	logging.For(logging.ComponentJobs).Info("enqueued nodes for full rescan",
+		"count", len(completedNodes))
 	return nil
 }
 
@@ -103,7 +105,7 @@ func RescanNodesOnDBUpdate(db NodeDatabaseInterface, scanQueue NodeScanQueueInte
 		return nil // Host scanning not configured
 	}
 
-	log.Printf("[rescan-nodes] Checking nodes for vulnerability database update...")
+	logging.For(logging.ComponentJobs).Info("checking nodes for vulnerability database update")
 
 	// Find nodes that were scanned with an older grype database
 	nodeList, err := db.GetNodesNeedingRescan(currentGrypeDBBuilt)
@@ -112,11 +114,12 @@ func RescanNodesOnDBUpdate(db NodeDatabaseInterface, scanQueue NodeScanQueueInte
 	}
 
 	if len(nodeList) == 0 {
-		log.Printf("[rescan-nodes] All nodes are up-to-date with current grype DB, nothing to rescan")
+		logging.For(logging.ComponentJobs).Info("all nodes are up-to-date with current grype database, nothing to rescan")
 		return nil
 	}
 
-	log.Printf("[rescan-nodes] Found %d nodes scanned with older grype DB, triggering rescan", len(nodeList))
+	logging.For(logging.ComponentJobs).Info("found nodes scanned with older grype database, triggering rescan",
+		"count", len(nodeList))
 
 	// Enqueue force scan for each node
 	// ForceScan=true skips SBOM regeneration (uses existing SBOM), only reruns vulnerability scan
@@ -124,6 +127,7 @@ func RescanNodesOnDBUpdate(db NodeDatabaseInterface, scanQueue NodeScanQueueInte
 		scanQueue.EnqueueHostForceScan(node.Name)
 	}
 
-	log.Printf("[rescan-nodes] Enqueued %d nodes for rescanning", len(nodeList))
+	logging.For(logging.ComponentJobs).Info("enqueued nodes for rescanning",
+		"count", len(nodeList))
 	return nil
 }

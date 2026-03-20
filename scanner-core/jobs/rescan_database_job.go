@@ -3,12 +3,12 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/grype"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 	"github.com/bvboe/b2s-go/scanner-core/scanning"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
@@ -81,7 +81,7 @@ func (j *RescanDatabaseJob) Name() string {
 }
 
 func (j *RescanDatabaseJob) Run(ctx context.Context) error {
-	log.Printf("[rescan-database] Checking for vulnerability database updates...")
+	logging.For(logging.ComponentJobs).Info("checking for vulnerability database updates")
 
 	// Check for and download any available updates
 	// This also updates the persistent timestamp tracking
@@ -93,11 +93,12 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	// Get the current grype database version
 	currentVersion := j.dbUpdater.GetCurrentVersion()
 	if currentVersion == nil {
-		log.Printf("[rescan-database] No grype database available, skipping rescan")
+		logging.For(logging.ComponentJobs).Warn("no grype database available, skipping rescan")
 		return nil
 	}
 
-	log.Printf("[rescan-database] Current grype DB: built=%s", currentVersion.Built.Format(time.RFC3339))
+	logging.For(logging.ComponentJobs).Info("current grype database",
+		"built", currentVersion.Built.Format(time.RFC3339))
 
 	// Update readiness state if setter is configured
 	// This ensures the pod becomes ready even if initial download failed but db-updater succeeded
@@ -118,9 +119,10 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	}
 
 	if len(images) == 0 {
-		log.Printf("[rescan-database] All images are up-to-date with current grype DB, nothing to rescan")
+		logging.For(logging.ComponentJobs).Info("all images are up-to-date with current grype database, nothing to rescan")
 	} else {
-		log.Printf("[rescan-database] Found %d images scanned with older grype DB, triggering rescan", len(images))
+		logging.For(logging.ComponentJobs).Info("found images scanned with older grype database, triggering rescan",
+			"image_count", len(images))
 
 		// Enqueue force scan for each image
 		rescanned := 0
@@ -128,7 +130,9 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 			// Get the first container to determine node and runtime
 			instance, err := j.db.GetFirstContainerForImage(img.Digest)
 			if err != nil {
-				log.Printf("[rescan-database] Warning: could not find instance for image %s: %v", img.Digest, err)
+				logging.For(logging.ComponentJobs).Warn("could not find instance for image",
+					"digest", img.Digest,
+					"error", err)
 				continue
 			}
 
@@ -144,14 +148,16 @@ func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 			rescanned++
 		}
 
-		log.Printf("[rescan-database] Enqueued %d images for rescanning", rescanned)
+		logging.For(logging.ComponentJobs).Info("enqueued images for rescanning",
+			"count", rescanned)
 	}
 
 	// Also rescan nodes if node scanning is configured
 	// This runs regardless of whether images needed rescan
 	if j.nodeDB != nil && j.nodeScanQueue != nil {
 		if err := RescanNodesOnDBUpdate(j.nodeDB, j.nodeScanQueue, currentVersion.Built); err != nil {
-			log.Printf("[rescan-database] Warning: failed to rescan nodes: %v", err)
+			logging.For(logging.ComponentJobs).Warn("failed to rescan nodes",
+				"error", err)
 			// Don't fail the job - node scanning is optional
 		}
 	}

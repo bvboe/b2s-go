@@ -4,7 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 const currentSchemaVersion = 35
@@ -213,7 +214,8 @@ func (db *DB) ensureSchemaVersion() error {
 		return fmt.Errorf("failed to get current version: %w", err)
 	}
 
-	log.Printf("Current database schema version: %d, target version: %d", currentVersion, currentSchemaVersion)
+	logging.For(logging.ComponentDatabase).Info("database schema version check",
+		"current_version", currentVersion, "target_version", currentSchemaVersion)
 
 	// Apply migrations in order
 	for _, m := range migrations {
@@ -221,7 +223,7 @@ func (db *DB) ensureSchemaVersion() error {
 			continue // Already applied
 		}
 
-		log.Printf("Applying migration %d: %s", m.version, m.name)
+		logging.For(logging.ComponentDatabase).Info("applying migration", "version", m.version, "name", m.name)
 		if err := m.up(db.conn); err != nil {
 			return fmt.Errorf("failed to apply migration %d (%s): %w", m.version, m.name, err)
 		}
@@ -234,7 +236,7 @@ func (db *DB) ensureSchemaVersion() error {
 			return fmt.Errorf("failed to record migration %d: %w", m.version, err)
 		}
 
-		log.Printf("Successfully applied migration %d: %s", m.version, m.name)
+		logging.For(logging.ComponentDatabase).Info("successfully applied migration", "version", m.version, "name", m.name)
 	}
 
 	return nil
@@ -676,9 +678,9 @@ func migrateToV6(conn *sql.DB) error {
 	}
 
 	// Step 6: Parse existing SBOM and vulnerability data
-	log.Println("Migration v6: Processing existing SBOM and vulnerability data...")
+	logging.For(logging.ComponentDatabase).Info("migration v6: processing existing SBOM and vulnerability data")
 	if err := migrateExistingData(conn); err != nil {
-		log.Printf("Warning: Failed to migrate existing data: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("migration v6: failed to migrate existing data", "error", err)
 		// Don't fail the migration if data processing fails
 	}
 
@@ -713,7 +715,7 @@ func migrateExistingData(conn *sql.DB) error {
 		var sbomJSON, vulnJSON sql.NullString
 
 		if err := rows.Scan(&imageID, &digest, &sbomJSON, &vulnJSON); err != nil {
-			log.Printf("Warning: Failed to scan row: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("migration v6: failed to scan row", "error", err)
 			continue
 		}
 
@@ -731,7 +733,7 @@ func migrateExistingData(conn *sql.DB) error {
 		imagesToProcess = append(imagesToProcess, data)
 	}
 	if err := rows.Close(); err != nil {
-		log.Printf("Warning: Failed to close rows: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 	}
 
 	// Now process the data
@@ -740,24 +742,26 @@ func migrateExistingData(conn *sql.DB) error {
 		// Process SBOM if available
 		if data.sbomJSON != "" {
 			if err := parseSBOMData(conn, data.imageID, []byte(data.sbomJSON)); err != nil {
-				log.Printf("Warning: Failed to parse SBOM for image %d (%s): %v", data.imageID, data.digest, err)
+				logging.For(logging.ComponentDatabase).Warn("migration v6: failed to parse SBOM",
+					"image_id", data.imageID, "digest", data.digest, "error", err)
 			}
 		}
 
 		// Process vulnerabilities if available
 		if data.vulnJSON != "" {
 			if err := parseVulnerabilityData(conn, data.imageID, []byte(data.vulnJSON)); err != nil {
-				log.Printf("Warning: Failed to parse vulnerabilities for image %d (%s): %v", data.imageID, data.digest, err)
+				logging.For(logging.ComponentDatabase).Warn("migration v6: failed to parse vulnerabilities",
+					"image_id", data.imageID, "digest", data.digest, "error", err)
 			}
 		}
 
 		processed++
 		if processed%10 == 0 {
-			log.Printf("Migration v6: Processed %d images...", processed)
+			logging.For(logging.ComponentDatabase).Info("migration v6: processing progress", "processed", processed)
 		}
 	}
 
-	log.Printf("Migration v6: Completed processing %d images", processed)
+	logging.For(logging.ComponentDatabase).Info("migration v6: completed processing", "images_processed", processed)
 	return nil
 }
 
@@ -785,7 +789,7 @@ func migrateToV7(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v7: Added risk, EPSS, and known_exploited columns to vulnerabilities table")
+	logging.For(logging.ComponentDatabase).Info("migration v7: added risk, EPSS, and known_exploited columns to vulnerabilities table")
 	return nil
 }
 
@@ -797,7 +801,7 @@ func migrateToV8(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v8: Adding unified status field...")
+	logging.For(logging.ComponentDatabase).Info("migration v8: adding unified status field")
 
 	// Add new status columns
 	_, err = tx.Exec(`
@@ -811,7 +815,7 @@ func migrateToV8(conn *sql.DB) error {
 	}
 
 	// Migrate data from old columns to unified status
-	log.Println("Migration v8: Migrating status data...")
+	logging.For(logging.ComponentDatabase).Info("migration v8: migrating status data")
 	_, err = tx.Exec(`
 		UPDATE container_images
 		SET
@@ -848,7 +852,7 @@ func migrateToV8(conn *sql.DB) error {
 	}
 
 	// Drop old status columns by recreating the table without them
-	log.Println("Migration v8: Removing old status columns...")
+	logging.For(logging.ComponentDatabase).Info("migration v8: removing old status columns")
 	_, err = tx.Exec(`
 		-- Create new table without old status columns
 		CREATE TABLE container_images_new (
@@ -892,7 +896,7 @@ func migrateToV8(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v8: Successfully migrated to unified status field")
+	logging.For(logging.ComponentDatabase).Info("migration v8: successfully migrated to unified status field")
 	return nil
 }
 
@@ -904,7 +908,7 @@ func migrateToV9(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v9: Moving os_name and os_version to container_images...")
+	logging.For(logging.ComponentDatabase).Info("migration v9: moving os_name and os_version to container_images")
 
 	// Add os_name and os_version columns to container_images
 	_, err = tx.Exec(`
@@ -937,8 +941,8 @@ func migrateToV9(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v9: Successfully moved os_name and os_version to container_images")
-	log.Println("Note: image_summary table is deprecated and will be removed in a future migration")
+	logging.For(logging.ComponentDatabase).Info("migration v9: successfully moved os_name and os_version to container_images")
+	logging.For(logging.ComponentDatabase).Info("note: image_summary table is deprecated and will be removed in a future migration")
 	return nil
 }
 
@@ -950,7 +954,7 @@ func migrateToV10(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v10: Dropping image_summary table...")
+	logging.For(logging.ComponentDatabase).Info("migration v10: dropping image_summary table")
 
 	// Drop the image_summary table
 	_, err = tx.Exec(`DROP TABLE IF EXISTS image_summary`)
@@ -962,8 +966,8 @@ func migrateToV10(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v10: Successfully dropped image_summary table")
-	log.Println("Note: package_count is now calculated dynamically from packages table")
+	logging.For(logging.ComponentDatabase).Info("migration v10: successfully dropped image_summary table")
+	logging.For(logging.ComponentDatabase).Info("note: package_count is now calculated dynamically from packages table")
 	return nil
 }
 
@@ -975,7 +979,7 @@ func migrateToV11(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v11: Creating scan_status lookup table...")
+	logging.For(logging.ComponentDatabase).Info("migration v11: creating scan_status lookup table")
 
 	// Create scan_status table
 	_, err = tx.Exec(`
@@ -1007,7 +1011,7 @@ func migrateToV11(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v11: Successfully created scan_status table")
+	logging.For(logging.ComponentDatabase).Info("migration v11: successfully created scan_status table")
 	return nil
 }
 
@@ -1020,7 +1024,7 @@ func migrateToV12(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v12: Adding UNIQUE constraint to packages table...")
+	logging.For(logging.ComponentDatabase).Info("migration v12: adding UNIQUE constraint to packages table")
 
 	// Create new packages table with UNIQUE constraint
 	_, err = tx.Exec(`
@@ -1041,7 +1045,7 @@ func migrateToV12(conn *sql.DB) error {
 	}
 
 	// Copy data from old table, aggregating duplicates
-	log.Println("Migration v12: Consolidating duplicate packages...")
+	logging.For(logging.ComponentDatabase).Info("migration v12: consolidating duplicate packages")
 	_, err = tx.Exec(`
 		INSERT INTO packages_new (image_id, name, version, type, number_of_instances, created_at)
 		SELECT
@@ -1083,8 +1087,8 @@ func migrateToV12(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v12: Successfully added UNIQUE constraint to packages table")
-	log.Println("Note: Duplicate packages have been consolidated by summing number_of_instances")
+	logging.For(logging.ComponentDatabase).Info("migration v12: successfully added UNIQUE constraint to packages table")
+	logging.For(logging.ComponentDatabase).Info("note: duplicate packages have been consolidated by summing number_of_instances")
 	return nil
 }
 
@@ -1096,7 +1100,7 @@ func migrateToV13(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v13: Creating vulnerability_details and package_details tables...")
+	logging.For(logging.ComponentDatabase).Info("migration v13: creating vulnerability_details and package_details tables")
 
 	// Create vulnerability_details table
 	_, err = tx.Exec(`
@@ -1148,13 +1152,13 @@ func migrateToV13(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v13: Successfully created vulnerability_details and package_details tables")
+	logging.For(logging.ComponentDatabase).Info("migration v13: successfully created vulnerability_details and package_details tables")
 	return nil
 }
 
 // migrateToV14 backfills vulnerability_details and package_details tables with existing data
 func migrateToV14(conn *sql.DB) error {
-	log.Println("Migration v14: Backfilling vulnerability_details and package_details tables...")
+	logging.For(logging.ComponentDatabase).Info("migration v14: backfilling vulnerability_details and package_details tables")
 
 	// Get all image IDs that have SBOM or vulnerability data
 	rows, err := conn.Query(`
@@ -1168,7 +1172,7 @@ func migrateToV14(conn *sql.DB) error {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -1176,7 +1180,7 @@ func migrateToV14(conn *sql.DB) error {
 	for rows.Next() {
 		var imageID int64
 		if err := rows.Scan(&imageID); err != nil {
-			log.Printf("Warning: Failed to scan image ID: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to scan image ID", "error", err)
 			continue
 		}
 		imageIDs = append(imageIDs, imageID)
@@ -1186,7 +1190,7 @@ func migrateToV14(conn *sql.DB) error {
 		return fmt.Errorf("error iterating image rows: %w", err)
 	}
 
-	log.Printf("Migration v14: Found %d images to backfill", len(imageIDs))
+	logging.For(logging.ComponentDatabase).Info("migration v14: found images to backfill", "count", len(imageIDs))
 
 	// Re-parse each image to populate details tables
 	successCount := 0
@@ -1196,14 +1200,14 @@ func migrateToV14(conn *sql.DB) error {
 		var sbomJSON sql.NullString
 		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to get SBOM for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to get SBOM", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
 			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1213,14 +1217,14 @@ func migrateToV14(conn *sql.DB) error {
 		var vulnJSON sql.NullString
 		err = conn.QueryRow(`SELECT vulnerabilities FROM container_images WHERE id = ?`, imageID).Scan(&vulnJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to get vulnerabilities for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to get vulnerabilities", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if vulnJSON.Valid && vulnJSON.String != "" {
 			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse vulnerabilities for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse vulnerabilities", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1228,17 +1232,19 @@ func migrateToV14(conn *sql.DB) error {
 
 		successCount++
 		if successCount%10 == 0 {
-			log.Printf("Migration v14: Processed %d/%d images...", successCount, len(imageIDs))
+			logging.For(logging.ComponentDatabase).Info("migration v14: processing progress",
+				"processed", successCount, "total", len(imageIDs))
 		}
 	}
 
-	log.Printf("Migration v14: Successfully backfilled details for %d images (%d failed)", successCount, failCount)
+	logging.For(logging.ComponentDatabase).Info("migration v14: successfully backfilled details",
+		"success_count", successCount, "fail_count", failCount)
 	return nil
 }
 
 // migrateToV15 updates existing detail records to store arrays instead of single objects
 func migrateToV15(conn *sql.DB) error {
-	log.Println("Migration v15: Updating detail records to store all instances...")
+	logging.For(logging.ComponentDatabase).Info("migration v15: updating detail records to store all instances")
 
 	// Clear existing details - they will be regenerated with all instances
 	_, err := conn.Exec(`DELETE FROM vulnerability_details`)
@@ -1251,7 +1257,7 @@ func migrateToV15(conn *sql.DB) error {
 		return fmt.Errorf("failed to clear package_details: %w", err)
 	}
 
-	log.Println("Migration v15: Cleared existing details, will regenerate from raw SBOM/vulnerability data")
+	logging.For(logging.ComponentDatabase).Info("migration v15: cleared existing details, will regenerate from raw SBOM/vulnerability data")
 
 	// Get all image IDs that have SBOM or vulnerability data
 	rows, err := conn.Query(`
@@ -1265,7 +1271,7 @@ func migrateToV15(conn *sql.DB) error {
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Warning: Failed to close rows: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 		}
 	}()
 
@@ -1273,7 +1279,7 @@ func migrateToV15(conn *sql.DB) error {
 	for rows.Next() {
 		var imageID int64
 		if err := rows.Scan(&imageID); err != nil {
-			log.Printf("Warning: Failed to scan image ID: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to scan image ID", "error", err)
 			continue
 		}
 		imageIDs = append(imageIDs, imageID)
@@ -1283,7 +1289,7 @@ func migrateToV15(conn *sql.DB) error {
 		return fmt.Errorf("error iterating image rows: %w", err)
 	}
 
-	log.Printf("Migration v15: Found %d images to regenerate details for", len(imageIDs))
+	logging.For(logging.ComponentDatabase).Info("migration v15: found images to regenerate details for", "count", len(imageIDs))
 
 	// Re-parse each image to populate details tables with arrays
 	successCount := 0
@@ -1293,14 +1299,14 @@ func migrateToV15(conn *sql.DB) error {
 		var sbomJSON sql.NullString
 		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to get SBOM for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to get SBOM", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
 			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1310,14 +1316,14 @@ func migrateToV15(conn *sql.DB) error {
 		var vulnJSON sql.NullString
 		err = conn.QueryRow(`SELECT vulnerabilities FROM container_images WHERE id = ?`, imageID).Scan(&vulnJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to get vulnerabilities for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to get vulnerabilities", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if vulnJSON.Valid && vulnJSON.String != "" {
 			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse vulnerabilities for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse vulnerabilities", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1325,18 +1331,20 @@ func migrateToV15(conn *sql.DB) error {
 
 		successCount++
 		if successCount%10 == 0 {
-			log.Printf("Migration v15: Processed %d/%d images...", successCount, len(imageIDs))
+			logging.For(logging.ComponentDatabase).Info("migration v15: processing progress",
+				"processed", successCount, "total", len(imageIDs))
 		}
 	}
 
-	log.Printf("Migration v15: Successfully regenerated details for %d images (%d failed)", successCount, failCount)
+	logging.For(logging.ComponentDatabase).Info("migration v15: successfully regenerated details",
+		"success_count", successCount, "fail_count", failCount)
 	return nil
 }
 
 // migrateToV16 regenerates package_details to include complete SBOM artifact data
 // instead of just name/version/type
 func migrateToV16(conn *sql.DB) error {
-	log.Println("Migration v16: Updating package_details with complete SBOM artifact data...")
+	logging.For(logging.ComponentDatabase).Info("migration v16: updating package_details with complete SBOM artifact data")
 
 	// Clear existing package details - they will be regenerated with complete data
 	_, err := conn.Exec(`DELETE FROM package_details`)
@@ -1358,16 +1366,16 @@ func migrateToV16(conn *sql.DB) error {
 	for rows.Next() {
 		var imageID int64
 		if err := rows.Scan(&imageID); err != nil {
-			log.Printf("Warning: Failed to scan image ID: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to scan image ID", "error", err)
 			continue
 		}
 		imageIDs = append(imageIDs, imageID)
 	}
 	if err := rows.Close(); err != nil {
-		log.Printf("Warning: Failed to close rows: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 	}
 
-	log.Printf("Migration v16: Found %d images with SBOM data to process", len(imageIDs))
+	logging.For(logging.ComponentDatabase).Info("migration v16: found images with SBOM data to process", "count", len(imageIDs))
 
 	// Re-parse each image's SBOM to populate package_details with complete artifact data
 	successCount := 0
@@ -1377,14 +1385,14 @@ func migrateToV16(conn *sql.DB) error {
 		var sbomJSON sql.NullString
 		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to query SBOM for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to query SBOM", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
 			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1392,18 +1400,20 @@ func migrateToV16(conn *sql.DB) error {
 
 		successCount++
 		if successCount%10 == 0 {
-			log.Printf("Migration v16: Processed %d/%d images...", successCount, len(imageIDs))
+			logging.For(logging.ComponentDatabase).Info("migration v16: processing progress",
+				"processed", successCount, "total", len(imageIDs))
 		}
 	}
 
-	log.Printf("Migration v16: Successfully regenerated package details for %d images (%d failed)", successCount, failCount)
+	logging.For(logging.ComponentDatabase).Info("migration v16: successfully regenerated package details",
+		"success_count", successCount, "fail_count", failCount)
 	return nil
 }
 
 // migrateToV17 regenerates package_details using struct format for consistent field ordering
 // This ensures packages display like CVEs with fields in a logical order, not alphabetically
 func migrateToV17(conn *sql.DB) error {
-	log.Println("Migration v17: Updating package_details with struct format for consistent field ordering...")
+	logging.For(logging.ComponentDatabase).Info("migration v17: updating package_details with struct format for consistent field ordering")
 
 	// Clear existing package details - they will be regenerated with struct format
 	_, err := conn.Exec(`DELETE FROM package_details`)
@@ -1425,16 +1435,16 @@ func migrateToV17(conn *sql.DB) error {
 	for rows.Next() {
 		var imageID int64
 		if err := rows.Scan(&imageID); err != nil {
-			log.Printf("Warning: Failed to scan image ID: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to scan image ID", "error", err)
 			continue
 		}
 		imageIDs = append(imageIDs, imageID)
 	}
 	if err := rows.Close(); err != nil {
-		log.Printf("Warning: Failed to close rows: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 	}
 
-	log.Printf("Migration v17: Found %d images with SBOM data to process", len(imageIDs))
+	logging.For(logging.ComponentDatabase).Info("migration v17: found images with SBOM data to process", "count", len(imageIDs))
 
 	// Re-parse each image's SBOM to populate package_details with struct format
 	successCount := 0
@@ -1444,14 +1454,14 @@ func migrateToV17(conn *sql.DB) error {
 		var sbomJSON sql.NullString
 		err := conn.QueryRow(`SELECT sbom FROM container_images WHERE id = ?`, imageID).Scan(&sbomJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to query SBOM for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to query SBOM", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
 			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse SBOM for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1459,18 +1469,20 @@ func migrateToV17(conn *sql.DB) error {
 
 		successCount++
 		if successCount%10 == 0 {
-			log.Printf("Migration v17: Processed %d/%d images...", successCount, len(imageIDs))
+			logging.For(logging.ComponentDatabase).Info("migration v17: processing progress",
+				"processed", successCount, "total", len(imageIDs))
 		}
 	}
 
-	log.Printf("Migration v17: Successfully regenerated package details for %d images (%d failed)", successCount, failCount)
+	logging.For(logging.ComponentDatabase).Info("migration v17: successfully regenerated package details",
+		"success_count", successCount, "fail_count", failCount)
 	return nil
 }
 
 // migrateToV18 regenerates vulnerability_details using raw JSON format
 // This ensures vulnerabilities preserve ALL fields (current and future) from Grype output
 func migrateToV18(conn *sql.DB) error {
-	log.Println("Migration v18: Updating vulnerability_details with raw JSON format for complete data preservation...")
+	logging.For(logging.ComponentDatabase).Info("migration v18: updating vulnerability_details with raw JSON format for complete data preservation")
 
 	// Clear existing vulnerability details - they will be regenerated with raw JSON
 	_, err := conn.Exec(`DELETE FROM vulnerability_details`)
@@ -1492,16 +1504,16 @@ func migrateToV18(conn *sql.DB) error {
 	for rows.Next() {
 		var imageID int64
 		if err := rows.Scan(&imageID); err != nil {
-			log.Printf("Warning: Failed to scan image ID: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("failed to scan image ID", "error", err)
 			continue
 		}
 		imageIDs = append(imageIDs, imageID)
 	}
 	if err := rows.Close(); err != nil {
-		log.Printf("Warning: Failed to close rows: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to close rows", "error", err)
 	}
 
-	log.Printf("Migration v18: Found %d images with vulnerability data to process", len(imageIDs))
+	logging.For(logging.ComponentDatabase).Info("migration v18: found images with vulnerability data to process", "count", len(imageIDs))
 
 	// Re-parse each image's vulnerabilities to populate vulnerability_details with raw JSON
 	successCount := 0
@@ -1511,14 +1523,14 @@ func migrateToV18(conn *sql.DB) error {
 		var vulnJSON sql.NullString
 		err := conn.QueryRow(`SELECT vulnerabilities FROM container_images WHERE id = ?`, imageID).Scan(&vulnJSON)
 		if err != nil {
-			log.Printf("Warning: Failed to query vulnerabilities for image_id=%d: %v", imageID, err)
+			logging.For(logging.ComponentDatabase).Warn("failed to query vulnerabilities", "image_id", imageID, "error", err)
 			failCount++
 			continue
 		}
 
 		if vulnJSON.Valid && vulnJSON.String != "" {
 			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
-				log.Printf("Warning: Failed to parse vulnerabilities for image_id=%d: %v", imageID, err)
+				logging.For(logging.ComponentDatabase).Warn("failed to parse vulnerabilities", "image_id", imageID, "error", err)
 				failCount++
 				continue
 			}
@@ -1526,11 +1538,13 @@ func migrateToV18(conn *sql.DB) error {
 
 		successCount++
 		if successCount%10 == 0 {
-			log.Printf("Migration v18: Processed %d/%d images...", successCount, len(imageIDs))
+			logging.For(logging.ComponentDatabase).Info("migration v18: processing progress",
+				"processed", successCount, "total", len(imageIDs))
 		}
 	}
 
-	log.Printf("Migration v18: Successfully regenerated vulnerability details for %d images (%d failed)", successCount, failCount)
+	logging.For(logging.ComponentDatabase).Info("migration v18: successfully regenerated vulnerability details",
+		"success_count", successCount, "fail_count", failCount)
 	return nil
 }
 
@@ -1543,7 +1557,7 @@ func migrateToV19(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v19: Removing deprecated known_exploits column from vulnerabilities table...")
+	logging.For(logging.ComponentDatabase).Info("migration v19: removing deprecated known_exploits column from vulnerabilities table")
 
 	// SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
 	// Step 1: Create new table without known_exploits column
@@ -1615,8 +1629,8 @@ func migrateToV19(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v19: Successfully removed known_exploits column from vulnerabilities table")
-	log.Println("Note: Use known_exploited column instead for CISA KEV catalog count")
+	logging.For(logging.ComponentDatabase).Info("migration v19: successfully removed known_exploits column from vulnerabilities table")
+	logging.For(logging.ComponentDatabase).Info("note: use known_exploited column instead for CISA KEV catalog count")
 	return nil
 }
 
@@ -1628,11 +1642,11 @@ func migrateToV20(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v20: Adding performance indexes...")
+	logging.For(logging.ComponentDatabase).Info("migration v20: adding performance indexes")
 
 	// Add index on container_images.created_at for ORDER BY optimization
 	// Used by: GetAllImages, GetAllImageDetails, GetImagesByStatus, GetImagesByScanStatus
-	log.Println("Migration v20: Creating index on container_images(created_at)...")
+	logging.For(logging.ComponentDatabase).Info("migration v20: creating index on container_images(created_at)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_images_created_at ON container_images(created_at)
 	`)
@@ -1642,7 +1656,7 @@ func migrateToV20(conn *sql.DB) error {
 
 	// Add index on container_instances.created_at for ORDER BY optimization
 	// Used by: GetAllInstances, GetFirstInstanceForImage
-	log.Println("Migration v20: Creating index on container_instances(created_at)...")
+	logging.For(logging.ComponentDatabase).Info("migration v20: creating index on container_instances(created_at)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_instances_created_at ON container_instances(created_at)
 	`)
@@ -1652,7 +1666,7 @@ func migrateToV20(conn *sql.DB) error {
 
 	// Add composite index on vulnerabilities(image_id, severity) for GROUP BY optimization
 	// Used by: GetImageDetails vulnerability counts aggregation
-	log.Println("Migration v20: Creating composite index on vulnerabilities(image_id, severity)...")
+	logging.For(logging.ComponentDatabase).Info("migration v20: creating composite index on vulnerabilities(image_id, severity)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_vulnerabilities_image_severity ON vulnerabilities(image_id, severity)
 	`)
@@ -1664,16 +1678,16 @@ func migrateToV20(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v20: Successfully added performance indexes")
-	log.Println("  - container_images(created_at): Optimizes ORDER BY in image list queries")
-	log.Println("  - container_instances(created_at): Optimizes ORDER BY in instance list queries")
-	log.Println("  - vulnerabilities(image_id, severity): Optimizes GROUP BY in vulnerability count queries")
+	logging.For(logging.ComponentDatabase).Info("migration v20: successfully added performance indexes")
+	logging.For(logging.ComponentDatabase).Info("migration v20: container_images(created_at): optimizes ORDER BY in image list queries")
+	logging.For(logging.ComponentDatabase).Info("migration v20: container_instances(created_at): optimizes ORDER BY in instance list queries")
+	logging.For(logging.ComponentDatabase).Info("migration v20: vulnerabilities(image_id, severity): optimizes GROUP BY in vulnerability count queries")
 	return nil
 }
 
 // migrateToV21 adds grype_db_built column to track which vulnerability database version was used for scanning
 func migrateToV21(conn *sql.DB) error {
-	log.Println("Migration v21: Adding grype_db_built column to container_images...")
+	logging.For(logging.ComponentDatabase).Info("migration v21: adding grype_db_built column to container_images")
 
 	// Add grype_db_built column to track the vulnerability database version used for scanning
 	// This stores the RFC3339 timestamp of when the grype database was built
@@ -1684,8 +1698,8 @@ func migrateToV21(conn *sql.DB) error {
 		return fmt.Errorf("failed to add grype_db_built column: %w", err)
 	}
 
-	log.Println("Migration v21: Successfully added grype_db_built column")
-	log.Println("  - grype_db_built: Stores the grype vulnerability database build timestamp used for scanning")
+	logging.For(logging.ComponentDatabase).Info("migration v21: successfully added grype_db_built column")
+	logging.For(logging.ComponentDatabase).Info("migration v21: grype_db_built stores the grype vulnerability database build timestamp used for scanning")
 	return nil
 }
 
@@ -1697,7 +1711,7 @@ func migrateToV22(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v22: Creating job_executions table...")
+	logging.For(logging.ComponentDatabase).Info("migration v22: creating job_executions table")
 
 	// Create job_executions table to track job execution history
 	_, err = tx.Exec(`
@@ -1730,13 +1744,13 @@ func migrateToV22(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v22: Successfully created job_executions table")
-	log.Println("  - job_name: Name of the scheduled job")
-	log.Println("  - started_at: When the job started executing")
-	log.Println("  - completed_at: When the job finished")
-	log.Println("  - status: running, completed, or failed")
-	log.Println("  - error_message: Error details if job failed")
-	log.Println("  - duration_ms: Execution duration in milliseconds")
+	logging.For(logging.ComponentDatabase).Info("migration v22: successfully created job_executions table")
+	logging.For(logging.ComponentDatabase).Info("migration v22: job_name: Name of the scheduled job")
+	logging.For(logging.ComponentDatabase).Info("migration v22: started_at: When the job started executing")
+	logging.For(logging.ComponentDatabase).Info("migration v22: completed_at: When the job finished")
+	logging.For(logging.ComponentDatabase).Info("migration v22: status: running, completed, or failed")
+	logging.For(logging.ComponentDatabase).Info("migration v22: error_message: Error details if job failed")
+	logging.For(logging.ComponentDatabase).Info("migration v22: duration_ms: Execution duration in milliseconds")
 	return nil
 }
 
@@ -1749,7 +1763,7 @@ func migrateToV23(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v23: Creating metric_staleness table...")
+	logging.For(logging.ComponentDatabase).Info("migration v23: creating metric_staleness table")
 
 	// Create metric_staleness table with single row for JSON blob storage
 	// key='metrics' stores JSON map of metric_key -> last_seen_timestamp
@@ -1768,17 +1782,17 @@ func migrateToV23(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v23: Successfully created metric_staleness table")
-	log.Println("  - key: Storage key (e.g., 'metrics')")
-	log.Println("  - data: JSON blob containing metric_key -> last_seen_timestamp map")
-	log.Println("  - updated_at: Last modification timestamp")
+	logging.For(logging.ComponentDatabase).Info("migration v23: successfully created metric_staleness table")
+	logging.For(logging.ComponentDatabase).Info("migration v23: key: Storage key (e.g., 'metrics')")
+	logging.For(logging.ComponentDatabase).Info("migration v23: data: JSON blob containing metric_key -> last_seen_timestamp map")
+	logging.For(logging.ComponentDatabase).Info("migration v23: updated_at: Last modification timestamp")
 	return nil
 }
 
 // migrateToV24 adds architecture column to track CPU architecture of scanned images
 // This is extracted from the SBOM (Syft) source.target metadata
 func migrateToV24(conn *sql.DB) error {
-	log.Println("Migration v24: Adding architecture column to container_images...")
+	logging.For(logging.ComponentDatabase).Info("migration v24: adding architecture column to container_images")
 
 	// Add architecture column to track the CPU architecture (e.g., amd64, arm64)
 	_, err := conn.Exec(`
@@ -1788,15 +1802,15 @@ func migrateToV24(conn *sql.DB) error {
 		return fmt.Errorf("failed to add architecture column: %w", err)
 	}
 
-	log.Println("Migration v24: Successfully added architecture column")
-	log.Println("  - architecture: CPU architecture of the image (e.g., amd64, arm64)")
+	logging.For(logging.ComponentDatabase).Info("migration v24: successfully added architecture column")
+	logging.For(logging.ComponentDatabase).Info("migration v24: architecture: CPU architecture of the image (e.g., amd64, arm64)")
 	return nil
 }
 
 // migrateToV25 populates architecture from existing SBOMs
 // This extracts architecture from source.metadata.architecture in the SBOM JSON
 func migrateToV25(conn *sql.DB) error {
-	log.Println("Migration v25: Populating architecture from existing SBOMs...")
+	logging.For(logging.ComponentDatabase).Info("migration v25: populating architecture from existing SBOMs")
 
 	// Query all images with SBOM but no architecture
 	rows, err := conn.Query(`
@@ -1828,13 +1842,13 @@ func migrateToV25(conn *sql.DB) error {
 		var id int64
 		var sbomJSON string
 		if err := rows.Scan(&id, &sbomJSON); err != nil {
-			log.Printf("Warning: Failed to scan row: %v", err)
+			logging.For(logging.ComponentDatabase).Warn("migration v25: failed to scan row", "error", err)
 			continue
 		}
 
 		var doc sbomDoc
 		if err := json.Unmarshal([]byte(sbomJSON), &doc); err != nil {
-			log.Printf("Warning: Failed to parse SBOM for image %d: %v", id, err)
+			logging.For(logging.ComponentDatabase).Warn("migration v25: failed to parse SBOM", "image_id", id, "error", err)
 			continue
 		}
 
@@ -1849,33 +1863,33 @@ func migrateToV25(conn *sql.DB) error {
 	for _, u := range updates {
 		_, err = conn.Exec(`UPDATE container_images SET architecture = ? WHERE id = ?`, u.arch, u.id)
 		if err != nil {
-			log.Printf("Warning: Failed to update architecture for image %d: %v", u.id, err)
+			logging.For(logging.ComponentDatabase).Warn("migration v25: failed to update architecture", "image_id", u.id, "error", err)
 			continue
 		}
 	}
 
-	log.Printf("Migration v25: Updated architecture for %d images", len(updates))
+	logging.For(logging.ComponentDatabase).Info("migration v25: updated architecture", "images_updated", len(updates))
 	return nil
 }
 
 // migrateToV26 renames metric_staleness table to app_state
 // This table is now used for general application state storage, not just metric staleness
 func migrateToV26(conn *sql.DB) error {
-	log.Println("Migration v26: Renaming metric_staleness table to app_state...")
+	logging.For(logging.ComponentDatabase).Info("migration v26: renaming metric_staleness table to app_state")
 
 	_, err := conn.Exec(`ALTER TABLE metric_staleness RENAME TO app_state`)
 	if err != nil {
 		return fmt.Errorf("failed to rename metric_staleness to app_state: %w", err)
 	}
 
-	log.Println("Migration v26: Successfully renamed metric_staleness to app_state")
+	logging.For(logging.ComponentDatabase).Info("migration v26: successfully renamed metric_staleness to app_state")
 	return nil
 }
 
 // migrateToV27 adds reference column to container_instances and populates it from repository+tag
 // This fixes the ":latest" bug for digest-only images by preserving the original reference
 func migrateToV27(conn *sql.DB) error {
-	log.Println("Migration v27: Adding reference column to container_instances...")
+	logging.For(logging.ComponentDatabase).Info("migration v27: adding reference column to container_instances")
 
 	// Add reference column
 	_, err := conn.Exec(`ALTER TABLE container_instances ADD COLUMN reference TEXT`)
@@ -1895,7 +1909,7 @@ func migrateToV27(conn *sql.DB) error {
 		return fmt.Errorf("failed to populate reference column: %w", err)
 	}
 
-	log.Println("Migration v27: Successfully added and populated reference column")
+	logging.For(logging.ComponentDatabase).Info("migration v27: successfully added and populated reference column")
 	return nil
 }
 
@@ -1908,7 +1922,7 @@ func migrateToV28(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v28: Dropping repository and tag columns from container_instances...")
+	logging.For(logging.ComponentDatabase).Info("migration v28: dropping repository and tag columns from container_instances")
 
 	// SQLite doesn't support DROP COLUMN directly, so we need to rebuild the table
 	// Step 1: Create new table without repository and tag columns
@@ -1967,7 +1981,7 @@ func migrateToV28(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v28: Successfully dropped repository and tag columns")
+	logging.For(logging.ComponentDatabase).Info("migration v28: successfully dropped repository and tag columns")
 	return nil
 }
 
@@ -1980,17 +1994,17 @@ func migrateToV29(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v29: Renaming tables to match Docker/Kubernetes terminology...")
+	logging.For(logging.ComponentDatabase).Info("migration v29: renaming tables to match Docker/Kubernetes terminology")
 
 	// Step 1: Rename container_images to images
-	log.Println("Migration v29: Renaming container_images → images...")
+	logging.For(logging.ComponentDatabase).Info("migration v29: renaming container_images → images")
 	_, err = tx.Exec(`ALTER TABLE container_images RENAME TO images`)
 	if err != nil {
 		return fmt.Errorf("failed to rename container_images to images: %w", err)
 	}
 
 	// Step 2: Create new containers table with 'name' column instead of 'container'
-	log.Println("Migration v29: Creating containers table with renamed column...")
+	logging.For(logging.ComponentDatabase).Info("migration v29: creating containers table with renamed column")
 	_, err = tx.Exec(`
 		CREATE TABLE containers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2011,7 +2025,7 @@ func migrateToV29(conn *sql.DB) error {
 	}
 
 	// Step 3: Copy data from container_instances to containers
-	log.Println("Migration v29: Copying data to containers table...")
+	logging.For(logging.ComponentDatabase).Info("migration v29: copying data to containers table")
 	_, err = tx.Exec(`
 		INSERT INTO containers (id, namespace, pod, name, reference, image_id, node_name, container_runtime, created_at)
 		SELECT id, namespace, pod, container, reference, image_id, node_name, container_runtime, created_at
@@ -2041,10 +2055,10 @@ func migrateToV29(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v29: Successfully renamed tables and columns")
-	log.Println("  - container_images → images")
-	log.Println("  - container_instances → containers")
-	log.Println("  - containers.container → containers.name")
+	logging.For(logging.ComponentDatabase).Info("migration v29: successfully renamed tables and columns")
+	logging.For(logging.ComponentDatabase).Info("migration v29: container_images → images")
+	logging.For(logging.ComponentDatabase).Info("migration v29: container_instances → containers")
+	logging.For(logging.ComponentDatabase).Info("migration v29: containers.container → containers.name")
 	return nil
 }
 
@@ -2057,7 +2071,7 @@ func migrateToV30(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v30: Creating nodes tables for host-level scanning...")
+	logging.For(logging.ComponentDatabase).Info("migration v30: creating nodes tables for host-level scanning")
 
 	// Step 1: Create nodes table
 	_, err = tx.Exec(`
@@ -2138,10 +2152,10 @@ func migrateToV30(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v30: Successfully created nodes tables")
-	log.Println("  - nodes: Tracks Kubernetes nodes with OS/kernel info")
-	log.Println("  - node_packages: Packages installed on each node")
-	log.Println("  - node_vulnerabilities: Vulnerabilities found on nodes")
+	logging.For(logging.ComponentDatabase).Info("migration v30: successfully created nodes tables")
+	logging.For(logging.ComponentDatabase).Info("migration v30: nodes: Tracks Kubernetes nodes with OS/kernel info")
+	logging.For(logging.ComponentDatabase).Info("migration v30: node_packages: Packages installed on each node")
+	logging.For(logging.ComponentDatabase).Info("migration v30: node_vulnerabilities: Vulnerabilities found on nodes")
 	return nil
 }
 
@@ -2154,11 +2168,11 @@ func migrateToV31(conn *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	log.Println("Migration v31: Adding performance indexes for node queries...")
+	logging.For(logging.ComponentDatabase).Info("migration v31: adding performance indexes for node queries")
 
 	// Critical index: package_id for counting vulnerabilities per package in SBOM view
 	// Without this index, GetNodePackages() takes 50+ seconds with ~1000 packages and ~30000 vulns
-	log.Println("Migration v31: Creating index on node_vulnerabilities(package_id)...")
+	logging.For(logging.ComponentDatabase).Info("migration v31: creating index on node_vulnerabilities(package_id)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_package ON node_vulnerabilities(package_id)
 	`)
@@ -2167,7 +2181,7 @@ func migrateToV31(conn *sql.DB) error {
 	}
 
 	// Composite index for efficient severity counts per node (used in summary queries)
-	log.Println("Migration v31: Creating composite index on node_vulnerabilities(node_id, severity)...")
+	logging.For(logging.ComponentDatabase).Info("migration v31: creating composite index on node_vulnerabilities(node_id, severity)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_node_severity ON node_vulnerabilities(node_id, severity)
 	`)
@@ -2176,7 +2190,7 @@ func migrateToV31(conn *sql.DB) error {
 	}
 
 	// Index for fix_status filtering in node summary queries
-	log.Println("Migration v31: Creating index on node_vulnerabilities(fix_status)...")
+	logging.For(logging.ComponentDatabase).Info("migration v31: creating index on node_vulnerabilities(fix_status)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_fix_status ON node_vulnerabilities(fix_status)
 	`)
@@ -2185,7 +2199,7 @@ func migrateToV31(conn *sql.DB) error {
 	}
 
 	// Index for package type filtering
-	log.Println("Migration v31: Creating index on node_packages(type)...")
+	logging.For(logging.ComponentDatabase).Info("migration v31: creating index on node_packages(type)")
 	_, err = tx.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_node_packages_type ON node_packages(type)
 	`)
@@ -2197,18 +2211,18 @@ func migrateToV31(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v31: Successfully added performance indexes for node queries")
-	log.Println("  - node_vulnerabilities(package_id): Critical for SBOM view performance")
-	log.Println("  - node_vulnerabilities(node_id, severity): Optimizes summary counts")
-	log.Println("  - node_vulnerabilities(fix_status): Enables fast fix status filtering")
-	log.Println("  - node_packages(type): Enables fast package type filtering")
+	logging.For(logging.ComponentDatabase).Info("migration v31: successfully added performance indexes for node queries")
+	logging.For(logging.ComponentDatabase).Info("migration v31: node_vulnerabilities(package_id): Critical for SBOM view performance")
+	logging.For(logging.ComponentDatabase).Info("migration v31: node_vulnerabilities(node_id, severity): Optimizes summary counts")
+	logging.For(logging.ComponentDatabase).Info("migration v31: node_vulnerabilities(fix_status): Enables fast fix status filtering")
+	logging.For(logging.ComponentDatabase).Info("migration v31: node_packages(type): Enables fast package type filtering")
 	return nil
 }
 
 // migrateToV32 adds number_of_instances column to node_packages table
 // This tracks how many times the same package (name+version+type) appears in different locations
 func migrateToV32(conn *sql.DB) error {
-	log.Println("Migration v32: Adding number_of_instances column to node_packages...")
+	logging.For(logging.ComponentDatabase).Info("migration v32: adding number_of_instances column to node_packages")
 
 	tx, err := conn.Begin()
 	if err != nil {
@@ -2228,15 +2242,15 @@ func migrateToV32(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v32: Successfully added number_of_instances column to node_packages")
-	log.Println("  - Existing packages default to 1 instance")
-	log.Println("  - Future SBOM imports will count actual instances")
+	logging.For(logging.ComponentDatabase).Info("migration v32: successfully added number_of_instances column to node_packages")
+	logging.For(logging.ComponentDatabase).Info("migration v32: existing packages default to 1 instance")
+	logging.For(logging.ComponentDatabase).Info("migration v32: future SBOM imports will count actual instances")
 	return nil
 }
 
 // migrateToV33 adds count column and UNIQUE constraint to node_vulnerabilities for deduplication
 func migrateToV33(conn *sql.DB) error {
-	log.Println("Migration v33: Adding deduplication support to node_vulnerabilities...")
+	logging.For(logging.ComponentDatabase).Info("migration v33: adding deduplication support to node_vulnerabilities")
 
 	tx, err := conn.Begin()
 	if err != nil {
@@ -2303,17 +2317,17 @@ func migrateToV33(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v33: Successfully added deduplication support to node_vulnerabilities")
-	log.Println("  - Added count column (default 1)")
-	log.Println("  - Added UNIQUE constraint on (node_id, package_id, cve_id)")
-	log.Println("  - Existing duplicates aggregated")
+	logging.For(logging.ComponentDatabase).Info("migration v33: successfully added deduplication support to node_vulnerabilities")
+	logging.For(logging.ComponentDatabase).Info("migration v33: added count column (default 1)")
+	logging.For(logging.ComponentDatabase).Info("migration v33: added UNIQUE constraint on (node_id, package_id, cve_id)")
+	logging.For(logging.ComponentDatabase).Info("migration v33: existing duplicates aggregated")
 	return nil
 }
 
 // migrateToV34 adds node_vulnerability_details and node_package_details tables
 // This separates heavy JSON details from main tables for better performance
 func migrateToV34(conn *sql.DB) error {
-	log.Println("Migration v34: Creating node detail tables...")
+	logging.For(logging.ComponentDatabase).Info("migration v34: creating node detail tables")
 
 	tx, err := conn.Begin()
 	if err != nil {
@@ -2391,10 +2405,10 @@ func migrateToV34(conn *sql.DB) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("Migration v34: Successfully created node detail tables")
-	log.Println("  - Created node_vulnerability_details table")
-	log.Println("  - Created node_package_details table")
-	log.Println("  - Migrated existing details data")
+	logging.For(logging.ComponentDatabase).Info("migration v34: successfully created node detail tables")
+	logging.For(logging.ComponentDatabase).Info("migration v34: created node_vulnerability_details table")
+	logging.For(logging.ComponentDatabase).Info("migration v34: created node_package_details table")
+	logging.For(logging.ComponentDatabase).Info("migration v34: migrated existing details data")
 	return nil
 }
 
@@ -2402,7 +2416,7 @@ func migrateToV34(conn *sql.DB) error {
 // This enables the /api/nodes/{name}/sbom and /api/nodes/{name}/vulnerabilities endpoints
 // to return the full Syft and Grype output respectively
 func migrateToV35(conn *sql.DB) error {
-	log.Println("Migration v35: Adding sbom and vulnerabilities columns to nodes table...")
+	logging.For(logging.ComponentDatabase).Info("migration v35: adding sbom and vulnerabilities columns to nodes table")
 
 	_, err := conn.Exec(`ALTER TABLE nodes ADD COLUMN sbom TEXT`)
 	if err != nil {
@@ -2414,8 +2428,8 @@ func migrateToV35(conn *sql.DB) error {
 		return fmt.Errorf("failed to add vulnerabilities column to nodes: %w", err)
 	}
 
-	log.Println("Migration v35: Successfully added sbom and vulnerabilities columns to nodes table")
-	log.Println("  - sbom: Stores raw SBOM JSON from Syft")
-	log.Println("  - vulnerabilities: Stores raw vulnerability JSON from Grype")
+	logging.For(logging.ComponentDatabase).Info("migration v35: successfully added sbom and vulnerabilities columns to nodes table")
+	logging.For(logging.ComponentDatabase).Info("migration v35: sbom: Stores raw SBOM JSON from Syft")
+	logging.For(logging.ComponentDatabase).Info("migration v35: vulnerabilities: Stores raw vulnerability JSON from Grype")
 	return nil
 }

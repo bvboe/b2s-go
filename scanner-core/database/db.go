@@ -3,9 +3,11 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // DB wraps the database connection
@@ -31,7 +33,8 @@ func isCorruptionError(err error) bool {
 
 // deleteDatabase deletes the database file and associated files (WAL, SHM)
 func deleteDatabase(dbPath string) error {
-	log.Printf("Deleting database files at %s", dbPath)
+	log := logging.For(logging.ComponentDatabase)
+	log.Info("deleting database files", "path", dbPath)
 
 	// Delete main database file
 	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
@@ -41,16 +44,16 @@ func deleteDatabase(dbPath string) error {
 	// Delete WAL file if exists
 	walPath := dbPath + "-wal"
 	if err := os.Remove(walPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("Warning: failed to delete WAL file: %v", err)
+		log.Warn("failed to delete WAL file", slog.Any("error", err))
 	}
 
 	// Delete SHM file if exists
 	shmPath := dbPath + "-shm"
 	if err := os.Remove(shmPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("Warning: failed to delete SHM file: %v", err)
+		log.Warn("failed to delete SHM file", slog.Any("error", err))
 	}
 
-	log.Printf("Database files deleted, will create fresh database")
+	log.Info("database files deleted, will create fresh database")
 	return nil
 }
 
@@ -69,8 +72,9 @@ func New(dbPath string) (*DB, error) {
 
 		// Check if it's a corruption error
 		if isCorruptionError(err) {
-			log.Printf("Database corruption detected: %v", err)
-			log.Printf("Deleting corrupted database and starting fresh...")
+			log := logging.For(logging.ComponentDatabase)
+			log.Error("database corruption detected", slog.Any("error", err))
+			log.Info("deleting corrupted database and starting fresh")
 			if err := deleteDatabase(dbPath); err != nil {
 				return nil, fmt.Errorf("failed to delete corrupted database: %w", err)
 			}
@@ -100,8 +104,9 @@ func New(dbPath string) (*DB, error) {
 
 		// If configuration fails due to corruption, delete and recreate
 		if isCorruptionError(err) {
-			log.Printf("Database corruption detected during configuration: %v", err)
-			log.Printf("Deleting corrupted database and starting fresh...")
+			log := logging.For(logging.ComponentDatabase)
+			log.Error("database corruption detected during configuration", slog.Any("error", err))
+			log.Info("deleting corrupted database and starting fresh")
 			if err := deleteDatabase(dbPath); err != nil {
 				return nil, fmt.Errorf("failed to delete corrupted database: %w", err)
 			}
@@ -119,8 +124,9 @@ func New(dbPath string) (*DB, error) {
 
 		// If migration fails due to corruption, delete and recreate
 		if isCorruptionError(err) {
-			log.Printf("Database corruption detected during migration: %v", err)
-			log.Printf("Deleting corrupted database and starting fresh...")
+			log := logging.For(logging.ComponentDatabase)
+			log.Error("database corruption detected during migration", slog.Any("error", err))
+			log.Info("deleting corrupted database and starting fresh")
 			if err := deleteDatabase(dbPath); err != nil {
 				return nil, fmt.Errorf("failed to delete corrupted database: %w", err)
 			}
@@ -130,7 +136,7 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
 
-	log.Printf("Database initialized at %s", dbPath)
+	logging.For(logging.ComponentDatabase).Info("database initialized", "path", dbPath)
 	return db, nil
 }
 
@@ -141,9 +147,9 @@ func Close(db *DB) error {
 	}
 
 	// Checkpoint WAL to ensure all data is written to main database
-	log.Printf("Checkpointing WAL before closing database...")
+	logging.For(logging.ComponentDatabase).Info("checkpointing WAL before closing database")
 	if _, err := db.conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		log.Printf("Warning: failed to checkpoint WAL: %v", err)
+		logging.For(logging.ComponentDatabase).Warn("failed to checkpoint WAL", "error", err)
 	}
 
 	return db.conn.Close()
@@ -182,7 +188,8 @@ func HealthCheck(db *DB) error {
 // RecoverFromCorruption attempts to recover from database corruption
 // WARNING: This may result in data loss
 func RecoverFromCorruption(dbPath string) error {
-	log.Printf("Attempting to recover corrupted database at %s", dbPath)
+	log := logging.For(logging.ComponentDatabase)
+	log.Info("attempting to recover corrupted database", "path", dbPath)
 
 	// Try to dump and restore
 	conn, err := sql.Open("sqlite", dbPath)
@@ -193,17 +200,17 @@ func RecoverFromCorruption(dbPath string) error {
 
 	// Attempt to export data to a new database
 	backupPath := dbPath + ".backup"
-	log.Printf("Creating backup at %s", backupPath)
+	log.Info("creating backup", "path", backupPath)
 
 	_, err = conn.Exec(fmt.Sprintf("VACUUM INTO '%s'", backupPath))
 	if err != nil {
-		log.Printf("VACUUM INTO failed: %v", err)
+		log.Error("VACUUM INTO failed", "error", err)
 		// Try alternative recovery: .dump equivalent
 		return fmt.Errorf("failed to recover database: %w", err)
 	}
 
-	log.Printf("Database recovered to %s", backupPath)
-	log.Printf("To use recovered database, run: mv %s %s", backupPath, dbPath)
+	log.Info("database recovered", "backup_path", backupPath)
+	log.Info("to use recovered database, run command", "command", fmt.Sprintf("mv %s %s", backupPath, dbPath))
 
 	return nil
 }

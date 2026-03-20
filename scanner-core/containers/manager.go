@@ -1,8 +1,10 @@
 package containers
 
 import (
-	"log"
+	"log/slog"
 	"sync"
+
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // ReconciliationStats holds statistics about a reconciliation operation
@@ -57,7 +59,7 @@ func (m *Manager) SetDatabase(db DatabaseInterface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.db = db
-	log.Println("Container manager: database persistence enabled")
+	logging.For(logging.ComponentContainers).Info("database persistence enabled")
 }
 
 // SetScanQueue configures the manager to use a scan queue for SBOM generation
@@ -66,13 +68,13 @@ func (m *Manager) SetDatabase(db DatabaseInterface) {
 func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 	m.mu.Lock()
 	m.scanQueue = queue
-	log.Println("Container manager: scan queue enabled")
+	logging.For(logging.ComponentContainers).Info("scan queue enabled")
 
 	// Catch-up: enqueue scans for images discovered before queue was connected
 	// This handles images from initial sync that couldn't be enqueued
 	if m.db != nil && len(m.containers) > 0 {
 		containerCount := len(m.containers)
-		log.Printf("Checking %d containers for pending scans...", containerCount)
+		logging.For(logging.ComponentContainers).Info("checking containers for pending scans", "count", containerCount)
 
 		// Build map of digest -> container (first container per digest for scan context)
 		digestToContainer := make(map[string]Container)
@@ -93,14 +95,14 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 		}
 
 		if len(digests) == 0 {
-			log.Printf("No images to check for pending scans")
+			logging.For(logging.ComponentContainers).Debug("no images to check for pending scans")
 			return
 		}
 
 		// Get status for all images in a single bulk query
 		scanStatuses, err := m.db.GetImageScanStatusBulk(digests)
 		if err != nil {
-			log.Printf("Error fetching bulk scan status: %v", err)
+			logging.For(logging.ComponentContainers).Error("failed to fetch bulk scan status", slog.Any("error", err))
 			return
 		}
 
@@ -117,7 +119,7 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 		if len(scannedDigests) > 0 {
 			completenessStatus, err = m.db.IsScanDataCompleteBulk(scannedDigests)
 			if err != nil {
-				log.Printf("Error fetching bulk completeness status: %v", err)
+				logging.For(logging.ComponentContainers).Error("failed to fetch bulk completeness status", slog.Any("error", err))
 				completenessStatus = make(map[string]bool)
 			}
 		} else {
@@ -125,6 +127,7 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 		}
 
 		// Enqueue scans based on status
+		log := logging.For(logging.ComponentContainers)
 		enqueuedCount := 0
 		for digest, status := range scanStatuses {
 			c := digestToContainer[digest]
@@ -132,37 +135,33 @@ func (m *Manager) SetScanQueue(queue ScanQueueInterface) {
 			switch status {
 			case "pending":
 				// New image, enqueue normal scan
-				log.Printf("Enqueuing scan for new image: %s (digest=%s)",
-					c.Image.Reference, c.Image.Digest)
+				log.Debug("enqueuing scan for new image", "image", c.Image.Reference, "digest", c.Image.Digest)
 				m.scanQueue.EnqueueScan(c.Image, c.NodeName, c.ContainerRuntime)
 				enqueuedCount++
 
 			case "failed":
 				// Previous scan failed, retry with force scan
-				log.Printf("Retrying failed scan for image: %s (digest=%s)",
-					c.Image.Reference, c.Image.Digest)
+				log.Debug("retrying failed scan", "image", c.Image.Reference, "digest", c.Image.Digest)
 				m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 				enqueuedCount++
 
 			case "scanned":
 				// Check if data is actually complete
 				if !completenessStatus[digest] {
-					log.Printf("Retrying scan for image with incomplete data: %s (digest=%s)",
-						c.Image.Reference, c.Image.Digest)
+					log.Debug("retrying scan for incomplete data", "image", c.Image.Reference, "digest", c.Image.Digest)
 					m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 					enqueuedCount++
 				}
 
 			case "scanning":
 				// Image is in an intermediate state (previous scan was interrupted)
-				log.Printf("Retrying interrupted scan for image: %s (digest=%s)",
-					c.Image.Reference, c.Image.Digest)
+				log.Debug("retrying interrupted scan", "image", c.Image.Reference, "digest", c.Image.Digest)
 				m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 				enqueuedCount++
 			}
 		}
 
-		log.Printf("Queued catch-up scans for %d of %d unique images", enqueuedCount, len(digests))
+		log.Info("queued catch-up scans", "enqueued", enqueuedCount, "total", len(digests))
 		return
 	}
 	m.mu.Unlock()
@@ -181,14 +180,15 @@ func (m *Manager) AddContainer(c Container) {
 	key := makeKey(c.ID.Namespace, c.ID.Pod, c.ID.Name)
 	m.containers[key] = c
 
-	log.Printf("Add container: namespace=%s, pod=%s, name=%s, image=%s (digest=%s)",
-		c.ID.Namespace, c.ID.Pod, c.ID.Name,
-		c.Image.Reference, c.Image.Digest)
+	logging.For(logging.ComponentContainers).Info("add container",
+		"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name,
+		"image", c.Image.Reference, "digest", c.Image.Digest)
 
 	// Persist to database if configured
 	if m.db != nil {
 		if _, err := m.db.AddContainer(c); err != nil {
-			log.Printf("Error adding container to database: %v", err)
+			logging.For(logging.ComponentContainers).Error("failed to add container to database",
+				"container", c.ID.Name, slog.Any("error", err))
 			return
 		}
 
@@ -207,13 +207,14 @@ func (m *Manager) RemoveContainer(id ContainerID) {
 	key := makeKey(id.Namespace, id.Pod, id.Name)
 	delete(m.containers, key)
 
-	log.Printf("Remove container: namespace=%s, pod=%s, name=%s",
-		id.Namespace, id.Pod, id.Name)
+	logging.For(logging.ComponentContainers).Info("remove container",
+		"namespace", id.Namespace, "pod", id.Pod, "name", id.Name)
 
 	// Remove from database if configured
 	if m.db != nil {
 		if err := m.db.RemoveContainer(id); err != nil {
-			log.Printf("Error removing container from database: %v", err)
+			logging.For(logging.ComponentContainers).Error("failed to remove container from database",
+				"container", id.Name, slog.Any("error", err))
 		}
 	}
 }
@@ -244,8 +245,8 @@ func (m *Manager) SetContainers(containers []Container) {
 		}
 	}
 
-	log.Printf("Set containers: %d containers, %d unique images, %d nodes",
-		len(containers), len(uniqueImages), len(uniqueNodes))
+	log := logging.For(logging.ComponentContainers)
+	log.Info("set containers", "containers", len(containers), "unique_images", len(uniqueImages), "nodes", len(uniqueNodes))
 
 	// Log first 3 containers as samples for debugging (only if we have containers)
 	if len(containers) > 0 {
@@ -253,15 +254,15 @@ func (m *Manager) SetContainers(containers []Container) {
 		if len(containers) < sampleCount {
 			sampleCount = len(containers)
 		}
-		log.Printf("Sample containers:")
+		log.Debug("sample containers:")
 		for i := 0; i < sampleCount; i++ {
 			c := containers[i]
-			log.Printf("  [%d] ns=%s, pod=%s, name=%s, image=%s, node=%s",
-				i, c.ID.Namespace, c.ID.Pod, c.ID.Name,
-				c.Image.Reference, c.NodeName)
+			log.Debug("sample container", "index", i,
+				"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name,
+				"image", c.Image.Reference, "node", c.NodeName)
 		}
 		if len(containers) > sampleCount {
-			log.Printf("  ... and %d more containers", len(containers)-sampleCount)
+			log.Debug("additional containers not shown", "count", len(containers)-sampleCount)
 		}
 	}
 
@@ -269,14 +270,16 @@ func (m *Manager) SetContainers(containers []Container) {
 	if m.db != nil {
 		stats, err := m.db.SetContainers(containers)
 		if err != nil {
-			log.Printf("Error setting containers in database: %v", err)
+			log.Error("failed to set containers in database", slog.Any("error", err))
 			return
 		}
 
 		// Log reconciliation summary
 		if stats != nil {
-			log.Printf("Reconciliation summary: %d containers added, %d containers removed, %d new images discovered",
-				stats.ContainersAdded, stats.ContainersRemoved, stats.ImagesAdded)
+			log.Info("reconciliation summary",
+				"added", stats.ContainersAdded,
+				"removed", stats.ContainersRemoved,
+				"new_images", stats.ImagesAdded)
 		}
 
 		// Enqueue scan jobs for images that need scanning or retrying
@@ -334,9 +337,10 @@ func (m *Manager) GetContainer(namespace, pod, name string) (Container, bool) {
 // checkAndEnqueueScan checks if an image needs scanning and enqueues it with appropriate flags
 // This method handles retrying failed or incomplete scans
 func (m *Manager) checkAndEnqueueScan(c Container) {
+	log := logging.For(logging.ComponentContainers)
 	scanStatus, err := m.db.GetImageScanStatus(c.Image.Digest)
 	if err != nil {
-		log.Printf("Error checking scan status for %s: %v", c.Image.Digest, err)
+		log.Error("failed to check scan status", "digest", c.Image.Digest, slog.Any("error", err))
 		return
 	}
 
@@ -344,27 +348,24 @@ func (m *Manager) checkAndEnqueueScan(c Container) {
 	switch scanStatus {
 	case "pending":
 		// New image, enqueue normal scan
-		log.Printf("Enqueuing scan for new image: %s (digest=%s)",
-			c.Image.Reference, c.Image.Digest)
+		log.Debug("enqueuing scan for new image", "image", c.Image.Reference, "digest", c.Image.Digest)
 		m.scanQueue.EnqueueScan(c.Image, c.NodeName, c.ContainerRuntime)
 
 	case "failed":
 		// Previous scan failed, retry with force scan
-		log.Printf("Retrying failed scan for image: %s (digest=%s)",
-			c.Image.Reference, c.Image.Digest)
+		log.Debug("retrying failed scan", "image", c.Image.Reference, "digest", c.Image.Digest)
 		m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 
 	case "scanned":
 		// Check if data is actually complete
 		isComplete, err := m.db.IsScanDataComplete(c.Image.Digest)
 		if err != nil {
-			log.Printf("Error checking scan data completeness for %s: %v", c.Image.Digest, err)
+			log.Error("failed to check scan data completeness", "digest", c.Image.Digest, slog.Any("error", err))
 			return
 		}
 		if !isComplete {
 			// Data is incomplete, retry with force scan
-			log.Printf("Retrying scan for image with incomplete data: %s (digest=%s)",
-				c.Image.Reference, c.Image.Digest)
+			log.Debug("retrying scan for incomplete data", "image", c.Image.Reference, "digest", c.Image.Digest)
 			m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 		}
 		// If complete, no action needed
@@ -373,8 +374,7 @@ func (m *Manager) checkAndEnqueueScan(c Container) {
 		// Image is in an intermediate state (generating_sbom).
 		// This typically means a previous scan was interrupted (e.g., pod restart).
 		// Re-enqueue with force scan to resume/restart the scan.
-		log.Printf("Retrying interrupted scan for image: %s (digest=%s)",
-			c.Image.Reference, c.Image.Digest)
+		log.Debug("retrying interrupted scan", "image", c.Image.Reference, "digest", c.Image.Digest)
 		m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
 	}
 }

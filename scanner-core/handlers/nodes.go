@@ -4,12 +4,12 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 // RegisterNodeHandlers registers all node-related HTTP handlers
@@ -33,14 +33,14 @@ func ListNodesHandler(db *database.DB) http.HandlerFunc {
 
 		nodes, err := db.GetAllNodes()
 		if err != nil {
-			log.Printf("Error getting nodes: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error getting nodes", "error", err)
 			http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(nodes); err != nil {
-			log.Printf("Error encoding nodes response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding nodes response", "error", err)
 		}
 	}
 }
@@ -80,7 +80,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 			// GET /api/nodes/{name} - Get node details
 			node, getErr := db.GetNode(nodeName)
 			if getErr != nil {
-				log.Printf("Error getting node %s: %v", nodeName, getErr)
+				logging.For(logging.ComponentHTTP).Error("error getting node", "node_name", nodeName, "error", getErr)
 				http.Error(w, "Failed to get node", http.StatusInternalServerError)
 				return
 			}
@@ -97,7 +97,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				// Export raw SBOM JSON (Syft output)
 				sbom, sbomErr := db.GetNodeSBOM(nodeName)
 				if sbomErr != nil {
-					log.Printf("Error getting node SBOM for %s: %v", nodeName, sbomErr)
+					logging.For(logging.ComponentHTTP).Error("error getting node SBOM", "node_name", nodeName, "error", sbomErr)
 					http.Error(w, "Failed to get node SBOM", http.StatusInternalServerError)
 					return
 				}
@@ -108,7 +108,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"syft-sbom-%s.json\"", nodeName))
 				if _, writeErr := w.Write(sbom); writeErr != nil {
-					log.Printf("Error writing node SBOM response: %v", writeErr)
+					logging.For(logging.ComponentHTTP).Error("error writing node SBOM response", "error", writeErr)
 				}
 				return
 			}
@@ -116,7 +116,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				// Export packages as CSV
 				packages, csvErr := db.GetNodePackages(nodeName)
 				if csvErr != nil {
-					log.Printf("Error getting node packages for %s: %v", nodeName, csvErr)
+					logging.For(logging.ComponentHTTP).Error("error getting node packages", "node_name", nodeName, "error", csvErr)
 					http.Error(w, "Failed to get node packages", http.StatusInternalServerError)
 					return
 				}
@@ -139,7 +139,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				// Export raw vulnerability JSON (Grype output)
 				vulns, vulnErr := db.GetNodeVulnerabilitiesRaw(nodeName)
 				if vulnErr != nil {
-					log.Printf("Error getting node vulnerabilities for %s: %v", nodeName, vulnErr)
+					logging.For(logging.ComponentHTTP).Error("error getting node vulnerabilities", "node_name", nodeName, "error", vulnErr)
 					http.Error(w, "Failed to get node vulnerabilities", http.StatusInternalServerError)
 					return
 				}
@@ -150,7 +150,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"grype-vulnerabilities-%s.json\"", nodeName))
 				if _, writeErr := w.Write(vulns); writeErr != nil {
-					log.Printf("Error writing node vulnerabilities response: %v", writeErr)
+					logging.For(logging.ComponentHTTP).Error("error writing node vulnerabilities response", "error", writeErr)
 				}
 				return
 			}
@@ -158,7 +158,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 				// Export vulnerabilities as CSV
 				vulns, csvErr := db.GetNodeVulnerabilities(nodeName)
 				if csvErr != nil {
-					log.Printf("Error getting node vulnerabilities for %s: %v", nodeName, csvErr)
+					logging.For(logging.ComponentHTTP).Error("error getting node vulnerabilities", "node_name", nodeName, "error", csvErr)
 					http.Error(w, "Failed to get node vulnerabilities", http.StatusInternalServerError)
 					return
 				}
@@ -191,14 +191,14 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 		}
 
 		if err != nil {
-			log.Printf("Error getting node data for %s/%s: %v", nodeName, subResource, err)
+			logging.For(logging.ComponentHTTP).Error("error getting node data", "node_name", nodeName, "sub_resource", subResource, "error", err)
 			http.Error(w, "Failed to get node data", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(result); err != nil {
-			log.Printf("Error encoding node response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding node response", "error", err)
 		}
 	}
 }
@@ -239,7 +239,7 @@ func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 
 		summaries, err := db.GetNodeSummariesFiltered(filters)
 		if err != nil {
-			log.Printf("Error getting node summaries: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error getting node summaries", "error", err)
 			http.Error(w, "Failed to get node summaries", http.StatusInternalServerError)
 			return
 		}
@@ -280,7 +280,7 @@ func NodeSummaryHandler(db *database.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(summaries); err != nil {
-			log.Printf("Error encoding node summaries response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding node summaries response", "error", err)
 		}
 	}
 }
@@ -296,7 +296,7 @@ func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
 
 		summaries, err := db.GetNodeDistributionSummary()
 		if err != nil {
-			log.Printf("Error getting node distribution summary: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error getting node distribution summary", "error", err)
 			http.Error(w, "Failed to get node distribution summary", http.StatusInternalServerError)
 			return
 		}
@@ -336,7 +336,7 @@ func NodeDistributionSummaryHandler(db *database.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(summaries); err != nil {
-			log.Printf("Error encoding node distribution summary response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding node distribution summary response", "error", err)
 		}
 	}
 }
@@ -351,14 +351,14 @@ func NodeFilterOptionsHandler(db *database.DB) http.HandlerFunc {
 
 		options, err := db.GetNodeFilterOptions()
 		if err != nil {
-			log.Printf("Error getting node filter options: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error getting node filter options", "error", err)
 			http.Error(w, "Failed to get node filter options", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(options); err != nil {
-			log.Printf("Error encoding node filter options response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error encoding node filter options response", "error", err)
 		}
 	}
 }
@@ -392,14 +392,14 @@ func NodeVulnerabilityDetailsHandler(db *database.DB) http.HandlerFunc {
 				http.Error(w, "Vulnerability not found", http.StatusNotFound)
 				return
 			}
-			log.Printf("Error getting node vulnerability details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error getting node vulnerability details", "error", err)
 			http.Error(w, "Failed to get vulnerability details", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(details)); err != nil {
-			log.Printf("Error writing vulnerability details response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing vulnerability details response", "error", err)
 		}
 	}
 }
@@ -433,14 +433,14 @@ func NodePackageDetailsHandler(db *database.DB) http.HandlerFunc {
 				http.Error(w, "Package not found", http.StatusNotFound)
 				return
 			}
-			log.Printf("Error getting node package details: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error getting node package details", "error", err)
 			http.Error(w, "Failed to get package details", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(details)); err != nil {
-			log.Printf("Error writing package details response: %v", err)
+			logging.For(logging.ComponentHTTP).Error("error writing package details response", "error", err)
 		}
 	}
 }
