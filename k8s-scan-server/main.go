@@ -28,6 +28,7 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/scheduler"
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 	// SQLite driver is registered by Grype's dependencies
+	_ "github.com/KimMachineGun/automemlimit" // Automatically set GOMEMLIMIT based on cgroup limits
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

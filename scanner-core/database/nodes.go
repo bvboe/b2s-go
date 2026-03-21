@@ -618,6 +618,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 // StoreNodeVulnerabilities stores vulnerabilities for a node
 // Groups duplicates and stores details in separate table
 func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuilt time.Time) error {
+
 	// Get node ID first (outside transaction)
 	var nodeID int64
 	err := db.conn.QueryRow(`SELECT id FROM nodes WHERE name = ?`, name).Scan(&nodeID)
@@ -818,7 +819,9 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	}
 
 	log.Info("stored vulnerabilities for node",
-		"node", name, "unique", totalInserted, "total_matches", len(report.Matches))
+		"node", name,
+		"unique", totalInserted,
+		"total_matches", len(report.Matches))
 	return nil
 }
 

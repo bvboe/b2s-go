@@ -745,6 +745,8 @@ type QueueContents struct {
 	TotalEnqueued  int64      `json:"total_enqueued"`
 	TotalDropped   int64      `json:"total_dropped"`
 	TotalProcessed int64      `json:"total_processed"`
+	JobCount       int        `json:"job_count"`      // Number of image scan jobs
+	HostJobCount   int        `json:"host_job_count"` // Number of host scan jobs
 	Jobs           []QueueJob `json:"jobs"`
 }
 
@@ -784,6 +786,8 @@ func (q *JobQueue) GetQueueContents() QueueContents {
 		TotalEnqueued:  q.metrics.totalEnqueued,
 		TotalDropped:   q.metrics.totalDropped,
 		TotalProcessed: q.metrics.totalProcessed,
+		JobCount:       len(q.jobs),
+		HostJobCount:   len(q.hostJobs),
 		Jobs:           jobs,
 	}
 }

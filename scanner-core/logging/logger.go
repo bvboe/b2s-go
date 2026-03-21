@@ -22,19 +22,19 @@ import (
 
 // Component names for structured logging
 const (
-	ComponentScheduler       = "scheduler"
-	ComponentGrype           = "grype"
-	ComponentQueue           = "scan-queue"
-	ComponentDatabase        = "database"
-	ComponentNodes           = "nodes"
-	ComponentContainers      = "containers"
-	ComponentHTTP            = "http"
-	ComponentPodScanner      = "pod-scanner"
+	ComponentScheduler        = "scheduler"
+	ComponentGrype            = "grype"
+	ComponentQueue            = "scan-queue"
+	ComponentDatabase         = "database"
+	ComponentNodes            = "nodes"
+	ComponentContainers       = "containers"
+	ComponentHTTP             = "http"
+	ComponentPodScanner       = "pod-scanner"
 	ComponentPodScannerClient = "pod-scanner-client"
-	ComponentK8s             = "k8s"
-	ComponentMetrics         = "metrics"
-	ComponentJobs            = "jobs"
-	ComponentVulnDB          = "vulndb"
+	ComponentK8s              = "k8s"
+	ComponentMetrics          = "metrics"
+	ComponentJobs             = "jobs"
+	ComponentVulnDB           = "vulndb"
 )
 
 var (

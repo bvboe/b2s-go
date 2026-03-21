@@ -10,6 +10,54 @@
 - [ ] None currently
 
 ## Backlog
+
+### Research Topics
+- [ ] **[RESEARCH] Batched SBOM processing through Grype**
+  - [ ] **Goal**: Reduce memory usage for large node SBOMs (52MB+) by batching
+  - [ ] **Approach**: Split SBOM into chunks of ~1000 packages, run each through Grype separately, merge results
+  - [ ] **Questions to answer**:
+    - [ ] Can Grype handle partial SBOMs? (Does it need full SBOM context?)
+    - [ ] How to split SBOM JSON correctly? (Preserve relationships, metadata)
+    - [ ] Will merged results be identical to single-pass results?
+    - [ ] What about cross-package vulnerabilities?
+    - [ ] Impact on scan duration? (Multiple Grype invocations vs. one)
+  - [ ] **Risk**: COMPLEX - Grype may rely on full SBOM context for accuracy
+  - [ ] **Benefit**: Could reduce peak memory from 1.5GB → 200MB per scan
+  - [ ] **Status**: Research only - implement AFTER basic batching fixes proven
+  - [ ] **Related**: Node SBOM memory investigation (Test 2.1 results)
+
+### Performance & Stability
+- [ ] **[DECISION] Move Grype DB from ephemeral to persistent storage**
+  - [ ] **Current state**: Grype DB (300-500 MB) stored on ephemeral storage
+  - [ ] **Problem**: DB re-downloaded on every pod restart/upgrade
+    - [ ] Wastes bandwidth (300-500 MB download per restart)
+    - [ ] Increases startup time significantly (download + initialization)
+    - [ ] Readiness probe must wait 2 minutes (`initialDelaySeconds: 120`)
+  - [ ] **Solution**: Use PersistentVolumeClaim for Grype DB cache directory
+    - [ ] DB persists across pod restarts
+    - [ ] Only downloads when DB is updated (daily/weekly)
+    - [ ] Faster startup times (seconds vs minutes)
+  - [ ] **Tradeoff**: Requires PVC provisioning (storage class needed)
+  - [ ] **Related**: Slow server startup time investigation
+- [ ] **[INVESTIGATE] Slow server startup time**
+  - [ ] **Potential causes**:
+    - [ ] Grype database download/initialization (300-500 MB on first start) ← **PRIMARY SUSPECT**
+    - [ ] Database migrations (may be slow with large existing databases)
+    - [ ] Container discovery and initial scanning activity
+    - [ ] Kubernetes API enumeration (all pods/namespaces)
+    - [ ] Go module/dependency initialization
+  - [ ] **How to measure**:
+    - [ ] Time from pod creation to `/ready` endpoint healthy
+    - [ ] Check readiness probe timing (currently `initialDelaySeconds: 120`)
+    - [ ] Add startup phase timing in logs (Grype init, migrations, K8s discovery)
+    - [ ] Profile with `go tool pprof` or `go tool trace`
+  - [ ] **Investigation steps**:
+    - [ ] Add startup timing instrumentation for key phases
+    - [ ] Measure Grype DB initialization separately
+    - [ ] Measure database migration time
+    - [ ] Compare cold start (no DB) vs warm start (DB exists)
+  - [ ] **Goal**: Identify bottleneck and optimize if >30 seconds
+  - [ ] **Note**: If Grype DB moved to persistent storage, this may resolve startup time issue
 - [ ] Improve log output format to show component before msg
   - [ ] Update `scanner-core/logging/logger.go` to customize slog handler field ordering
   - [ ] Update standalone loggers in `pod-scanner/main.go` and `k8s-update-controller/main.go`
@@ -53,6 +101,15 @@
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 
 ## Recently Completed
+- [x] [2026-03-21] Resolved OOMKilled pod restarts during node vulnerability scanning
+  - **Root cause**: Node scans require 1.5-2.0 GB peak memory for Grype vulnerability scanning, exceeding 2Gi pod limit
+  - **Solution**: Increased scan-server memory limit from 2Gi → 3Gi in `helm/bjorn2scan/values.yaml`
+  - **Enhancement**: Added `automemlimit` for automatic GOMEMLIMIT configuration based on cgroup limits
+  - **Investigation**: Instrumented memory usage at granular level to identify exact spike location (Grype scan, not storage)
+  - **Key finding**: Scanning is already single-threaded - OOM from single node scan, not concurrent scans
+  - **Memory breakdown**: 277-387 MB heap, 1105-1747 MB system memory (2.9-4.5x ratio due to CGO/SQLite)
+  - **Documentation**: Full investigation moved to `dev-local/oom-investigation/`
+  - **Test results**: kubeadm-worker-1 scan completed successfully with 64% memory headroom
 - [x] [2026-03-11] Implemented code simplification suggestions (net ~330 lines removed)
   - Created `scanner-core/handlers/queryhelpers.go` with shared SQL filter building helpers
   - Consolidated 4 CSV export functions into single `exportQueryResultAsCSV()` function
