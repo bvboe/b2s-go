@@ -27,6 +27,29 @@
   - [ ] **Related**: Node SBOM memory investigation (Test 2.1 results)
 
 ### Performance & Stability
+- [ ] **[REFACTOR] Unify metrics collection implementation for containers and nodes**
+  - [ ] **Current state**: Two different implementations with inconsistent behavior
+    - [ ] Container metrics: Use `MetricTracker` for staleness tracking, collect all into memory
+    - [ ] Node metrics: No staleness tracking, stream vulnerability data directly to avoid OOM
+  - [ ] **Problem**: Inconsistent behavior across metric types
+    - [ ] Node metrics disappear immediately when node removed (no staleness window)
+    - [ ] Container metrics buffered in memory (potential OOM with large datasets)
+    - [ ] `metrics_staleness_window` config only applies to container metrics
+  - [ ] **Goal**: Unified implementation for all metric types
+    - [ ] Staleness tracking for both container AND node metrics
+    - [ ] Streaming/batched writing for all metrics to avoid memory spikes
+    - [ ] Consistent configuration (staleness window applies to all)
+  - [ ] **Approach**:
+    - [ ] Extend `MetricTracker` to support streaming mode (process metrics one at a time)
+    - [ ] Update `NodeCollector` to use tracker for staleness detection
+    - [ ] Update `Collector` (container metrics) to stream large datasets instead of buffering
+    - [ ] Ensure both use same code paths through `HandlerWithNodes`
+  - [ ] **Files to modify**:
+    - [ ] `scanner-core/metrics/tracker.go` - Add streaming support
+    - [ ] `scanner-core/metrics/node_metrics.go` - Add tracker integration
+    - [ ] `scanner-core/metrics/metrics.go` - Add streaming for container vulnerabilities
+    - [ ] `scanner-core/metrics/handler.go` - Unify handler logic
+  - [ ] **Benefit**: Consistent metrics behavior, reduced memory usage, proper staleness handling
 - [ ] **[DECISION] Move Grype DB from ephemeral to persistent storage**
   - [ ] **Current state**: Grype DB (300-500 MB) stored on ephemeral storage
   - [ ] **Problem**: DB re-downloaded on every pod restart/upgrade
