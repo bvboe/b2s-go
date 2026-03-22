@@ -12,9 +12,9 @@
 ## Backlog
 
 ### Code Quality
-- [ ] **[BUG] `sbom-generator-shared` appears with unknown version in SBOM output**
-  - [ ] Investigate how version is embedded at build time for this module
-  - [ ] Fix so the correct version is reported in generated SBOMs
+- [x] **[BUG] `sbom-generator-shared` appears with unknown version in SBOM output**
+  - [x] Investigate how version is embedded at build time for this module
+  - [x] Fix so the correct version is reported in generated SBOMs
 
 ### Research Topics
 - [ ] **[RESEARCH] Batched SBOM processing through Grype**
