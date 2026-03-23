@@ -156,6 +156,46 @@ start_agent_container() {
     exit 1
 }
 
+# Warmup: scan a tiny image to ensure grype DB is fully initialized before tests.
+# The grype DB download (~500MB) is async after agent startup; the health check only
+# confirms the HTTP API is up, not that grype is ready.
+warmup_agent() {
+    local warmup_image="busybox:latest"
+    echo ""
+    echo "Warming up agent (waiting for grype DB initialization)..."
+
+    # Pull and run busybox inside the agent's Docker
+    docker exec "$CONTAINER_NAME" docker pull "$warmup_image" >/dev/null 2>&1 || true
+    local warmup_id
+    warmup_id=$(docker exec "$CONTAINER_NAME" docker run -d "$warmup_image" sleep 3600 2>/dev/null || echo "")
+    if [[ -z "$warmup_id" ]]; then
+        echo -e "${YELLOW}Warning: Could not start warmup container, continuing without warmup${NC}"
+        return 0
+    fi
+
+    local digest
+    digest=$(docker exec "$CONTAINER_NAME" docker inspect "$warmup_id" --format '{{index .Image}}' 2>/dev/null | sed 's/sha256://' || echo "")
+
+    if [[ -n "$digest" ]]; then
+        local elapsed=0
+        while [[ $elapsed -lt $TIMEOUT ]]; do
+            local status
+            status=$(curl -s "$AGENT_API_URL/api/images/sha256:$digest" 2>/dev/null | jq -r '.status_description // empty' 2>/dev/null || echo "")
+            if [[ "$status" == "Scan complete" ]] || [[ "$status" == "Scan failed"* ]]; then
+                echo -e "${GREEN}✓ Agent warmup complete (grype DB ready)${NC}"
+                break
+            fi
+            sleep $POLL_INTERVAL
+            elapsed=$((elapsed + POLL_INTERVAL))
+        done
+        if [[ $elapsed -ge $TIMEOUT ]]; then
+            echo -e "${YELLOW}Warning: Warmup timed out, grype DB may still be initializing${NC}"
+        fi
+    fi
+
+    docker exec "$CONTAINER_NAME" docker rm -f "$warmup_id" >/dev/null 2>&1 || true
+}
+
 # Read test cases from file
 read_test_cases() {
     if [[ ! -f "$TEST_CASES_FILE" ]]; then
@@ -606,6 +646,7 @@ main() {
 
     check_prerequisites
     start_agent_container
+    warmup_agent
 
     # Read test cases
     local test_cases
