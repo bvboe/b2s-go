@@ -2,32 +2,17 @@ package metrics
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 )
 
-// familyMeta maps each metric family name to its [help text, metric type].
-// Used to write HELP/TYPE headers for stale-NaN lines when a family has no current data.
-var familyMeta = map[string][2]string{
-	"bjorn2scan_deployment":                    {"Bjorn2scan deployment information", "gauge"},
-	"bjorn2scan_image_scanned":                 {"Bjorn2scan scanned container image information", "gauge"},
-	"bjorn2scan_image_vulnerability":           {"Bjorn2scan vulnerability information for container images", "gauge"},
-	"bjorn2scan_image_vulnerability_risk":      {"Bjorn2scan vulnerability risk scores for container images", "gauge"},
-	"bjorn2scan_image_vulnerability_exploited": {"Bjorn2scan known exploited vulnerabilities (CISA KEV) in container images", "gauge"},
-	"bjorn2scan_image_scan_status":             {"Count of running container images by scan status", "gauge"},
-	"bjorn2scan_node_scanned":                  {"Bjorn2scan scanned node information", "gauge"},
-	"bjorn2scan_node_vulnerability":            {"Bjorn2scan vulnerability information for nodes", "gauge"},
-	"bjorn2scan_node_vulnerability_risk":       {"Bjorn2scan vulnerability risk scores for nodes", "gauge"},
-	"bjorn2scan_node_vulnerability_exploited":  {"Bjorn2scan known exploited vulnerabilities (CISA KEV) on nodes", "gauge"},
-}
-
 // StreamMetrics writes all enabled metric families to w in Prometheus text format,
-// then emits NaN for any stale metrics from a previous cycle.
+// then emits NaN for any genuinely stale metrics from a previous cycle.
 //
 // Returns the accumulated staleness rows for the caller to persist asynchronously.
 // The caller should call staleness.FlushAll(batch, cycleStart) and
@@ -47,272 +32,49 @@ func StreamMetrics(
 ) ([]database.StalenessRow, error) {
 	bw := bufio.NewWriterSize(w, 64*1024)
 	deploymentName := info.GetDeploymentName()
-	cycleStartUnix := cycleStart.Unix()
 
 	// writtenFamilies tracks which families have had HELP+TYPE written.
-	// Used to avoid duplicate headers when stale NaN lines reference an already-written family.
+	// Avoids duplicate headers when multiple metrics share the same family.
 	writtenFamilies := make(map[string]bool)
 
-	// batch accumulates staleness rows for the caller to flush after the HTTP response.
-	var batch []database.StalenessRow
+	// writeErr captures the first write error; subsequent writes are no-ops.
+	var writeErr error
 
-	// writeHeader writes HELP and TYPE lines for a family exactly once.
-	writeHeader := func(name, help, metricType string) error {
-		if writtenFamilies[name] {
-			return nil
+	writeHeader := func(name string) {
+		if writeErr != nil || writtenFamilies[name] {
+			return
 		}
 		writtenFamilies[name] = true
-		if _, err := fmt.Fprintf(bw, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, metricType); err != nil {
-			return err
-		}
-		return nil
+		meta := familyMeta[name]
+		_, writeErr = fmt.Fprintf(bw, "# HELP %s %s\n# TYPE %s %s\n", name, meta[0], name, meta[1])
 	}
 
-	// appendToBatch queues a staleness row for the current metric point.
-	appendToBatch := func(familyName string, labels map[string]string) error {
-		labelsJSON, err := json.Marshal(labels)
-		if err != nil {
-			return fmt.Errorf("failed to marshal labels: %w", err)
+	emit := func(familyName, _ string, labels map[string]string, value float64) {
+		writeHeader(familyName)
+		if writeErr != nil {
+			return
 		}
-		batch = append(batch, database.StalenessRow{
-			MetricKey:  generateMetricKey(familyName, labels),
-			FamilyName: familyName,
-			LabelsJSON: string(labelsJSON),
-			// LastSeenUnix is set by FlushAll before writing to DB.
-			LastSeenUnix: cycleStartUnix,
-		})
-		return nil
-	}
-
-	// ─── 1. Deployment metric ─────────────────────────────────────────────────
-	if config.DeploymentEnabled {
-		labels := buildDeploymentLabels(info, deploymentUUID, deploymentName)
-		if err := writeHeader("bjorn2scan_deployment", familyMeta["bjorn2scan_deployment"][0], "gauge"); err != nil {
-			return nil, err
-		}
-		if _, err := fmt.Fprintf(bw, "bjorn2scan_deployment{%s} 1\n", formatLabels(labels)); err != nil {
-			return nil, err
-		}
-		if err := appendToBatch("bjorn2scan_deployment", labels); err != nil {
-			return nil, err
+		if math.IsNaN(value) {
+			_, writeErr = fmt.Fprintf(bw, "%s{%s} NaN\n", familyName, formatLabels(labels))
+		} else {
+			_, writeErr = fmt.Fprintf(bw, "%s{%s} %g\n", familyName, formatLabels(labels), value)
 		}
 	}
 
-	// ─── 2. Image scanned (stream containers) ────────────────────────────────
-	if config.ScannedContainersEnabled {
-		if err := provider.StreamScannedContainers(func(ctr database.ScannedContainer) error {
-			if err := writeHeader("bjorn2scan_image_scanned", familyMeta["bjorn2scan_image_scanned"][0], "gauge"); err != nil {
-				return err
-			}
-			info := containerInfo{
-				NodeName:  ctr.NodeName,
-				Namespace: ctr.Namespace,
-				Pod:       ctr.Pod,
-				Name:      ctr.Name,
-				Reference: ctr.Reference,
-				Digest:    ctr.Digest,
-				OSName:    ctr.OSName,
-				Arch:      ctr.Architecture,
-			}
-			labels := buildContainerBaseLabels(deploymentUUID, deploymentName, info)
-			if _, err := fmt.Fprintf(bw, "bjorn2scan_image_scanned{%s} 1\n", formatLabels(labels)); err != nil {
-				return err
-			}
-			return appendToBatch("bjorn2scan_image_scanned", labels)
-		}); err != nil {
-			return nil, fmt.Errorf("streaming scanned containers: %w", err)
-		}
+	// No mid-stream flushing: the full batch is returned for async flush after the response.
+	batch, err := collectMetrics(provider, config, info, deploymentUUID, deploymentName,
+		cycleStart.Unix(), staleRows, 0, emit, nil)
+	if err != nil {
+		return nil, err
 	}
-
-	// ─── 3. Image vulnerabilities (3 families, single DB pass) ───────────────
-	needsVulns := config.VulnerabilitiesEnabled || config.VulnerabilityExploitedEnabled || config.VulnerabilityRiskEnabled
-	if needsVulns {
-		if err := provider.StreamContainerVulnerabilities(func(v database.ContainerVulnerability) error {
-			labels := buildContainerVulnerabilityLabels(deploymentUUID, deploymentName, v)
-			labelsStr := formatLabels(labels)
-
-			if config.VulnerabilitiesEnabled {
-				if err := writeHeader("bjorn2scan_image_vulnerability", familyMeta["bjorn2scan_image_vulnerability"][0], "gauge"); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(bw, "bjorn2scan_image_vulnerability{%s} %g\n", labelsStr, float64(v.Count)); err != nil {
-					return err
-				}
-				if err := appendToBatch("bjorn2scan_image_vulnerability", labels); err != nil {
-					return err
-				}
-			}
-
-			if config.VulnerabilityRiskEnabled {
-				if err := writeHeader("bjorn2scan_image_vulnerability_risk", familyMeta["bjorn2scan_image_vulnerability_risk"][0], "gauge"); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(bw, "bjorn2scan_image_vulnerability_risk{%s} %g\n", labelsStr, v.Risk*float64(v.Count)); err != nil {
-					return err
-				}
-				if err := appendToBatch("bjorn2scan_image_vulnerability_risk", labels); err != nil {
-					return err
-				}
-			}
-
-			if config.VulnerabilityExploitedEnabled && v.KnownExploited > 0 {
-				if err := writeHeader("bjorn2scan_image_vulnerability_exploited", familyMeta["bjorn2scan_image_vulnerability_exploited"][0], "gauge"); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(bw, "bjorn2scan_image_vulnerability_exploited{%s} %g\n", labelsStr, float64(v.KnownExploited*v.Count)); err != nil {
-					return err
-				}
-				if err := appendToBatch("bjorn2scan_image_vulnerability_exploited", labels); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}); err != nil {
-			return nil, fmt.Errorf("streaming container vulnerabilities: %w", err)
-		}
+	if writeErr != nil {
+		return nil, writeErr
 	}
-
-	// ─── 4. Image scan status (small, load all at once) ──────────────────────
-	if config.ImageScanStatusEnabled {
-		statusCounts, err := provider.GetImageScanStatusCounts()
-		if err != nil {
-			return nil, fmt.Errorf("getting image scan status counts: %w", err)
-		}
-		for _, sc := range statusCounts {
-			if err := writeHeader("bjorn2scan_image_scan_status", familyMeta["bjorn2scan_image_scan_status"][0], "gauge"); err != nil {
-				return nil, err
-			}
-			labels := map[string]string{
-				"deployment_uuid": deploymentUUID,
-				"scan_status":     sc.Status,
-			}
-			if _, err := fmt.Fprintf(bw, "bjorn2scan_image_scan_status{%s} %g\n", formatLabels(labels), float64(sc.Count)); err != nil {
-				return nil, err
-			}
-			if err := appendToBatch("bjorn2scan_image_scan_status", labels); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// ─── 5. Node scanned (small, load all at once) ────────────────────────────
-	if config.NodeScannedEnabled {
-		nodeList, err := provider.GetScannedNodes()
-		if err != nil {
-			return nil, fmt.Errorf("getting scanned nodes: %w", err)
-		}
-		for _, node := range nodeList {
-			if err := writeHeader("bjorn2scan_node_scanned", familyMeta["bjorn2scan_node_scanned"][0], "gauge"); err != nil {
-				return nil, err
-			}
-			labels := buildNodeBaseLabels(deploymentUUID, deploymentName, node)
-			if _, err := fmt.Fprintf(bw, "bjorn2scan_node_scanned{%s} 1\n", formatLabels(labels)); err != nil {
-				return nil, err
-			}
-			if err := appendToBatch("bjorn2scan_node_scanned", labels); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// ─── 6. Node vulnerabilities (3 families, single DB pass) ────────────────
-	needsNodeVulns := config.NodeVulnerabilitiesEnabled || config.NodeVulnerabilityRiskEnabled || config.NodeVulnerabilityExploitedEnabled
-	if needsNodeVulns {
-		if err := provider.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
-			labels := buildNodeVulnerabilityLabels(deploymentUUID, deploymentName, v)
-			labelsStr := formatLabels(labels)
-
-			if config.NodeVulnerabilitiesEnabled {
-				if err := writeHeader("bjorn2scan_node_vulnerability", familyMeta["bjorn2scan_node_vulnerability"][0], "gauge"); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(bw, "bjorn2scan_node_vulnerability{%s} %g\n", labelsStr, float64(v.Count)); err != nil {
-					return err
-				}
-				if err := appendToBatch("bjorn2scan_node_vulnerability", labels); err != nil {
-					return err
-				}
-			}
-
-			if config.NodeVulnerabilityRiskEnabled {
-				if err := writeHeader("bjorn2scan_node_vulnerability_risk", familyMeta["bjorn2scan_node_vulnerability_risk"][0], "gauge"); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(bw, "bjorn2scan_node_vulnerability_risk{%s} %g\n", labelsStr, v.Score*float64(v.Count)); err != nil {
-					return err
-				}
-				if err := appendToBatch("bjorn2scan_node_vulnerability_risk", labels); err != nil {
-					return err
-				}
-			}
-
-			if config.NodeVulnerabilityExploitedEnabled && v.KnownExploited > 0 {
-				if err := writeHeader("bjorn2scan_node_vulnerability_exploited", familyMeta["bjorn2scan_node_vulnerability_exploited"][0], "gauge"); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(bw, "bjorn2scan_node_vulnerability_exploited{%s} %g\n", labelsStr, float64(v.KnownExploited*v.Count)); err != nil {
-					return err
-				}
-				if err := appendToBatch("bjorn2scan_node_vulnerability_exploited", labels); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}); err != nil {
-			return nil, fmt.Errorf("streaming node vulnerabilities: %w", err)
-		}
-	}
-
-	// ─── 7. Emit NaN for stale metrics ───────────────────────────────────────
-	// Group by family so each family header is written at most once.
-	staleByFamily := make(map[string][]database.StalenessRow)
-	for _, row := range staleRows {
-		staleByFamily[row.FamilyName] = append(staleByFamily[row.FamilyName], row)
-	}
-
-	// Write NaN lines in a deterministic order (same as streaming order above).
-	orderedFamilies := []string{
-		"bjorn2scan_deployment",
-		"bjorn2scan_image_scanned",
-		"bjorn2scan_image_vulnerability",
-		"bjorn2scan_image_vulnerability_risk",
-		"bjorn2scan_image_vulnerability_exploited",
-		"bjorn2scan_image_scan_status",
-		"bjorn2scan_node_scanned",
-		"bjorn2scan_node_vulnerability",
-		"bjorn2scan_node_vulnerability_risk",
-		"bjorn2scan_node_vulnerability_exploited",
-	}
-
-	for _, familyName := range orderedFamilies {
-		rows, ok := staleByFamily[familyName]
-		if !ok {
-			continue
-		}
-		meta := familyMeta[familyName]
-		if err := writeHeader(familyName, meta[0], meta[1]); err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			var labels map[string]string
-			if err := json.Unmarshal([]byte(row.LabelsJSON), &labels); err != nil {
-				log.Warn("skipping stale metric: invalid labels JSON",
-					"family", familyName, "metric_key", row.MetricKey, "error", err)
-				continue
-			}
-			if _, err := fmt.Fprintf(bw, "%s{%s} NaN\n", familyName, formatLabels(labels)); err != nil {
-				return nil, err
-			}
-		}
-	}
-
 	return batch, bw.Flush()
 }
 
 // ─── Label builder standalone functions ──────────────────────────────────────
-// These are used by StreamMetrics. The Collector/NodeCollector methods delegate to these.
+// These are used by collectMetrics. The Collector/NodeCollector methods delegate to these.
 
 // buildDeploymentLabels builds the labels for the bjorn2scan_deployment metric.
 func buildDeploymentLabels(info InfoProvider, deploymentUUID, deploymentName string) map[string]string {
