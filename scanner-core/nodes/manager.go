@@ -3,6 +3,7 @@ package nodes
 import (
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
@@ -201,19 +202,30 @@ func (m *Manager) UpdateNode(n Node) {
 // RemoveNode removes a node from the manager
 func (m *Manager) RemoveNode(name string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	delete(m.nodes, name)
+	m.mu.Unlock()
 
 	log.Info("remove node", "name", name)
 
-	// Remove from database if configured
-	if m.db != nil {
-		if err := m.db.RemoveNode(name); err != nil {
-			log.Error("failed to remove node from database",
-				"node", name, slog.Any("error", err))
-		}
+	// Remove from database if configured. The DB call is outside the mutex
+	// since it doesn't need in-memory state. We retry on transient SQLITE_BUSY
+	// errors (which can occur when a write transaction is in progress).
+	if m.db == nil {
+		return
 	}
+	const maxAttempts = 4
+	for attempt := range maxAttempts {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		err := m.db.RemoveNode(name)
+		if err == nil {
+			return
+		}
+		log.Error("failed to remove node from database",
+			"node", name, "attempt", attempt+1, slog.Any("error", err))
+	}
+	log.Error("giving up removing node from database after retries", "node", name)
 }
 
 // SetNodes replaces the entire collection of nodes
