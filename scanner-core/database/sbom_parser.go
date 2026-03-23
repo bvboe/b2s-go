@@ -182,7 +182,7 @@ type GrypeDocument struct {
 }
 
 // parseSBOMData parses SBOM JSON and populates packages table
-func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
+func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 	var sbom SyftSBOM
 	if err := json.Unmarshal(sbomJSON, &sbom); err != nil {
 		return fmt.Errorf("failed to unmarshal SBOM: %w", err)
@@ -200,7 +200,9 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 	}
 
 	// Insert packages into database
-	tx, err := conn.Begin()
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+	tx, err := db.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -300,7 +302,7 @@ func parseSBOMData(conn *sql.DB, imageID int64, sbomJSON []byte) error {
 }
 
 // parseVulnerabilityData parses Grype vulnerability JSON and populates vulnerabilities table
-func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error {
+func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 	var doc GrypeDocument
 	if err := json.Unmarshal(vulnJSON, &doc); err != nil {
 		return fmt.Errorf("failed to unmarshal vulnerability data: %w", err)
@@ -331,7 +333,9 @@ func parseVulnerabilityData(conn *sql.DB, imageID int64, vulnJSON []byte) error 
 	}
 
 	// Insert vulnerabilities into database
-	tx, err := conn.Begin()
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+	tx, err := db.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -499,14 +503,14 @@ func (db *DB) ParseAndStoreImageData(imageID int64) error {
 
 	// Parse SBOM if available
 	if sbomJSON.Valid && sbomJSON.String != "" {
-		if err := parseSBOMData(db.conn, imageID, []byte(sbomJSON.String)); err != nil {
+		if err := parseSBOMData(db, imageID, []byte(sbomJSON.String)); err != nil {
 			return fmt.Errorf("failed to parse SBOM: %w", err)
 		}
 	}
 
 	// Parse vulnerabilities if available
 	if vulnJSON.Valid && vulnJSON.String != "" {
-		if err := parseVulnerabilityData(db.conn, imageID, []byte(vulnJSON.String)); err != nil {
+		if err := parseVulnerabilityData(db, imageID, []byte(vulnJSON.String)); err != nil {
 			return fmt.Errorf("failed to parse vulnerabilities: %w", err)
 		}
 	}

@@ -272,7 +272,7 @@ func TestParseSBOMData_MultiplePackageInstances(t *testing.T) {
 		]
 	}`
 
-	err = parseSBOMData(db.conn, imageID, []byte(sbomJSON))
+	err = parseSBOMData(db, imageID, []byte(sbomJSON))
 	if err != nil {
 		t.Fatalf("parseSBOMData failed: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestParseVulnerabilityData_MultipleMatches(t *testing.T) {
 		}
 	}`
 
-	err = parseVulnerabilityData(db.conn, imageID, []byte(vulnJSON))
+	err = parseVulnerabilityData(db, imageID, []byte(vulnJSON))
 	if err != nil {
 		t.Fatalf("parseVulnerabilityData failed: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestParseVulnerabilityData_ExtractsDistro(t *testing.T) {
 		}
 	}`
 
-	err = parseVulnerabilityData(db.conn, imageID, []byte(vulnJSON))
+	err = parseVulnerabilityData(db, imageID, []byte(vulnJSON))
 	if err != nil {
 		t.Fatalf("parseVulnerabilityData failed: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestParseVulnerabilityData_KnownExploits(t *testing.T) {
 		]
 	}`
 
-	err = parseVulnerabilityData(db.conn, imageID, []byte(vulnJSON))
+	err = parseVulnerabilityData(db, imageID, []byte(vulnJSON))
 	if err != nil {
 		t.Fatalf("parseVulnerabilityData failed: %v", err)
 	}

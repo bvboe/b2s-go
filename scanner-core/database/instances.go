@@ -39,6 +39,8 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	}
 
 	// Start a transaction to ensure atomic operation across both tables
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return false, fmt.Errorf("failed to begin transaction: %w", err)
@@ -118,6 +120,8 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 
 // RemoveContainer removes a container from the database
 func (db *DB) RemoveContainer(id containers.ContainerID) error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	result, err := db.conn.Exec(`
 		DELETE FROM containers
 		WHERE namespace = ? AND pod = ? AND name = ?
@@ -159,6 +163,8 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 	}
 
 	// Start a transaction to ensure atomic replacement
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -269,6 +275,8 @@ type CleanupStats struct {
 // CleanupOrphanedImages removes images that have no associated containers
 // This also cascades to delete related packages and vulnerabilities
 func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	// Start a transaction
 	tx, err := db.conn.Begin()
 	if err != nil {

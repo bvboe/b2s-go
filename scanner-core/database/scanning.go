@@ -209,6 +209,8 @@ func (db *DB) UpdateStatus(digest string, status Status, errorMsg string) error 
 		vulnsScannedAt = timestamp
 	}
 
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	_, err := db.conn.Exec(`
 		UPDATE images
 		SET status = ?,
@@ -254,6 +256,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 		return fmt.Errorf("failed to get image ID: %w", err)
 	}
 
+	db.writeMu.Lock()
 	_, err = db.conn.Exec(`
 		UPDATE images
 		SET sbom = ?,
@@ -263,13 +266,14 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
 	`, string(sbomJSON), StatusScanningVulnerabilities.String(), time.Now().UTC().Format(time.RFC3339), digest)
+	db.writeMu.Unlock()
 
 	if err != nil {
 		return fmt.Errorf("failed to store SBOM: %w", err)
 	}
 
-	// Parse and store SBOM data in packages table
-	if err := parseSBOMData(db.conn, imageID, sbomJSON); err != nil {
+	// Parse and store SBOM data in packages table (parseSBOMData acquires writeMu internally)
+	if err := parseSBOMData(db, imageID, sbomJSON); err != nil {
 		log.Warn("failed to parse SBOM data", "digest", digest, "error", err)
 		// Don't fail the whole operation if parsing fails
 	}
@@ -466,6 +470,7 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		grypeDBBuiltStr = &s
 	}
 
+	db.writeMu.Lock()
 	_, err = db.conn.Exec(`
 		UPDATE images
 		SET vulnerabilities = ?,
@@ -476,13 +481,14 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
 	`, string(vulnJSON), StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), grypeDBBuiltStr, digest)
+	db.writeMu.Unlock()
 
 	if err != nil {
 		return fmt.Errorf("failed to store vulnerabilities: %w", err)
 	}
 
-	// Parse and store vulnerability data in vulnerabilities table
-	if err := parseVulnerabilityData(db.conn, imageID, vulnJSON); err != nil {
+	// Parse and store vulnerability data in vulnerabilities table (parseVulnerabilityData acquires writeMu internally)
+	if err := parseVulnerabilityData(db, imageID, vulnJSON); err != nil {
 		log.Warn("failed to parse vulnerability data", "digest", digest, "error", err)
 		// Don't fail the whole operation if parsing fails
 	}

@@ -744,7 +744,7 @@ func migrateExistingData(conn *sql.DB) error {
 	for _, data := range imagesToProcess {
 		// Process SBOM if available
 		if data.sbomJSON != "" {
-			if err := parseSBOMData(conn, data.imageID, []byte(data.sbomJSON)); err != nil {
+			if err := parseSBOMData(&DB{conn: conn}, data.imageID, []byte(data.sbomJSON)); err != nil {
 				log.Warn("migration v6: failed to parse SBOM",
 					"image_id", data.imageID, "digest", data.digest, "error", err)
 			}
@@ -752,7 +752,7 @@ func migrateExistingData(conn *sql.DB) error {
 
 		// Process vulnerabilities if available
 		if data.vulnJSON != "" {
-			if err := parseVulnerabilityData(conn, data.imageID, []byte(data.vulnJSON)); err != nil {
+			if err := parseVulnerabilityData(&DB{conn: conn}, data.imageID, []byte(data.vulnJSON)); err != nil {
 				log.Warn("migration v6: failed to parse vulnerabilities",
 					"image_id", data.imageID, "digest", data.digest, "error", err)
 			}
@@ -1209,7 +1209,7 @@ func migrateToV14(conn *sql.DB) error {
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
-			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+			if err := parseSBOMData(&DB{conn: conn}, imageID, []byte(sbomJSON.String)); err != nil {
 				log.Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
@@ -1226,7 +1226,7 @@ func migrateToV14(conn *sql.DB) error {
 		}
 
 		if vulnJSON.Valid && vulnJSON.String != "" {
-			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
+			if err := parseVulnerabilityData(&DB{conn: conn}, imageID, []byte(vulnJSON.String)); err != nil {
 				log.Warn("failed to parse vulnerabilities", "image_id", imageID, "error", err)
 				failCount++
 				continue
@@ -1308,7 +1308,7 @@ func migrateToV15(conn *sql.DB) error {
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
-			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+			if err := parseSBOMData(&DB{conn: conn}, imageID, []byte(sbomJSON.String)); err != nil {
 				log.Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
@@ -1325,7 +1325,7 @@ func migrateToV15(conn *sql.DB) error {
 		}
 
 		if vulnJSON.Valid && vulnJSON.String != "" {
-			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
+			if err := parseVulnerabilityData(&DB{conn: conn}, imageID, []byte(vulnJSON.String)); err != nil {
 				log.Warn("failed to parse vulnerabilities", "image_id", imageID, "error", err)
 				failCount++
 				continue
@@ -1394,7 +1394,7 @@ func migrateToV16(conn *sql.DB) error {
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
-			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+			if err := parseSBOMData(&DB{conn: conn}, imageID, []byte(sbomJSON.String)); err != nil {
 				log.Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
@@ -1463,7 +1463,7 @@ func migrateToV17(conn *sql.DB) error {
 		}
 
 		if sbomJSON.Valid && sbomJSON.String != "" {
-			if err := parseSBOMData(conn, imageID, []byte(sbomJSON.String)); err != nil {
+			if err := parseSBOMData(&DB{conn: conn}, imageID, []byte(sbomJSON.String)); err != nil {
 				log.Warn("failed to parse SBOM", "image_id", imageID, "error", err)
 				failCount++
 				continue
@@ -1532,7 +1532,7 @@ func migrateToV18(conn *sql.DB) error {
 		}
 
 		if vulnJSON.Valid && vulnJSON.String != "" {
-			if err := parseVulnerabilityData(conn, imageID, []byte(vulnJSON.String)); err != nil {
+			if err := parseVulnerabilityData(&DB{conn: conn}, imageID, []byte(vulnJSON.String)); err != nil {
 				log.Warn("failed to parse vulnerabilities", "image_id", imageID, "error", err)
 				failCount++
 				continue

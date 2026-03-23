@@ -19,6 +19,8 @@ type JobExecution struct {
 
 // RecordJobStart records the start of a job execution and returns the execution ID
 func (db *DB) RecordJobStart(jobName string) (int64, error) {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	result, err := db.conn.Exec(`
 		INSERT INTO job_executions (job_name, started_at, status)
 		VALUES (?, ?, 'running')
@@ -37,6 +39,8 @@ func (db *DB) RecordJobStart(jobName string) (int64, error) {
 
 // RecordJobSuccess records the successful completion of a job execution
 func (db *DB) RecordJobSuccess(executionID int64) error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	completedAt := time.Now().UTC()
 
 	_, err := db.conn.Exec(`
@@ -55,6 +59,8 @@ func (db *DB) RecordJobSuccess(executionID int64) error {
 
 // RecordJobFailure records the failure of a job execution
 func (db *DB) RecordJobFailure(executionID int64, errorMsg string) error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	completedAt := time.Now().UTC()
 
 	_, err := db.conn.Exec(`
@@ -167,6 +173,8 @@ func (db *DB) GetLastJobExecution(jobName string) (*JobExecution, error) {
 
 // CleanupOldJobExecutions removes job executions older than the specified number of days
 func (db *DB) CleanupOldJobExecutions(daysToKeep int) (int64, error) {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	result, err := db.conn.Exec(`
 		DELETE FROM job_executions
 		WHERE started_at < datetime('now', '-' || ? || ' days')

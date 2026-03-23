@@ -6,15 +6,19 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 var log = logging.For(logging.ComponentDatabase)
 
-// DB wraps the database connection
+// DB wraps the database connection.
+// writeMu serializes all write transactions at the Go level so that SQLite
+// never receives a concurrent write and SQLITE_BUSY is impossible.
 type DB struct {
-	conn *sql.DB
+	writeMu sync.Mutex
+	conn    *sql.DB
 }
 
 // GetConnection returns the underlying database connection (for testing)
@@ -98,7 +102,7 @@ func New(dbPath string) (*DB, error) {
 	// Configure SQLite for better concurrency
 	_, err = conn.Exec(`
 		PRAGMA journal_mode = WAL;
-		PRAGMA busy_timeout = 5000;
+		PRAGMA busy_timeout = 30000;
 		PRAGMA synchronous = NORMAL;
 	`)
 	if err != nil {

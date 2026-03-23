@@ -604,6 +604,8 @@ func (db *DB) LoadMetricStaleness(key string) (string, error) {
 // SaveMetricStaleness saves the metric staleness data to the database
 // Uses INSERT OR REPLACE to handle both insert and update cases
 func (db *DB) SaveMetricStaleness(key string, data string) error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	_, err := db.conn.Exec(`
 		INSERT OR REPLACE INTO app_state (key, data, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -777,6 +779,15 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 		return nil
 	}
 
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// SQLite has a limit of 999 parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
 	// With 4 columns per row, max safe batch size is 249 rows. We process in chunks.
 	const chunkSize = 200
@@ -797,16 +808,18 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 
 		query := "INSERT OR REPLACE INTO metric_staleness (metric_key, family_name, labels_json, last_seen_unix) VALUES " +
 			strings.Join(placeholders, ",")
-		if _, err := db.conn.Exec(query, args...); err != nil {
+		if _, err := tx.Exec(query, args...); err != nil {
 			return fmt.Errorf("failed to upsert staleness batch: %w", err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteExpiredStaleness removes staleness rows older than expireBefore (unix timestamp).
 // Called asynchronously after each collection cycle to prune expired entries.
 func (db *DB) DeleteExpiredStaleness(expireBefore int64) error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	_, err := db.conn.Exec(`DELETE FROM metric_staleness WHERE last_seen_unix < ?`, expireBefore)
 	if err != nil {
 		return fmt.Errorf("failed to delete expired staleness: %w", err)
@@ -840,6 +853,8 @@ func (db *DB) LoadGrypeDBTimestamp() (time.Time, error) {
 
 // SaveGrypeDBTimestamp saves the grype vulnerability database timestamp
 func (db *DB) SaveGrypeDBTimestamp(t time.Time) error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
 	_, err := db.conn.Exec(`
 		INSERT OR REPLACE INTO app_state (key, data, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)

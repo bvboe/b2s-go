@@ -80,7 +80,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	}
 
 	// Parse vulnerability data
-	err = parseVulnerabilityData(db.conn, imageID, vulnJSON)
+	err = parseVulnerabilityData(db, imageID, vulnJSON)
 	if err != nil {
 		t.Fatalf("Failed to parse vulnerability data: %v", err)
 	}
