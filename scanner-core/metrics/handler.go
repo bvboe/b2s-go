@@ -2,161 +2,69 @@ package metrics
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
 var log = logging.For(logging.ComponentMetrics)
 
-// Handler returns an HTTP handler for the /metrics endpoint
-func Handler(infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig) http.HandlerFunc {
-	collector := NewCollector(infoProvider, deploymentUUID, database, config)
-
+// NewMetricsHandler returns an HTTP handler for the /metrics endpoint.
+//
+// On each GET request it:
+//  1. Queries the staleness store for recently-disappeared metrics (fast indexed read).
+//  2. Streams all current metrics to the response while batch-upserting to the staleness DB.
+//  3. Emits NaN lines for any stale metrics.
+//  4. Asynchronously deletes expired staleness entries.
+//
+// This replaces Handler, HandlerWithTracker, and HandlerWithNodes.
+func NewMetricsHandler(
+	info InfoProvider,
+	deploymentUUID string,
+	provider StreamingProvider,
+	config UnifiedConfig,
+	staleness *StalenessStore,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Only accept GET requests
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Collect metrics
-		data, err := collector.Collect()
+		cycleStart := time.Now()
+
+		// Query stale entries before streaming — fast, returns only recently-disappeared metrics.
+		staleRows, err := staleness.QueryStale(cycleStart)
 		if err != nil {
-			log.Error("error collecting metrics", "error", err)
-			http.Error(w, "Failed to collect metrics", http.StatusInternalServerError)
-			return
+			log.Error("failed to query stale metrics", "error", err)
+			// Continue without NaN lines rather than returning an error response.
 		}
 
-		// Format as Prometheus text
-		metricsText := FormatPrometheus(data)
-
-		// Write response
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte(metricsText)); err != nil {
-			log.Error("error writing metrics response", "error", err)
+
+		batch, err := StreamMetrics(w, info, deploymentUUID, provider, config, staleRows, cycleStart)
+		if err != nil {
+			log.Error("error streaming metrics", "error", err)
 		}
+
+		// Flush staleness DB and delete expired entries after the HTTP response is flushed,
+		// so slow PVC writes don't block the client.
+		go func() {
+			staleness.FlushAll(batch, cycleStart)
+			staleness.DeleteExpired(cycleStart)
+		}()
 	}
 }
 
-// HandlerWithTracker returns an HTTP handler for the /metrics endpoint with staleness tracking
-func HandlerWithTracker(infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, tracker *MetricTracker) http.HandlerFunc {
-	collector := NewCollector(infoProvider, deploymentUUID, database, config)
-	if tracker != nil {
-		collector.SetTracker(tracker)
-	}
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Only accept GET requests
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Collect metrics
-		data, err := collector.Collect()
-		if err != nil {
-			log.Error("error collecting metrics", "error", err)
-			http.Error(w, "Failed to collect metrics", http.StatusInternalServerError)
-			return
-		}
-
-		// Format as Prometheus text
-		metricsText := FormatPrometheus(data)
-
-		// Write response
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte(metricsText)); err != nil {
-			log.Error("error writing metrics response", "error", err)
-		}
-	}
-}
-
-// HandlerWithNodes returns an HTTP handler for the /metrics endpoint with node metrics support
-func HandlerWithNodes(infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, nodeDatabase NodeDatabaseProvider, nodeConfig NodeCollectorConfig, tracker *MetricTracker) http.HandlerFunc {
-	collector := NewCollector(infoProvider, deploymentUUID, database, config)
-	if tracker != nil {
-		collector.SetTracker(tracker)
-	}
-
-	var nodeCollector *NodeCollector
-	if nodeDatabase != nil {
-		nodeCollector = NewNodeCollector(deploymentUUID, infoProvider.GetDeploymentName(), nodeDatabase, nodeConfig)
-	}
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Only accept GET requests
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Set headers before streaming
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-
-		// Collect and stream image/container metrics
-		data, err := collector.Collect()
-		if err != nil {
-			log.Error("error collecting metrics", "error", err)
-			http.Error(w, "Failed to collect metrics", http.StatusInternalServerError)
-			return
-		}
-
-		// Stream image metrics directly to response
-		if err := WritePrometheus(w, data); err != nil {
-			log.Error("error writing image metrics", "error", err)
-			return
-		}
-
-		// Stream node metrics if enabled
-		if nodeCollector != nil {
-			// First, write node_scanned metrics (small dataset, use standard collection)
-			nodeScannedData, err := nodeCollector.CollectNodeScannedOnly()
-			if err != nil {
-				log.Error("error collecting node scanned metrics", "error", err)
-			} else if len(nodeScannedData.Families) > 0 {
-				if err := WritePrometheus(w, nodeScannedData); err != nil {
-					log.Error("error writing node scanned metrics", "error", err)
-				}
-			}
-
-			// Then stream vulnerability metrics directly from database to response
-			// This avoids loading 100k+ vulnerabilities into memory
-			streamed, err := nodeCollector.StreamVulnerabilityMetrics(w)
-			if err != nil {
-				log.Error("error streaming node vulnerability metrics", "error", err)
-			}
-
-			// Fall back to standard collection if streaming not supported
-			if !streamed {
-				nodeData, err := nodeCollector.Collect()
-				if err != nil {
-					log.Error("error collecting node metrics", "error", err)
-				} else {
-					if err := WritePrometheus(w, nodeData); err != nil {
-						log.Error("error writing node metrics", "error", err)
-					}
-				}
-			}
-		}
-	}
-}
-
-// RegisterMetricsHandler registers the /metrics endpoint on the provided mux
-func RegisterMetricsHandler(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig) {
-	mux.HandleFunc("/metrics", Handler(infoProvider, deploymentUUID, database, config))
+// RegisterMetricsHandler registers the /metrics endpoint using the new unified handler.
+func RegisterMetricsHandler(
+	mux *http.ServeMux,
+	info InfoProvider,
+	deploymentUUID string,
+	provider StreamingProvider,
+	config UnifiedConfig,
+	staleness *StalenessStore,
+) {
+	mux.HandleFunc("/metrics", NewMetricsHandler(info, deploymentUUID, provider, config, staleness))
 	log.Info("metrics handler registered at /metrics")
-}
-
-// RegisterMetricsHandlerWithTracker registers the /metrics endpoint with staleness tracking
-func RegisterMetricsHandlerWithTracker(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, tracker *MetricTracker) {
-	mux.HandleFunc("/metrics", HandlerWithTracker(infoProvider, deploymentUUID, database, config, tracker))
-	log.Info("metrics handler registered at /metrics (with staleness tracking)")
-}
-
-// RegisterMetricsHandlerWithNodes registers the /metrics endpoint with node metrics support
-func RegisterMetricsHandlerWithNodes(mux *http.ServeMux, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, config CollectorConfig, nodeDatabase NodeDatabaseProvider, nodeConfig NodeCollectorConfig, tracker *MetricTracker) {
-	mux.HandleFunc("/metrics", HandlerWithNodes(infoProvider, deploymentUUID, database, config, nodeDatabase, nodeConfig, tracker))
-	log.Info("metrics handler registered at /metrics (with node metrics)")
 }

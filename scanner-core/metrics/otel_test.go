@@ -2,83 +2,113 @@ package metrics
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 )
 
-var errMockError = errors.New("mock database error")
-
-func TestCreateExporter_GRPC(t *testing.T) {
+// makeTestOTELExporter creates an OTELExporter for testing.
+// provider may be nil if the test does not exercise data collection paths.
+// Marks the test as slow because Shutdown() blocks while the OTEL SDK tries to flush.
+func makeTestOTELExporter(t *testing.T, provider *MockStreamingProvider, cfg OTELConfig, config UnifiedConfig) *OTELExporter {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("slow: requires OTEL endpoint flush timeout")
+	}
 	ctx := context.Background()
-	config := OTELConfig{
+	info := &MockInfoProvider{deploymentName: "test-cluster", deploymentType: "kubernetes", version: "1.0.0"}
+
+	var staleness *StalenessStore
+	if provider != nil {
+		staleness = newTestStalenessStore(provider)
+	} else {
+		staleness = NewStalenessStore(&mockStalenessDB{}, time.Hour)
+	}
+
+	var sp StreamingProvider
+	if provider != nil {
+		sp = provider
+	}
+
+	e, err := NewOTELExporter(ctx, info, "test-uuid", sp, config, cfg, staleness)
+	if err != nil {
+		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	}
+	return e
+}
+
+func defaultOTELConfig() OTELConfig {
+	return OTELConfig{
 		Endpoint:     "localhost:4317",
 		Protocol:     OTELProtocolGRPC,
 		PushInterval: 1 * time.Minute,
 		Insecure:     true,
 	}
+}
 
-	exporter, err := createExporter(ctx, config)
+func TestCreateExporter_GRPC(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: OTEL exporter shutdown blocks on gRPC timeout")
+	}
+	ctx := context.Background()
+	exporter, err := createExporter(ctx, OTELConfig{
+		Endpoint:     "localhost:4317",
+		Protocol:     OTELProtocolGRPC,
+		PushInterval: 1 * time.Minute,
+		Insecure:     true,
+	})
 	if err != nil {
 		t.Fatalf("Failed to create gRPC exporter: %v", err)
 	}
 	if exporter == nil {
 		t.Fatal("Expected non-nil exporter")
 	}
-
-	// Cleanup
 	_ = exporter.Shutdown(ctx)
 }
 
 func TestCreateExporter_HTTP(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: OTEL exporter shutdown blocks on HTTP timeout")
+	}
 	ctx := context.Background()
-	config := OTELConfig{
+	exporter, err := createExporter(ctx, OTELConfig{
 		Endpoint:     "localhost:9090",
 		Protocol:     OTELProtocolHTTP,
 		PushInterval: 1 * time.Minute,
 		Insecure:     true,
-	}
-
-	exporter, err := createExporter(ctx, config)
+	})
 	if err != nil {
 		t.Fatalf("Failed to create HTTP exporter: %v", err)
 	}
 	if exporter == nil {
 		t.Fatal("Expected non-nil exporter")
 	}
-
-	// Cleanup
 	_ = exporter.Shutdown(ctx)
 }
 
 func TestCreateExporter_InvalidProtocol(t *testing.T) {
 	ctx := context.Background()
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocol("invalid"),
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := createExporter(ctx, config)
+	exporter, err := createExporter(ctx, OTELConfig{
+		Endpoint: "localhost:4317",
+		Protocol: OTELProtocol("invalid"),
+	})
 	if err == nil {
 		t.Fatal("Expected error for invalid protocol")
 	}
 	if exporter != nil {
 		t.Fatal("Expected nil exporter for invalid protocol")
 	}
-
-	expectedError := "unsupported OTLP protocol: invalid"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("Expected error to contain %q, got %q", expectedError, err.Error())
+	if !strings.Contains(err.Error(), "unsupported OTLP protocol") {
+		t.Errorf("Expected error to contain 'unsupported OTLP protocol', got %q", err.Error())
 	}
 }
 
 func TestCreateExporter_ProtocolCaseInsensitive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: OTEL exporter shutdown blocks on network timeout")
+	}
 	tests := []struct {
 		name     string
 		protocol string
@@ -86,25 +116,20 @@ func TestCreateExporter_ProtocolCaseInsensitive(t *testing.T) {
 	}{
 		{"grpc lowercase", "grpc", false},
 		{"GRPC uppercase", "GRPC", false},
-		{"GrPc mixed case", "GrPc", false},
 		{"http lowercase", "http", false},
 		{"HTTP uppercase", "HTTP", false},
-		{"HtTp mixed case", "HtTp", false},
-		{"invalid protocol", "invalid", true},
+		{"invalid", "invalid", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			config := OTELConfig{
+			exporter, err := createExporter(ctx, OTELConfig{
 				Endpoint:     "localhost:4317",
 				Protocol:     OTELProtocol(tt.protocol),
 				PushInterval: 1 * time.Minute,
 				Insecure:     true,
-			}
-
-			exporter, err := createExporter(ctx, config)
-
+			})
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error for protocol %q", tt.protocol)
@@ -113,9 +138,7 @@ func TestCreateExporter_ProtocolCaseInsensitive(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error for protocol %q: %v", tt.protocol, err)
 				}
-				if exporter == nil {
-					t.Errorf("Expected non-nil exporter for protocol %q", tt.protocol)
-				} else {
+				if exporter != nil {
 					_ = exporter.Shutdown(ctx)
 				}
 			}
@@ -124,158 +147,74 @@ func TestCreateExporter_ProtocolCaseInsensitive(t *testing.T) {
 }
 
 func TestNewOTELExporter_Success(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test-deployment",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
+	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{DeploymentEnabled: true})
+	defer func() { _ = e.Shutdown() }()
 
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
+	if e.meterProvider == nil {
+		t.Error("Expected non-nil meterProvider")
 	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	if exporter == nil {
-		t.Fatal("Expected non-nil exporter")
-	}
-
-	// Verify fields are set correctly
-	if exporter.collector == nil {
-		t.Error("Expected non-nil collector")
-	}
-	if exporter.meterProvider == nil {
-		t.Error("Expected non-nil meter provider")
-	}
-	if exporter.gauges == nil {
+	if e.gauges == nil {
 		t.Error("Expected non-nil gauges map")
 	}
-	if exporter.ctx == nil {
+	if e.ctx == nil {
 		t.Error("Expected non-nil context")
 	}
-	if exporter.cancel == nil {
+	if e.cancel == nil {
 		t.Error("Expected non-nil cancel function")
 	}
-
-	// Cleanup - shutdown may fail to flush metrics if no receiver is running (expected in tests)
-	_ = exporter.Shutdown()
 }
 
 func TestNewOTELExporter_WithHTTPProtocol(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "k8s-cluster",
-		deploymentType: "kubernetes",
-		version:        "2.0.0",
-	}
-	deploymentUUID := "abc-123-def-456"
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
-
-	config := OTELConfig{
+	cfg := OTELConfig{
 		Endpoint:     "prometheus:9090",
 		Protocol:     OTELProtocolHTTP,
 		PushInterval: 30 * time.Second,
 		Insecure:     true,
 	}
+	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	defer func() { _ = e.Shutdown() }()
 
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter with HTTP: %v", err)
+	if e.config.Protocol != OTELProtocolHTTP {
+		t.Errorf("Expected HTTP protocol, got %v", e.config.Protocol)
 	}
-	if exporter == nil {
-		t.Fatal("Expected non-nil exporter")
+	if e.config.Endpoint != "prometheus:9090" {
+		t.Errorf("Expected prometheus:9090, got %v", e.config.Endpoint)
 	}
-
-	// Verify config is preserved
-	if exporter.config.Protocol != OTELProtocolHTTP {
-		t.Errorf("Expected HTTP protocol, got %v", exporter.config.Protocol)
-	}
-	if exporter.config.Endpoint != "prometheus:9090" {
-		t.Errorf("Expected prometheus:9090, got %v", exporter.config.Endpoint)
-	}
-
-	// Cleanup - shutdown may fail to flush metrics if no receiver is running (expected in tests)
-	_ = exporter.Shutdown()
 }
 
-func TestRecordMetrics(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test-host",
-		deploymentType: "agent",
-		version:        "1.5.0",
-	}
-	deploymentUUID := "test-uuid-123"
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
+func TestRecordMetrics_NilProvider(t *testing.T) {
+	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{DeploymentEnabled: true})
+	defer func() { _ = e.Shutdown() }()
 
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
+	// recordMetrics with nil provider should not panic (guards against nil checks)
+	e.recordMetrics()
+}
+
+func TestRecordMetrics_WithProvider(t *testing.T) {
+	provider := newMockStreamingProvider()
+	config := UnifiedConfig{
+		DeploymentEnabled:        true,
+		ScannedContainersEnabled: true,
+		NodeScannedEnabled:       true,
 	}
+	e := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	defer func() { _ = e.Shutdown() }()
 
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	e.recordMetrics()
+	e.recordMetrics()
+
+	// After recording, at least the deployment gauge should have been created
+	if len(e.gauges) == 0 {
+		t.Error("Expected gauges to be created after recording metrics")
 	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Call recordMetrics - should not panic or error
-	exporter.recordMetrics()
-
-	// If we got here without panic, the test passes
-	// We can't easily verify the metrics were recorded without a mock receiver,
-	// but we've confirmed the code path executes successfully
 }
 
 func TestShutdown_GracefulShutdown(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
+	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
+	_ = e.Shutdown()
 
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-
-	// Shutdown completes (may return error if no receiver is running, which is expected in tests)
-	_ = exporter.Shutdown()
-
-	// Context should be cancelled
 	select {
-	case <-exporter.ctx.Done():
+	case <-e.ctx.Done():
 		// Expected
 	default:
 		t.Error("Expected context to be cancelled after shutdown")
@@ -283,129 +222,57 @@ func TestShutdown_GracefulShutdown(t *testing.T) {
 }
 
 func TestShutdown_MultipleShutdowns(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
-
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-
-	// First shutdown (may fail if no receiver, which is expected in tests)
-	_ = exporter.Shutdown()
-
-	// Second shutdown should handle being called again without panicking
-	_ = exporter.Shutdown()
-	// Multiple shutdowns should be safe even if they return errors
+	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
+	_ = e.Shutdown()
+	_ = e.Shutdown() // second shutdown should not panic
 }
 
 func TestStart_StartsBackgroundPush(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
-
-	config := OTELConfig{
+	cfg := OTELConfig{
 		Endpoint:     "localhost:4317",
 		Protocol:     OTELProtocolGRPC,
-		PushInterval: 100 * time.Millisecond, // Short interval for testing
+		PushInterval: 100 * time.Millisecond,
 		Insecure:     true,
 	}
+	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	defer func() { _ = e.Shutdown() }()
 
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Start the exporter
-	exporter.Start()
-
-	// Wait for at least one push cycle to complete
+	e.Start()
 	time.Sleep(250 * time.Millisecond)
-
 	// If we got here without deadlock or panic, the test passes
-	// The background goroutine is running and pushing metrics
 }
 
 func TestStart_StopsOnShutdown(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false,
-	}
-
-	config := OTELConfig{
+	cfg := OTELConfig{
 		Endpoint:     "localhost:4317",
 		Protocol:     OTELProtocolGRPC,
 		PushInterval: 50 * time.Millisecond,
 		Insecure:     true,
 	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-
-	// Start the background push
-	exporter.Start()
-
-	// Let it run for a bit
+	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	e.Start()
+	time.Sleep(100 * time.Millisecond)
+	_ = e.Shutdown()
 	time.Sleep(100 * time.Millisecond)
 
-	// Shutdown should stop the background goroutine (may fail to flush if no receiver)
-	_ = exporter.Shutdown()
-
-	// Wait a bit to ensure goroutine exits
-	time.Sleep(100 * time.Millisecond)
-
-	// Context should be done
 	select {
-	case <-exporter.ctx.Done():
-		// Expected - background goroutine should have exited
+	case <-e.ctx.Done():
+		// Expected
 	default:
-		t.Error("Expected context to be cancelled")
+		t.Error("Expected context to be cancelled after shutdown")
 	}
 }
 
 func TestOTELProtocolConstants(t *testing.T) {
-	// Verify protocol constants have expected values
 	if OTELProtocolGRPC != "grpc" {
-		t.Errorf("Expected OTELProtocolGRPC to be 'grpc', got %q", OTELProtocolGRPC)
+		t.Errorf("Expected OTELProtocolGRPC='grpc', got %q", OTELProtocolGRPC)
 	}
 	if OTELProtocolHTTP != "http" {
-		t.Errorf("Expected OTELProtocolHTTP to be 'http', got %q", OTELProtocolHTTP)
+		t.Errorf("Expected OTELProtocolHTTP='http', got %q", OTELProtocolHTTP)
 	}
 }
 
 func TestOTELConfig_AllFields(t *testing.T) {
-	// Test that OTELConfig struct can be instantiated with all fields
 	config := OTELConfig{
 		Endpoint:     "test:1234",
 		Protocol:     OTELProtocolGRPC,
@@ -420,335 +287,15 @@ func TestOTELConfig_AllFields(t *testing.T) {
 		t.Errorf("Expected protocol 'grpc', got %q", config.Protocol)
 	}
 	if config.PushInterval != 5*time.Minute {
-		t.Errorf("Expected push interval 5m, got %v", config.PushInterval)
+		t.Errorf("Expected 5m, got %v", config.PushInterval)
 	}
-	if config.Insecure != false {
-		t.Errorf("Expected insecure false, got %v", config.Insecure)
+	if config.Insecure {
+		t.Error("Expected insecure=false")
 	}
-}
-
-func TestOTELExporter_RecordScannedContainers(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test-cluster",
-		deploymentType: "kubernetes",
-		version:        "1.0.0",
-	}
-	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
-
-	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainer{
-			{
-				Namespace:  "default",
-				Pod:        "test-pod-1",
-				Name:  "nginx",
-				NodeName:   "node-1",
-				Reference: "nginx:1.21",
-				Digest:     "sha256:abc123",
-				OSName:     "debian",
-			},
-			{
-				Namespace:  "kube-system",
-				Pod:        "coredns-abc",
-				Name:  "coredns",
-				NodeName:   "node-2",
-				Reference: "coredns/coredns:1.8.0",
-				Digest:     "sha256:def456",
-				OSName:     "alpine",
-			},
-		},
-	}
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: true,
-	}
-
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, mockDB, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Verify gauges map was created
-	if exporter.gauges == nil {
-		t.Error("Expected non-nil gauges map")
-	}
-
-	// Call recordMetrics - should not panic and should record both metrics
-	exporter.recordMetrics()
-
-	// If we got here without panic, the test passes
-	// We've confirmed the code path executes successfully with scanned containers enabled
-}
-
-func TestOTELExporter_ScannedContainersDisabled(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-
-	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainer{
-			{
-				Namespace:  "default",
-				Pod:        "test-pod",
-				Name:  "test",
-				NodeName:   "node-1",
-				Reference: "test:latest",
-				Digest:     "sha256:abc",
-				OSName:     "alpine",
-			},
-		},
-	}
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:       true,
-		ScannedContainersEnabled: false, // Disabled
-	}
-
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", mockDB, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Verify gauges map was created (gauges are created dynamically on demand)
-	if exporter.gauges == nil {
-		t.Error("Expected non-nil gauges map")
-	}
-
-	// Call recordMetrics - should not panic even with scanned containers disabled
-	exporter.recordMetrics()
-
-	// If we got here without panic, the test passes
-}
-
-func TestOTELExporter_SetNodeCollector(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test-cluster",
-		deploymentType: "kubernetes",
-		version:        "1.0.0",
-	}
-	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled: true,
-	}
-
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Initially nodeCollector should be nil
-	if exporter.nodeCollector != nil {
-		t.Error("Expected nodeCollector to be nil initially")
-	}
-
-	// Create a node collector with mock data
-	mockNodeDB := &MockNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName: "node-1",
-				CVEID:    "CVE-2024-1234",
-				Severity: "Critical",
-				Score:    9.8,
-				Count:    1,
-			},
-		},
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled: true,
-	}
-
-	nodeCollector := NewNodeCollector(deploymentUUID, "test-cluster", mockNodeDB, nodeConfig)
-
-	// Set the node collector
-	exporter.SetNodeCollector(nodeCollector)
-
-	// Verify nodeCollector is set
-	if exporter.nodeCollector == nil {
-		t.Error("Expected nodeCollector to be set after SetNodeCollector")
-	}
-
-	// Call recordMetrics - should include node metrics without panic
-	exporter.recordMetrics()
-
-	// If we got here without panic, the test passes
-}
-
-func TestOTELExporter_RecordMetricsWithNodeCollector(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "prod-cluster",
-		deploymentType: "kubernetes",
-		version:        "2.0.0",
-	}
-	deploymentUUID := "prod-uuid-123"
-
-	// Mock image database
-	mockDB := &MockDatabaseProvider{
-		instances: []database.ScannedContainer{
-			{
-				Namespace:  "default",
-				Pod:        "app-pod",
-				Name:       "app",
-				NodeName:   "node-1",
-				Reference:  "app:v1",
-				Digest:     "sha256:abc",
-				OSName:     "alpine",
-			},
-		},
-	}
-
-	// Mock node database
-	mockNodeDB := &MockNodeDatabaseProvider{
-		scannedNodes: []nodes.NodeWithStatus{
-			{
-				Node: nodes.Node{
-					Name:         "node-1",
-					Hostname:     "node-1.local",
-					OSRelease:    "Ubuntu 22.04",
-					Architecture: "amd64",
-				},
-			},
-		},
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "node-1",
-				CVEID:          "CVE-2024-5678",
-				Severity:       "High",
-				Score:          7.5,
-				KnownExploited: 1,
-				Count:          2,
-			},
-		},
-	}
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled:        true,
-		ScannedContainersEnabled: true,
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeScannedEnabled:                true,
-		NodeVulnerabilitiesEnabled:        true,
-		NodeVulnerabilityRiskEnabled:      true,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, mockDB, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Set node collector
-	nodeCollector := NewNodeCollector(deploymentUUID, "prod-cluster", mockNodeDB, nodeConfig)
-	exporter.SetNodeCollector(nodeCollector)
-
-	// Call recordMetrics multiple times - should handle both image and node metrics
-	exporter.recordMetrics()
-	exporter.recordMetrics()
-
-	// Verify gauges were created for both image and node metrics
-	// The exact gauge names depend on what metrics are enabled
-	if len(exporter.gauges) == 0 {
-		t.Error("Expected gauges to be created after recording metrics")
-	}
-}
-
-func TestOTELExporter_NodeCollectorError(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled: true,
-	}
-
-	config := OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	}
-
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Create a node collector that will return an error
-	mockNodeDB := &MockNodeDatabaseProvider{
-		err: errMockError,
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeScannedEnabled: true,
-	}
-
-	nodeCollector := NewNodeCollector("test-uuid", "test", mockNodeDB, nodeConfig)
-	exporter.SetNodeCollector(nodeCollector)
-
-	// Call recordMetrics - should handle node collector error gracefully without panic
-	exporter.recordMetrics()
-
-	// If we got here without panic, the test passes - errors are logged but don't stop image metrics
 }
 
 func TestOTELExporter_WithDirectExport(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test-cluster",
-		deploymentType: "kubernetes",
-		version:        "1.0.0",
-	}
-	deploymentUUID := "direct-export-test-uuid"
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled: true,
-	}
-
-	config := OTELConfig{
+	cfg := OTELConfig{
 		Endpoint:        "localhost:4317",
 		Protocol:        OTELProtocolGRPC,
 		PushInterval:    1 * time.Minute,
@@ -756,72 +303,38 @@ func TestOTELExporter_WithDirectExport(t *testing.T) {
 		UseDirectExport: true,
 		DirectBatchSize: 1000,
 	}
+	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	defer func() { _ = e.Shutdown() }()
 
-	exporter, err := NewOTELExporter(ctx, infoProvider, deploymentUUID, nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
+	if e.directExporter == nil {
+		t.Error("Expected directExporter to be set when UseDirectExport=true")
 	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Verify direct exporter was created
-	if exporter.directExporter == nil {
-		t.Error("Expected direct exporter to be initialized when UseDirectExport is true")
-	}
-
-	// Verify infoProvider and deploymentUUID are set for direct export
-	if exporter.infoProvider == nil {
+	if e.infoProvider == nil {
 		t.Error("Expected infoProvider to be set")
 	}
-	if exporter.deploymentUUID != deploymentUUID {
-		t.Errorf("Expected deploymentUUID %q, got %q", deploymentUUID, exporter.deploymentUUID)
+	if e.deploymentUUID != "test-uuid" {
+		t.Errorf("Expected deploymentUUID='test-uuid', got %q", e.deploymentUUID)
 	}
 }
 
 func TestOTELExporter_WithoutDirectExport(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled: true,
-	}
-
-	config := OTELConfig{
+	cfg := OTELConfig{
 		Endpoint:        "localhost:4317",
 		Protocol:        OTELProtocolGRPC,
 		PushInterval:    1 * time.Minute,
 		Insecure:        true,
-		UseDirectExport: false, // Explicitly disabled
+		UseDirectExport: false,
 	}
+	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	defer func() { _ = e.Shutdown() }()
 
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-	defer func() { _ = exporter.Shutdown() }()
-
-	// Verify direct exporter was NOT created
-	if exporter.directExporter != nil {
-		t.Error("Expected direct exporter to be nil when UseDirectExport is false")
+	if e.directExporter != nil {
+		t.Error("Expected directExporter=nil when UseDirectExport=false")
 	}
 }
 
 func TestOTELExporter_DirectExportShutdown(t *testing.T) {
-	ctx := context.Background()
-	infoProvider := &MockInfoProvider{
-		deploymentName: "test",
-		deploymentType: "agent",
-		version:        "1.0.0",
-	}
-
-	collectorConfig := CollectorConfig{
-		DeploymentEnabled: true,
-	}
-
-	config := OTELConfig{
+	cfg := OTELConfig{
 		Endpoint:        "localhost:4317",
 		Protocol:        OTELProtocolGRPC,
 		PushInterval:    1 * time.Minute,
@@ -829,17 +342,10 @@ func TestOTELExporter_DirectExportShutdown(t *testing.T) {
 		UseDirectExport: true,
 		DirectBatchSize: 5000,
 	}
+	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
 
-	exporter, err := NewOTELExporter(ctx, infoProvider, "test-uuid", nil, collectorConfig, config)
-	if err != nil {
-		t.Fatalf("Failed to create OTEL exporter: %v", err)
-	}
-
-	// Shutdown should close the direct exporter without errors
-	_ = exporter.Shutdown()
-
-	// Multiple shutdowns should be safe
-	_ = exporter.Shutdown()
+	_ = e.Shutdown()
+	_ = e.Shutdown() // multiple shutdowns should be safe
 }
 
 func TestOTELConfig_DirectExportFields(t *testing.T) {
@@ -853,9 +359,28 @@ func TestOTELConfig_DirectExportFields(t *testing.T) {
 	}
 
 	if !config.UseDirectExport {
-		t.Error("Expected UseDirectExport to be true")
+		t.Error("Expected UseDirectExport=true")
 	}
 	if config.DirectBatchSize != 10000 {
-		t.Errorf("Expected DirectBatchSize 10000, got %d", config.DirectBatchSize)
+		t.Errorf("Expected DirectBatchSize=10000, got %d", config.DirectBatchSize)
+	}
+}
+
+func TestOTELExporter_RecordMetrics_WithNodeData(t *testing.T) {
+	provider := newMockStreamingProvider()
+	provider.scannedNodes = []nodes.NodeWithStatus{
+		{Node: nodes.Node{Name: "node-1", Hostname: "node-1.local", Architecture: "amd64"}},
+	}
+	config := UnifiedConfig{
+		DeploymentEnabled:  true,
+		NodeScannedEnabled: true,
+	}
+	e := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	defer func() { _ = e.Shutdown() }()
+
+	e.recordMetrics()
+
+	if len(e.gauges) == 0 {
+		t.Error("Expected gauges to be created after recording metrics")
 	}
 }

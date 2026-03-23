@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentSchemaVersion = 35
+const currentSchemaVersion = 36
 
 type migration struct {
 	version int
@@ -189,6 +189,11 @@ var migrations = []migration{
 		version: 35,
 		name:    "add_node_sbom_column",
 		up:      migrateToV35,
+	},
+	{
+		version: 36,
+		name:    "add_metric_staleness_dedicated_table",
+		up:      migrateToV36,
 	},
 }
 
@@ -2429,5 +2434,30 @@ func migrateToV35(conn *sql.DB) error {
 	log.Info("migration v35: successfully added sbom and vulnerabilities columns to nodes table")
 	log.Info("migration v35: sbom: Stores raw SBOM JSON from Syft")
 	log.Info("migration v35: vulnerabilities: Stores raw vulnerability JSON from Grype")
+	return nil
+}
+
+// migrateToV36 creates a dedicated metric_staleness table with per-metric-key rows.
+// This replaces the single JSON blob stored in app_state (key="metrics"), which
+// doesn't scale beyond ~10k metric keys (~65MB blob at current scale, ~420MB at 10x).
+// The new table uses SQLite's PRIMARY KEY index for O(1) upserts and a separate
+// last_seen_unix index for efficient stale-entry queries.
+func migrateToV36(conn *sql.DB) error {
+	log.Info("migration v36: creating metric_staleness table for scalable per-metric staleness tracking")
+
+	_, err := conn.Exec(`
+		CREATE TABLE IF NOT EXISTS metric_staleness (
+			metric_key      TEXT PRIMARY KEY,
+			family_name     TEXT NOT NULL,
+			labels_json     TEXT NOT NULL,
+			last_seen_unix  INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_metric_staleness_last_seen ON metric_staleness(last_seen_unix);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create metric_staleness table: %w", err)
+	}
+
+	log.Info("migration v36: successfully created metric_staleness table")
 	return nil
 }

@@ -2,7 +2,9 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -16,8 +18,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-)
 
+	"github.com/bvboe/b2s-go/scanner-core/database"
+)
 
 // OTELProtocol represents the protocol to use for OTLP
 type OTELProtocol string
@@ -29,30 +32,30 @@ const (
 	OTELProtocolHTTP OTELProtocol = "http"
 )
 
-
 // OTELConfig holds OpenTelemetry configuration
 type OTELConfig struct {
 	Endpoint        string
 	Protocol        OTELProtocol
 	PushInterval    time.Duration
 	Insecure        bool
-	UseDirectExport bool // Enable direct OTLP for high-cardinality metrics (bypasses SDK buffering)
+	UseDirectExport bool // Enable direct OTLP for high-cardinality node vulnerability metrics
 	DirectBatchSize int  // Batch size for direct export (default 5000)
 }
 
 // OTELExporter exports metrics to an OpenTelemetry collector
 type OTELExporter struct {
-	collector      *Collector
-	nodeCollector  *NodeCollector
+	provider       StreamingProvider
+	unifiedConfig  UnifiedConfig
 	config         OTELConfig
 	meterProvider  *sdkmetric.MeterProvider
 	meter          metric.Meter
 	gauges         map[string]metric.Float64Gauge
 	ctx            context.Context
 	cancel         context.CancelFunc
-	directExporter *DirectOTLPExporter // For high-cardinality node metrics
-	infoProvider   InfoProvider        // For direct export resource attributes
-	deploymentUUID string              // For direct export resource attributes
+	directExporter *DirectOTLPExporter // For high-cardinality node vulnerability metrics
+	infoProvider   InfoProvider
+	deploymentUUID string
+	staleness      *StalenessStore
 }
 
 // createExporter creates the appropriate OTLP exporter based on protocol
@@ -85,11 +88,18 @@ func createExporter(ctx context.Context, config OTELConfig) (sdkmetric.Exporter,
 	}
 }
 
-// NewOTELExporter creates a new OTEL metrics exporter
-func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentUUID string, database DatabaseProvider, collectorConfig CollectorConfig, config OTELConfig) (*OTELExporter, error) {
-	// Create collector to generate metrics
-	collector := NewCollector(infoProvider, deploymentUUID, database, collectorConfig)
-
+// NewOTELExporter creates a new OTEL metrics exporter.
+// provider must implement StreamingProvider (e.g. *database.DB).
+// staleness is shared with the Prometheus handler for consistent NaN behaviour.
+func NewOTELExporter(
+	ctx context.Context,
+	infoProvider InfoProvider,
+	deploymentUUID string,
+	provider StreamingProvider,
+	unifiedConfig UnifiedConfig,
+	config OTELConfig,
+	staleness *StalenessStore,
+) (*OTELExporter, error) {
 	// Create OTLP exporter based on configured protocol
 	exporter, err := createExporter(ctx, config)
 	if err != nil {
@@ -125,7 +135,8 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 	exporterCtx, cancel := context.WithCancel(ctx)
 
 	otelExporter := &OTELExporter{
-		collector:      collector,
+		provider:       provider,
+		unifiedConfig:  unifiedConfig,
 		config:         config,
 		meterProvider:  meterProvider,
 		meter:          meter,
@@ -134,9 +145,11 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 		cancel:         cancel,
 		infoProvider:   infoProvider,
 		deploymentUUID: deploymentUUID,
+		staleness:      staleness,
 	}
 
-	// Initialize direct exporter for high-cardinality metrics if enabled
+	// Initialize direct exporter for high-cardinality node vulnerability metrics if enabled.
+	// This bypasses SDK buffering which can OOM for large vulnerability datasets.
 	if config.UseDirectExport {
 		batchSize := config.DirectBatchSize
 		if batchSize <= 0 {
@@ -156,28 +169,17 @@ func NewOTELExporter(ctx context.Context, infoProvider InfoProvider, deploymentU
 			DeploymentUUID: deploymentUUID,
 		}
 
-		directExporter, err := NewDirectOTLPExporter(directConfig)
+		directExp, err := NewDirectOTLPExporter(directConfig)
 		if err != nil {
 			log.Warn("failed to create direct OTLP exporter, falling back to SDK",
 				"error", err)
 		} else {
-			otelExporter.directExporter = directExporter
-			log.Info("direct OTLP exporter initialized",
-				"batch_size", batchSize)
+			otelExporter.directExporter = directExp
+			log.Info("direct OTLP exporter initialized", "batch_size", batchSize)
 		}
 	}
 
 	return otelExporter, nil
-}
-
-// SetTracker sets the metric tracker on the internal collector for staleness detection
-func (e *OTELExporter) SetTracker(tracker *MetricTracker) {
-	e.collector.SetTracker(tracker)
-}
-
-// SetNodeCollector sets the node collector for pushing node metrics via OTEL
-func (e *OTELExporter) SetNodeCollector(nodeCollector *NodeCollector) {
-	e.nodeCollector = nodeCollector
 }
 
 // Start begins pushing metrics to the OTEL collector
@@ -203,121 +205,219 @@ func (e *OTELExporter) pushMetrics() {
 	}
 }
 
-// recordMetrics records all metrics by collecting structured data and converting to OTLP
+// recordMetrics records all metrics to OTEL gauges via streaming.
+// Container vulnerability metrics use the SDK path (each gauge.Record call is lightweight).
+// Node vulnerability metrics optionally use the direct OTLP path (bypasses SDK buffering).
 func (e *OTELExporter) recordMetrics() {
-	// Collect image metrics using the same method as /metrics endpoint
-	data, err := e.collector.Collect()
+	cycleStart := time.Now()
+	deploymentName := e.infoProvider.GetDeploymentName()
+	cycleStartUnix := cycleStart.Unix()
+
+	// Query stale entries — shared staleness state with the Prometheus handler.
+	staleRows, err := e.staleness.QueryStale(cycleStart)
 	if err != nil {
-		log.Error("error collecting metrics for OTEL", "error", err)
-		return
+		log.Error("failed to query stale metrics for OTEL", "error", err)
+		// Continue without NaN emission rather than aborting entirely.
 	}
 
-	// Record each image metric family
-	e.recordMetricFamilies(data.Families)
+	// In-flight staleness batch
+	batch := make([]database.StalenessRow, 0, e.staleness.BatchSize())
 
-	// Collect and record node metrics if node collector is configured
-	if e.nodeCollector != nil {
-		// First, collect node_scanned metrics (small dataset) via SDK
-		nodeScannedData, err := e.nodeCollector.CollectNodeScannedOnly()
-		if err != nil {
-			log.Error("error collecting node scanned metrics for OTEL", "error", err)
-		} else {
-			e.recordMetricFamilies(nodeScannedData.Families)
+	flushBatch := func() {
+		if len(batch) == 0 {
+			return
 		}
+		if err := e.staleness.FlushBatch(batch, cycleStartUnix); err != nil {
+			log.Warn("failed to flush staleness batch in OTEL exporter", "error", err)
+		}
+		batch = batch[:0]
+	}
 
-		// Node vulnerability metrics via direct export (high cardinality) or SDK fallback
+	// recordPoint records a single data point to an OTEL gauge and queues it for staleness tracking.
+	recordPoint := func(familyName, help string, labels map[string]string, value float64) {
+		gauge, err := e.getOrCreateGauge(familyName, help)
+		if err != nil {
+			log.Error("error creating OTEL gauge", "metric_name", familyName, "error", err)
+			return
+		}
+		attrs := make([]attribute.KeyValue, 0, len(labels))
+		for k, v := range labels {
+			attrs = append(attrs, attribute.String(k, v))
+		}
+		gauge.Record(e.ctx, value, metric.WithAttributes(attrs...))
+
+		labelsJSON, marshalErr := json.Marshal(labels)
+		if marshalErr != nil {
+			log.Warn("failed to marshal labels for staleness tracking", "error", marshalErr)
+			return
+		}
+		batch = append(batch, database.StalenessRow{
+			MetricKey:    generateMetricKey(familyName, labels),
+			FamilyName:   familyName,
+			LabelsJSON:   string(labelsJSON),
+			LastSeenUnix: cycleStartUnix,
+		})
+		if len(batch) >= e.staleness.BatchSize() {
+			flushBatch()
+		}
+	}
+
+	// ─── 1. Deployment metric ─────────────────────────────────────────────────
+	if e.unifiedConfig.DeploymentEnabled {
+		labels := buildDeploymentLabels(e.infoProvider, e.deploymentUUID, deploymentName)
+		recordPoint("bjorn2scan_deployment", familyMeta["bjorn2scan_deployment"][0], labels, 1)
+	}
+
+	// ─── 2. Image scanned ────────────────────────────────────────────────────
+	if e.unifiedConfig.ScannedContainersEnabled {
+		if err := e.provider.StreamScannedContainers(func(ctr database.ScannedContainer) error {
+			info := containerInfo{
+				NodeName:  ctr.NodeName,
+				Namespace: ctr.Namespace,
+				Pod:       ctr.Pod,
+				Name:      ctr.Name,
+				Reference: ctr.Reference,
+				Digest:    ctr.Digest,
+				OSName:    ctr.OSName,
+				Arch:      ctr.Architecture,
+			}
+			labels := buildContainerBaseLabels(e.deploymentUUID, deploymentName, info)
+			recordPoint("bjorn2scan_image_scanned", familyMeta["bjorn2scan_image_scanned"][0], labels, 1)
+			return nil
+		}); err != nil {
+			log.Error("error streaming scanned containers for OTEL", "error", err)
+		}
+	}
+
+	// ─── 3. Image vulnerabilities (3 families, single DB pass) ───────────────
+	needsVulns := e.unifiedConfig.VulnerabilitiesEnabled ||
+		e.unifiedConfig.VulnerabilityExploitedEnabled ||
+		e.unifiedConfig.VulnerabilityRiskEnabled
+	if needsVulns {
+		if err := e.provider.StreamContainerVulnerabilities(func(v database.ContainerVulnerability) error {
+			labels := buildContainerVulnerabilityLabels(e.deploymentUUID, deploymentName, v)
+			if e.unifiedConfig.VulnerabilitiesEnabled {
+				recordPoint("bjorn2scan_image_vulnerability", familyMeta["bjorn2scan_image_vulnerability"][0], labels, float64(v.Count))
+			}
+			if e.unifiedConfig.VulnerabilityRiskEnabled {
+				recordPoint("bjorn2scan_image_vulnerability_risk", familyMeta["bjorn2scan_image_vulnerability_risk"][0], labels, v.Risk*float64(v.Count))
+			}
+			if e.unifiedConfig.VulnerabilityExploitedEnabled && v.KnownExploited > 0 {
+				recordPoint("bjorn2scan_image_vulnerability_exploited", familyMeta["bjorn2scan_image_vulnerability_exploited"][0], labels, float64(v.KnownExploited*v.Count))
+			}
+			return nil
+		}); err != nil {
+			log.Error("error streaming container vulnerabilities for OTEL", "error", err)
+		}
+	}
+
+	// ─── 4. Image scan status ────────────────────────────────────────────────
+	if e.unifiedConfig.ImageScanStatusEnabled {
+		statusCounts, err := e.provider.GetImageScanStatusCounts()
+		if err != nil {
+			log.Error("error getting image scan status counts for OTEL", "error", err)
+		} else {
+			for _, sc := range statusCounts {
+				labels := map[string]string{
+					"deployment_uuid": e.deploymentUUID,
+					"scan_status":     sc.Status,
+				}
+				recordPoint("bjorn2scan_image_scan_status", familyMeta["bjorn2scan_image_scan_status"][0], labels, float64(sc.Count))
+			}
+		}
+	}
+
+	// ─── 5. Node scanned ─────────────────────────────────────────────────────
+	if e.unifiedConfig.NodeScannedEnabled {
+		nodeList, err := e.provider.GetScannedNodes()
+		if err != nil {
+			log.Error("error getting scanned nodes for OTEL", "error", err)
+		} else {
+			for _, node := range nodeList {
+				labels := buildNodeBaseLabels(e.deploymentUUID, deploymentName, node)
+				recordPoint("bjorn2scan_node_scanned", familyMeta["bjorn2scan_node_scanned"][0], labels, 1)
+			}
+		}
+	}
+
+	// ─── 6. Node vulnerabilities ──────────────────────────────────────────────
+	// Use direct OTLP export if available (bypasses SDK buffering for large datasets).
+	// Note: direct OTLP path does not update staleness tracking — this is a known limitation.
+	needsNodeVulns := e.unifiedConfig.NodeVulnerabilitiesEnabled ||
+		e.unifiedConfig.NodeVulnerabilityRiskEnabled ||
+		e.unifiedConfig.NodeVulnerabilityExploitedEnabled
+	if needsNodeVulns {
 		if e.directExporter != nil {
-			// Use direct OTLP export to avoid SDK buffering OOM
-			streamingDB := e.nodeCollector.GetStreamingDatabase()
-			if streamingDB != nil {
-				if err := e.directExporter.StreamNodeVulnerabilityMetrics(
-					e.ctx,
-					streamingDB,
-					e.nodeCollector.GetConfig(),
-					e.deploymentUUID,
-					e.infoProvider.GetDeploymentName(),
-				); err != nil {
-					log.Error("error streaming node vulnerability metrics via direct OTLP", "error", err)
-				}
-			} else {
-				log.Warn("database does not support streaming, falling back to SDK export")
-				if err := e.streamNodeVulnerabilityMetrics(); err != nil {
-					log.Error("error streaming node vulnerability metrics for OTEL", "error", err)
-				}
+			nodeConfig := NodeCollectorConfig{
+				NodeVulnerabilitiesEnabled:        e.unifiedConfig.NodeVulnerabilitiesEnabled,
+				NodeVulnerabilityRiskEnabled:      e.unifiedConfig.NodeVulnerabilityRiskEnabled,
+				NodeVulnerabilityExploitedEnabled: e.unifiedConfig.NodeVulnerabilityExploitedEnabled,
+			}
+			if err := e.directExporter.StreamNodeVulnerabilityMetrics(
+				e.ctx, e.provider, nodeConfig, e.deploymentUUID, deploymentName,
+			); err != nil {
+				log.Error("error streaming node vulnerability metrics via direct OTLP", "error", err)
 			}
 		} else {
-			// Fallback to SDK-based export (will OOM with large datasets)
-			if err := e.streamNodeVulnerabilityMetrics(); err != nil {
+			// SDK fallback: call gauge.Record per row (may OOM for very large datasets)
+			if err := e.provider.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
+				labels := buildNodeVulnerabilityLabels(e.deploymentUUID, deploymentName, v)
+				if e.unifiedConfig.NodeVulnerabilitiesEnabled {
+					recordPoint("bjorn2scan_node_vulnerability", familyMeta["bjorn2scan_node_vulnerability"][0], labels, float64(v.Count))
+				}
+				if e.unifiedConfig.NodeVulnerabilityRiskEnabled {
+					recordPoint("bjorn2scan_node_vulnerability_risk", familyMeta["bjorn2scan_node_vulnerability_risk"][0], labels, v.Score*float64(v.Count))
+				}
+				if e.unifiedConfig.NodeVulnerabilityExploitedEnabled && v.KnownExploited > 0 {
+					recordPoint("bjorn2scan_node_vulnerability_exploited", familyMeta["bjorn2scan_node_vulnerability_exploited"][0], labels, float64(v.KnownExploited*v.Count))
+				}
+				return nil
+			}); err != nil {
 				log.Error("error streaming node vulnerability metrics for OTEL", "error", err)
 			}
 		}
 	}
-}
 
-// streamNodeVulnerabilityMetrics streams node vulnerability metrics to OTEL gauges
-func (e *OTELExporter) streamNodeVulnerabilityMetrics() error {
-	// Get or create gauges for each metric type
-	vulnGauge, err := e.getOrCreateGauge("bjorn2scan_node_vulnerability", "Bjorn2scan vulnerability information for nodes")
-	if err != nil {
-		return fmt.Errorf("failed to create vuln gauge: %w", err)
-	}
-	riskGauge, err := e.getOrCreateGauge("bjorn2scan_node_vulnerability_risk", "Bjorn2scan vulnerability risk scores for nodes")
-	if err != nil {
-		return fmt.Errorf("failed to create risk gauge: %w", err)
-	}
-	exploitedGauge, err := e.getOrCreateGauge("bjorn2scan_node_vulnerability_exploited", "Bjorn2scan known exploited vulnerabilities (CISA KEV) on nodes")
-	if err != nil {
-		return fmt.Errorf("failed to create exploited gauge: %w", err)
-	}
+	// ─── Flush remaining staleness batch ─────────────────────────────────────
+	flushBatch()
 
-	return e.nodeCollector.StreamVulnerabilityMetricsToOTEL(OTELGauges{
-		Vuln:      vulnGauge,
-		Risk:      riskGauge,
-		Exploited: exploitedGauge,
-		Ctx:       e.ctx,
-	})
-}
-
-// recordMetricFamilies records a slice of metric families to OTEL
-func (e *OTELExporter) recordMetricFamilies(families []MetricFamily) {
-	for _, family := range families {
-		// Get or create gauge for this metric
-		gauge, err := e.getOrCreateGauge(family.Name, family.Help)
-		if err != nil {
-			log.Error("error creating gauge",
-				"metric_name", family.Name,
-				"error", err)
+	// ─── 7. Emit NaN for stale metrics ───────────────────────────────────────
+	for _, row := range staleRows {
+		var labels map[string]string
+		if err := json.Unmarshal([]byte(row.LabelsJSON), &labels); err != nil {
+			log.Warn("skipping stale OTEL metric: invalid labels JSON",
+				"family", row.FamilyName, "metric_key", row.MetricKey, "error", err)
 			continue
 		}
-
-		// Record all metrics in this family
-		for _, m := range family.Metrics {
-			// Convert labels map to OpenTelemetry attributes
-			attrs := make([]attribute.KeyValue, 0, len(m.Labels))
-			for k, v := range m.Labels {
-				attrs = append(attrs, attribute.String(k, v))
-			}
-
-			// Record the metric
-			gauge.Record(e.ctx, m.Value, metric.WithAttributes(attrs...))
+		gauge, err := e.getOrCreateGauge(row.FamilyName, "")
+		if err != nil {
+			log.Error("error creating OTEL gauge for stale metric", "error", err)
+			continue
 		}
+		attrs := make([]attribute.KeyValue, 0, len(labels))
+		for k, v := range labels {
+			attrs = append(attrs, attribute.String(k, v))
+		}
+		gauge.Record(e.ctx, math.NaN(), metric.WithAttributes(attrs...))
 	}
+
+	// Delete expired entries asynchronously
+	go e.staleness.DeleteExpired(cycleStart)
 }
 
 // getOrCreateGauge returns an existing gauge or creates a new one
 func (e *OTELExporter) getOrCreateGauge(name, help string) (metric.Float64Gauge, error) {
-	// Check if gauge already exists
 	if gauge, ok := e.gauges[name]; ok {
 		return gauge, nil
 	}
-
-	// Create new gauge
-	gauge, err := e.meter.Float64Gauge(name, metric.WithDescription(help))
+	opts := []metric.Float64GaugeOption{}
+	if help != "" {
+		opts = append(opts, metric.WithDescription(help))
+	}
+	gauge, err := e.meter.Float64Gauge(name, opts...)
 	if err != nil {
 		return nil, err
 	}
-
-	// Store for reuse
 	e.gauges[name] = gauge
 	return gauge, nil
 }
@@ -326,7 +426,6 @@ func (e *OTELExporter) getOrCreateGauge(name, help string) (metric.Float64Gauge,
 func (e *OTELExporter) Shutdown() error {
 	e.cancel()
 
-	// Close direct exporter if it was initialized
 	if e.directExporter != nil {
 		if err := e.directExporter.Close(); err != nil {
 			log.Error("error closing direct OTLP exporter", "error", err)

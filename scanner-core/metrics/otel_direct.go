@@ -303,11 +303,14 @@ func (e *DirectOTLPExporter) Close() error {
 	return nil
 }
 
-// StreamNodeVulnerabilityMetrics streams node vulnerability metrics directly to OTLP endpoint
-// Memory usage is constant - only one batch is held at a time
+// StreamNodeVulnerabilityMetrics streams node vulnerability metrics directly to OTLP endpoint.
+// Memory usage is constant - only one batch is held at a time.
+// provider must implement StreamNodeVulnerabilitiesForMetrics (e.g. *database.DB or StreamingProvider).
 func (e *DirectOTLPExporter) StreamNodeVulnerabilityMetrics(
 	ctx context.Context,
-	db StreamingNodeDatabaseProvider,
+	provider interface {
+		StreamNodeVulnerabilitiesForMetrics(func(database.NodeVulnerabilityForMetrics) error) error
+	},
 	nodeConfig NodeCollectorConfig,
 	deploymentUUID, deploymentName string,
 ) error {
@@ -370,7 +373,7 @@ func (e *DirectOTLPExporter) StreamNodeVulnerabilityMetrics(
 		return nil
 	}
 
-	err := db.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
+	err := provider.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
 		attrs := buildVulnAttributes(v, deploymentUUID, deploymentName)
 
 		if nodeConfig.NodeVulnerabilitiesEnabled {

@@ -1,5 +1,10 @@
 package metrics
 
+import (
+	"github.com/bvboe/b2s-go/scanner-core/database"
+	"github.com/bvboe/b2s-go/scanner-core/nodes"
+)
+
 // MetricPoint represents a single metric observation with labels and value
 type MetricPoint struct {
 	Labels map[string]string
@@ -17,4 +22,40 @@ type MetricFamily struct {
 // MetricsData holds all metrics to be exported
 type MetricsData struct {
 	Families []MetricFamily
+}
+
+// UnifiedConfig holds all configuration for the unified metrics handler.
+// It merges CollectorConfig and NodeCollectorConfig into a single struct.
+type UnifiedConfig struct {
+	// Image/container metrics
+	DeploymentEnabled             bool
+	ScannedContainersEnabled      bool
+	VulnerabilitiesEnabled        bool
+	VulnerabilityExploitedEnabled bool
+	VulnerabilityRiskEnabled      bool
+	ImageScanStatusEnabled        bool
+	// Node metrics
+	NodeScannedEnabled                bool
+	NodeVulnerabilitiesEnabled        bool
+	NodeVulnerabilityRiskEnabled      bool
+	NodeVulnerabilityExploitedEnabled bool
+	// Staleness
+	StalenessWindow int64 // Staleness window in seconds (use cfg.MetricsStalenessWindow.Seconds())
+}
+
+// StreamingProvider is the unified database interface required by the new metrics handler.
+// It combines streaming access to container and node data with staleness persistence.
+// *database.DB satisfies this interface.
+type StreamingProvider interface {
+	// Container data (streaming — avoids loading all vulnerabilities into memory)
+	StreamScannedContainers(func(database.ScannedContainer) error) error
+	StreamContainerVulnerabilities(func(database.ContainerVulnerability) error) error
+	GetImageScanStatusCounts() ([]database.ImageScanStatusCount, error)
+	// Node data
+	GetScannedNodes() ([]nodes.NodeWithStatus, error)
+	StreamNodeVulnerabilitiesForMetrics(func(database.NodeVulnerabilityForMetrics) error) error
+	// Staleness persistence (backed by the metric_staleness table, migration v36)
+	QueryStaleness(cycleStart, windowSecs int64) ([]database.StalenessRow, error)
+	UpsertStaleness(batch []database.StalenessRow) error
+	DeleteExpiredStaleness(expireBefore int64) error
 }

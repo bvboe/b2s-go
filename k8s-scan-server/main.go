@@ -552,34 +552,27 @@ func main() {
 		logging.For(logging.ComponentK8s).Info("node API endpoints registered", "endpoints", "/api/nodes, /api/nodes/{name}, /api/summary/by-node")
 	}
 
-	// Create collector config for metrics
-	collectorConfig := metrics.CollectorConfig{
-		DeploymentEnabled:             cfg.MetricsDeploymentEnabled,
-		ScannedContainersEnabled:      cfg.MetricsScannedContainersEnabled,
-		VulnerabilitiesEnabled:        cfg.MetricsVulnerabilitiesEnabled,
-		VulnerabilityExploitedEnabled: cfg.MetricsVulnerabilityExploitedEnabled,
-		VulnerabilityRiskEnabled:      cfg.MetricsVulnerabilityRiskEnabled,
-		ImageScanStatusEnabled:        cfg.MetricsImageScanStatusEnabled,
-	}
-
-	// Create node collector config for metrics (only when host scanning is enabled)
-	nodeCollectorConfig := metrics.NodeCollectorConfig{
-		NodeScannedEnabled:              cfg.MetricsNodeScannedEnabled && cfg.HostScanningEnabled,
-		NodeVulnerabilitiesEnabled:      cfg.MetricsNodeVulnerabilitiesEnabled && cfg.HostScanningEnabled,
-		NodeVulnerabilityRiskEnabled:    cfg.MetricsNodeVulnerabilityRiskEnabled && cfg.HostScanningEnabled,
+	// Create unified config for metrics (image + node + staleness)
+	unifiedConfig := metrics.UnifiedConfig{
+		DeploymentEnabled:                 cfg.MetricsDeploymentEnabled,
+		ScannedContainersEnabled:          cfg.MetricsScannedContainersEnabled,
+		VulnerabilitiesEnabled:            cfg.MetricsVulnerabilitiesEnabled,
+		VulnerabilityExploitedEnabled:     cfg.MetricsVulnerabilityExploitedEnabled,
+		VulnerabilityRiskEnabled:          cfg.MetricsVulnerabilityRiskEnabled,
+		ImageScanStatusEnabled:            cfg.MetricsImageScanStatusEnabled,
+		NodeScannedEnabled:                cfg.MetricsNodeScannedEnabled && cfg.HostScanningEnabled,
+		NodeVulnerabilitiesEnabled:        cfg.MetricsNodeVulnerabilitiesEnabled && cfg.HostScanningEnabled,
+		NodeVulnerabilityRiskEnabled:      cfg.MetricsNodeVulnerabilityRiskEnabled && cfg.HostScanningEnabled,
 		NodeVulnerabilityExploitedEnabled: cfg.MetricsNodeVulnerabilityExploitedEnabled && cfg.HostScanningEnabled,
+		StalenessWindow:                   int64(cfg.MetricsStalenessWindow.Seconds()),
 	}
 
-	// Create metric tracker for staleness detection (shared between /metrics and OTEL)
-	metricTracker := metrics.NewMetricTracker(metrics.MetricTrackerConfig{
-		StalenessWindow: cfg.MetricsStalenessWindow,
-		Store:           db,
-		StorageKey:      "metrics",
-	})
+	// Create staleness store (DB-backed, shared between /metrics and OTEL)
+	staleness := metrics.NewStalenessStore(db, cfg.MetricsStalenessWindow)
 	logging.For(logging.ComponentK8s).Info("metric staleness tracking enabled", "window", cfg.MetricsStalenessWindow)
 
-	// Register Prometheus metrics endpoint with node metrics support
-	metrics.RegisterMetricsHandlerWithNodes(mux, infoProvider, deploymentUUID.String(), db, collectorConfig, db, nodeCollectorConfig, metricTracker)
+	// Register Prometheus metrics endpoint
+	metrics.RegisterMetricsHandler(mux, infoProvider, deploymentUUID.String(), db, unifiedConfig, staleness)
 
 	// Initialize OpenTelemetry metrics exporter if enabled
 	var otelExporter *metrics.OTELExporter
@@ -599,20 +592,10 @@ func main() {
 		}
 
 		var err error
-		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), db, collectorConfig, otelConfig)
+		otelExporter, err = metrics.NewOTELExporter(ctx, infoProvider, deploymentUUID.String(), db, unifiedConfig, otelConfig, staleness)
 		if err != nil {
 			logging.For(logging.ComponentK8s).Warn("failed to initialize OTEL exporter (continuing without OTEL)", "error", err)
 		} else {
-			// Set the same tracker for consistent staleness detection
-			otelExporter.SetTracker(metricTracker)
-
-			// Add node metrics to OTEL push if host scanning is enabled
-			if cfg.HostScanningEnabled {
-				nodeCollector := metrics.NewNodeCollector(deploymentUUID.String(), infoProvider.GetDeploymentName(), db, nodeCollectorConfig)
-				otelExporter.SetNodeCollector(nodeCollector)
-				logging.For(logging.ComponentK8s).Info("node metrics added to OpenTelemetry exporter")
-			}
-
 			otelExporter.Start()
 			logging.For(logging.ComponentK8s).Info("OpenTelemetry metrics exporter started")
 		}

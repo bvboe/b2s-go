@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -609,6 +610,206 @@ func (db *DB) SaveMetricStaleness(key string, data string) error {
 	`, key, data)
 	if err != nil {
 		return fmt.Errorf("failed to save metric staleness: %w", err)
+	}
+	return nil
+}
+
+// StalenessRow represents a single row in the metric_staleness table.
+// Each row tracks when a specific metric data point was last seen during a collection cycle.
+type StalenessRow struct {
+	MetricKey    string // "familyName|label1=v1|label2=v2|..." — unique key for this metric point
+	FamilyName   string // Prometheus metric family name (e.g. "bjorn2scan_image_vulnerability")
+	LabelsJSON   string // JSON-encoded label map, used to reconstruct NaN lines for stale metrics
+	LastSeenUnix int64  // Unix timestamp of the collection cycle that last saw this metric
+}
+
+// StreamScannedContainers calls callback for each completed container scan row.
+// This is the streaming variant of GetScannedContainers, used for memory-efficient metrics generation.
+func (db *DB) StreamScannedContainers(callback func(ScannedContainer) error) error {
+	rows, err := db.conn.Query(`
+		SELECT
+			c.namespace,
+			c.pod,
+			c.name,
+			c.node_name,
+			c.reference,
+			img.digest,
+			COALESCE(img.os_name, '') as os_name,
+			COALESCE(img.architecture, '') as architecture
+		FROM containers c
+		JOIN images img ON c.image_id = img.id
+		WHERE img.status = 'completed'
+		ORDER BY c.namespace, c.pod, c.name
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query scanned containers: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Warn("failed to close rows", "error", err)
+		}
+	}()
+
+	for rows.Next() {
+		var sc ScannedContainer
+		if err := rows.Scan(
+			&sc.Namespace,
+			&sc.Pod,
+			&sc.Name,
+			&sc.NodeName,
+			&sc.Reference,
+			&sc.Digest,
+			&sc.OSName,
+			&sc.Architecture,
+		); err != nil {
+			return fmt.Errorf("failed to scan container row: %w", err)
+		}
+		if err := callback(sc); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// StreamContainerVulnerabilities calls callback for each vulnerability in a running container.
+// This is the streaming variant of GetContainerVulnerabilities, used for memory-efficient metrics generation.
+func (db *DB) StreamContainerVulnerabilities(callback func(ContainerVulnerability) error) error {
+	rows, err := db.conn.Query(`
+		SELECT
+			v.id,
+			c.namespace,
+			c.pod,
+			c.name,
+			c.node_name,
+			c.reference,
+			img.digest,
+			COALESCE(img.os_name, '') as os_name,
+			v.cve_id,
+			COALESCE(v.package_name, '') as package_name,
+			COALESCE(v.package_version, '') as package_version,
+			COALESCE(v.severity, '') as severity,
+			COALESCE(v.fix_status, '') as fix_status,
+			COALESCE(v.fixed_version, '') as fixed_version,
+			v.count,
+			v.known_exploited,
+			v.risk
+		FROM containers c
+		JOIN images img ON c.image_id = img.id
+		JOIN vulnerabilities v ON img.id = v.image_id
+		WHERE img.status = 'completed'
+		ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query container vulnerabilities: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Warn("failed to close rows", "error", err)
+		}
+	}()
+
+	for rows.Next() {
+		var cv ContainerVulnerability
+		if err := rows.Scan(
+			&cv.VulnID,
+			&cv.Namespace,
+			&cv.Pod,
+			&cv.Name,
+			&cv.NodeName,
+			&cv.Reference,
+			&cv.Digest,
+			&cv.OSName,
+			&cv.CVEID,
+			&cv.PackageName,
+			&cv.PackageVersion,
+			&cv.Severity,
+			&cv.FixStatus,
+			&cv.FixedVersion,
+			&cv.Count,
+			&cv.KnownExploited,
+			&cv.Risk,
+		); err != nil {
+			return fmt.Errorf("failed to scan container vulnerability row: %w", err)
+		}
+		if err := callback(cv); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// QueryStaleness returns metric rows that were seen in a previous collection cycle but not
+// updated since cycleStart. These are metrics that have recently disappeared and should
+// emit NaN to signal staleness to Prometheus.
+func (db *DB) QueryStaleness(cycleStart, windowSecs int64) ([]StalenessRow, error) {
+	rows, err := db.conn.Query(`
+		SELECT metric_key, family_name, labels_json, last_seen_unix
+		FROM metric_staleness
+		WHERE last_seen_unix < ?
+		  AND last_seen_unix >= ?
+		ORDER BY family_name, metric_key
+	`, cycleStart, cycleStart-windowSecs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query staleness: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Warn("failed to close staleness rows", "error", err)
+		}
+	}()
+
+	var result []StalenessRow
+	for rows.Next() {
+		var r StalenessRow
+		if err := rows.Scan(&r.MetricKey, &r.FamilyName, &r.LabelsJSON, &r.LastSeenUnix); err != nil {
+			return nil, fmt.Errorf("failed to scan staleness row: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// UpsertStaleness bulk-upserts metric staleness rows into the metric_staleness table.
+// Uses INSERT OR REPLACE to handle both new metrics and updates to existing ones.
+// The batch is limited to 1000 rows per call to keep memory bounded.
+func (db *DB) UpsertStaleness(batch []StalenessRow) error {
+	if len(batch) == 0 {
+		return nil
+	}
+
+	// SQLite has a limit of 999 parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
+	// With 4 columns per row, max safe batch size is 249 rows. We process in chunks.
+	const chunkSize = 200
+	for start := 0; start < len(batch); start += chunkSize {
+		end := start + chunkSize
+		if end > len(batch) {
+			end = len(batch)
+		}
+		chunk := batch[start:end]
+
+		// Build multi-value INSERT OR REPLACE
+		args := make([]any, 0, len(chunk)*4)
+		placeholders := make([]string, 0, len(chunk))
+		for _, r := range chunk {
+			placeholders = append(placeholders, "(?,?,?,?)")
+			args = append(args, r.MetricKey, r.FamilyName, r.LabelsJSON, r.LastSeenUnix)
+		}
+
+		query := "INSERT OR REPLACE INTO metric_staleness (metric_key, family_name, labels_json, last_seen_unix) VALUES " +
+			strings.Join(placeholders, ",")
+		if _, err := db.conn.Exec(query, args...); err != nil {
+			return fmt.Errorf("failed to upsert staleness batch: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteExpiredStaleness removes staleness rows older than expireBefore (unix timestamp).
+// Called asynchronously after each collection cycle to prune expired entries.
+func (db *DB) DeleteExpiredStaleness(expireBefore int64) error {
+	_, err := db.conn.Exec(`DELETE FROM metric_staleness WHERE last_seen_unix < ?`, expireBefore)
+	if err != nil {
+		return fmt.Errorf("failed to delete expired staleness: %w", err)
 	}
 	return nil
 }

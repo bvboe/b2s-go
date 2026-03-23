@@ -1,14 +1,17 @@
 package metrics
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
 )
 
-// MockNodeDatabaseProvider implements NodeDatabaseProvider for testing
+// MockNodeDatabaseProvider implements NodeDatabaseProvider for testing.
+// Exported so otel_test.go (same package) can reference it for the node DB mock.
 type MockNodeDatabaseProvider struct {
 	scannedNodes    []nodes.NodeWithStatus
 	vulnerabilities []database.NodeVulnerabilityForMetrics
@@ -29,731 +32,183 @@ func (m *MockNodeDatabaseProvider) GetNodeVulnerabilitiesForMetrics() ([]databas
 	return m.vulnerabilities, nil
 }
 
-func TestNodeCollector_Collect(t *testing.T) {
-	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
-	deploymentName := "test-cluster"
-
-	mockDB := &MockNodeDatabaseProvider{
-		scannedNodes: []nodes.NodeWithStatus{
-			{
-				Node: nodes.Node{
-					Name:          "node-1",
-					Hostname:      "node-1.local",
-					OSRelease:     "Ubuntu 22.04.3 LTS",
-					KernelVersion: "5.15.0-91-generic",
-					Architecture:  "amd64",
-				},
-			},
-		},
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "node-1",
-				Hostname:       "node-1.local",
-				OSRelease:      "Ubuntu 22.04.3 LTS",
-				KernelVersion:  "5.15.0-91-generic",
-				Architecture:   "amd64",
-				VulnID:         123,
-				CVEID:          "CVE-2024-1234",
-				Severity:       "Critical",
-				Score:          9.8,
-				FixStatus:      "fixed",
-				FixVersion:     "3.0.13",
-				KnownExploited: 1,
-				PackageName:    "openssl",
-				PackageVersion: "3.0.2",
-				PackageType:    "deb",
-				Count:          1,
-			},
-		},
+func (m *MockNodeDatabaseProvider) StreamNodeVulnerabilitiesForMetrics(cb func(v database.NodeVulnerabilityForMetrics) error) error {
+	if m.err != nil {
+		return m.err
 	}
-
-	config := NodeCollectorConfig{
-		NodeScannedEnabled:              true,
-		NodeVulnerabilitiesEnabled:      true,
-		NodeVulnerabilityRiskEnabled:    true,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify all metric families are present
-	if !strings.Contains(metrics, "bjorn2scan_node_scanned{") {
-		t.Error("Expected bjorn2scan_node_scanned metric")
-	}
-	if !strings.Contains(metrics, "bjorn2scan_node_vulnerability{") {
-		t.Error("Expected bjorn2scan_node_vulnerability metric")
-	}
-	if !strings.Contains(metrics, "bjorn2scan_node_vulnerability_risk{") {
-		t.Error("Expected bjorn2scan_node_vulnerability_risk metric")
-	}
-	if !strings.Contains(metrics, "bjorn2scan_node_vulnerability_exploited{") {
-		t.Error("Expected bjorn2scan_node_vulnerability_exploited metric")
-	}
-}
-
-func TestNodeCollector_CollectNodeScanned(t *testing.T) {
-	deploymentUUID := "abc-123-def-456"
-	deploymentName := "prod-cluster"
-
-	mockDB := &MockNodeDatabaseProvider{
-		scannedNodes: []nodes.NodeWithStatus{
-			{
-				Node: nodes.Node{
-					Name:          "worker-1",
-					Hostname:      "worker-1.prod.local",
-					OSRelease:     "Ubuntu 22.04.3 LTS",
-					KernelVersion: "5.15.0-91-generic",
-					Architecture:  "amd64",
-				},
-			},
-			{
-				Node: nodes.Node{
-					Name:          "worker-2",
-					Hostname:      "worker-2.prod.local",
-					OSRelease:     "Amazon Linux 2023",
-					KernelVersion: "6.1.21-1.45.amzn2023",
-					Architecture:  "arm64",
-				},
-			},
-		},
-	}
-
-	config := NodeCollectorConfig{
-		NodeScannedEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify node scanned metrics
-	expectedLabels := []string{
-		`deployment_uuid="abc-123-def-456"`,
-		`deployment_name="prod-cluster"`,
-		`node="worker-1"`,
-		`hostname="worker-1.prod.local"`,
-		`os_release="Ubuntu 22.04.3 LTS"`,
-		`kernel_version="5.15.0-91-generic"`,
-		`architecture="amd64"`,
-		`instance_type="NODE"`,
-	}
-
-	for _, label := range expectedLabels {
-		if !strings.Contains(metrics, label) {
-			t.Errorf("Expected label %s to be present in metrics", label)
+	for _, v := range m.vulnerabilities {
+		if err := cb(v); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	// Verify second node
-	if !strings.Contains(metrics, `node="worker-2"`) {
-		t.Error("Expected worker-2 node")
-	}
-	if !strings.Contains(metrics, `architecture="arm64"`) {
-		t.Error("Expected arm64 architecture")
-	}
-
-	// Count node scanned metrics (should be 2)
-	count := strings.Count(metrics, "bjorn2scan_node_scanned{")
-	if count != 2 {
-		t.Errorf("Expected 2 node scanned metrics, got %d", count)
-	}
-
-	// Verify metric value is 1
-	if !strings.Contains(metrics, "} 1\n") {
-		t.Error("Expected metric value of 1")
+func TestGetStreamingDB_ReturnsNilForNonStreaming(t *testing.T) {
+	// MockNodeDatabaseProvider implements StreamingNodeDatabaseProvider
+	// (has StreamNodeVulnerabilitiesForMetrics), so GetStreamingDB should return it.
+	m := &MockNodeDatabaseProvider{}
+	result := GetStreamingDB(m)
+	if result == nil {
+		t.Error("Expected non-nil: MockNodeDatabaseProvider implements StreamingNodeDatabaseProvider")
 	}
 }
 
-func TestNodeCollector_CollectNodeVulnerabilities(t *testing.T) {
-	deploymentUUID := "550e8400-e29b-41d4-a716-446655440000"
-	deploymentName := "test-cluster"
-
-	mockDB := &MockNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "node-1",
-				Hostname:       "node-1.local",
-				OSRelease:      "Ubuntu 22.04",
-				KernelVersion:  "5.15.0",
-				Architecture:   "amd64",
-				VulnID:         100,
-				CVEID:          "CVE-2024-1234",
-				Severity:       "Critical",
-				Score:          9.8,
-				FixStatus:      "fixed",
-				FixVersion:     "1.2.3",
-				KnownExploited: 0,
-				PackageName:    "openssl",
-				PackageVersion: "3.0.2",
-				PackageType:    "deb",
-				Count:          2,
-			},
-			{
-				NodeName:       "node-1",
-				Hostname:       "node-1.local",
-				OSRelease:      "Ubuntu 22.04",
-				KernelVersion:  "5.15.0",
-				Architecture:   "amd64",
-				VulnID:         101,
-				CVEID:          "CVE-2024-5678",
-				Severity:       "High",
-				Score:          7.5,
-				FixStatus:      "not-fixed",
-				FixVersion:     "",
-				KnownExploited: 0,
-				PackageName:    "curl",
-				PackageVersion: "7.81.0",
-				PackageType:    "deb",
-				Count:          1,
-			},
-		},
-	}
-
-	config := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify vulnerability labels
-	expectedLabels := []string{
-		`vulnerability="CVE-2024-1234"`,
-		`severity="Critical"`,
-		`package_name="openssl"`,
-		`package_version="3.0.2"`,
-		`package_type="deb"`,
-		`fix_status="fixed"`,
-		`fixed_version="1.2.3"`,
-		`vulnerability_id="550e8400-e29b-41d4-a716-446655440000.100"`,
-	}
-
-	for _, label := range expectedLabels {
-		if !strings.Contains(metrics, label) {
-			t.Errorf("Expected label %s to be present in metrics", label)
-		}
-	}
-
-	// Count vulnerability metrics (should be 2)
-	count := strings.Count(metrics, "bjorn2scan_node_vulnerability{")
-	if count != 2 {
-		t.Errorf("Expected 2 vulnerability metrics, got %d", count)
+func TestGetStreamingDB_ReturnsNilForNil(t *testing.T) {
+	result := GetStreamingDB(nil)
+	if result != nil {
+		t.Error("Expected nil for nil input")
 	}
 }
 
-func TestNodeCollector_CollectNodeVulnerabilityRisk(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test-cluster"
-
+func TestStreamVulnerabilityMetricsToOTEL_CallsGauges(t *testing.T) {
+	// This test verifies that StreamVulnerabilityMetricsToOTEL calls the streaming
+	// callback for each vulnerability. We use nil gauges to avoid real OTEL setup.
 	mockDB := &MockNodeDatabaseProvider{
 		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName: "node-1",
-				CVEID:    "CVE-2024-0001",
-				Severity: "Critical",
-				Score:    9.8,
-				Count:    1,
-			},
-			{
-				NodeName: "node-1",
-				CVEID:    "CVE-2024-0002",
-				Severity: "Medium",
-				Score:    5.5,
-				Count:    2,
-			},
-			{
-				NodeName: "node-1",
-				CVEID:    "CVE-2024-0003",
-				Severity: "Low",
-				Score:    0.0,
-				Count:    1,
-			},
+			{NodeName: "node-1", CVEID: "CVE-2024-0001", Severity: "Critical", Score: 9.8, Count: 1},
+			{NodeName: "node-1", CVEID: "CVE-2024-0002", Severity: "High", Score: 7.5, Count: 2},
 		},
 	}
-
 	config := NodeCollectorConfig{
+		NodeVulnerabilitiesEnabled:   true,
 		NodeVulnerabilityRiskEnabled: true,
 	}
+	gauges := OTELGauges{
+		Vuln: nil, // nil gauges — the function checks for nil before calling Record
+		Risk: nil,
+		Ctx:  nil,
+	}
 
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
+	// Should not panic even with nil gauges (function guards nil checks)
+	err := StreamVulnerabilityMetricsToOTEL("uuid", "cluster", config, mockDB, gauges)
 	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify risk metric is present
-	if !strings.Contains(metrics, "bjorn2scan_node_vulnerability_risk{") {
-		t.Error("Expected bjorn2scan_node_vulnerability_risk metric")
-	}
-
-	// Verify risk values (score * count)
-	if !strings.Contains(metrics, "9.8") {
-		t.Error("Expected risk value 9.8 (9.8 * 1)")
-	}
-	if !strings.Contains(metrics, "11") {
-		t.Error("Expected risk value 11 (5.5 * 2)")
-	}
-
-	// Count risk metrics (should be 3)
-	count := strings.Count(metrics, "bjorn2scan_node_vulnerability_risk{")
-	if count != 3 {
-		t.Errorf("Expected 3 vulnerability risk metrics, got %d", count)
+		t.Fatalf("StreamVulnerabilityMetricsToOTEL returned error: %v", err)
 	}
 }
 
-func TestNodeCollector_CollectNodeVulnerabilityExploited(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test-cluster"
+func TestStreamVulnerabilityMetricsToOTEL_DBError(t *testing.T) {
+	mockDB := &MockNodeDatabaseProvider{err: errStreamTestError}
+	config := NodeCollectorConfig{NodeVulnerabilitiesEnabled: true}
+	gauges := OTELGauges{}
 
-	mockDB := &MockNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "node-1",
-				CVEID:          "CVE-2024-0001",
-				Severity:       "Critical",
-				KnownExploited: 1, // Known exploited
-				Count:          1,
-			},
-			{
-				NodeName:       "node-1",
-				CVEID:          "CVE-2024-0002",
-				Severity:       "High",
-				KnownExploited: 0, // Not known exploited
-				Count:          2,
-			},
-			{
-				NodeName:       "node-2",
-				CVEID:          "CVE-2024-0003",
-				Severity:       "Critical",
-				KnownExploited: 1, // Known exploited
-				Count:          3,
-			},
+	err := StreamVulnerabilityMetricsToOTEL("uuid", "cluster", config, mockDB, gauges)
+	if err == nil {
+		t.Error("Expected error from database")
+	}
+}
+
+// errStreamTestError is used to simulate DB errors in node_metrics_test.go.
+var errStreamTestError = errors.New("mock node metrics error")
+
+func TestCollectNodeScannedLabels(t *testing.T) {
+	node := nodes.NodeWithStatus{
+		Node: nodes.Node{
+			Name:          "worker-1",
+			Hostname:      "worker-1.local",
+			OSRelease:     "Ubuntu 22.04",
+			KernelVersion: "5.15.0",
+			Architecture:  "amd64",
 		},
 	}
+	labels := collectNodeScannedLabels("uuid", "cluster", node)
 
-	config := NodeCollectorConfig{
-		NodeVulnerabilityExploitedEnabled: true,
+	expected := map[string]string{
+		"node":           "worker-1",
+		"hostname":       "worker-1.local",
+		"os_release":     "Ubuntu 22.04",
+		"kernel_version": "5.15.0",
+		"architecture":   "amd64",
 	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify exploited metric is present
-	if !strings.Contains(metrics, "bjorn2scan_node_vulnerability_exploited{") {
-		t.Error("Expected bjorn2scan_node_vulnerability_exploited metric")
-	}
-
-	// Verify only known exploited vulnerabilities are included (2, not 3)
-	count := strings.Count(metrics, "bjorn2scan_node_vulnerability_exploited{")
-	if count != 2 {
-		t.Errorf("Expected 2 exploited vulnerability metrics (only known_exploited > 0), got %d", count)
-	}
-
-	// CVE-2024-0002 should NOT be present (not known exploited)
-	if strings.Contains(metrics, `vulnerability="CVE-2024-0002"`) {
-		t.Error("CVE-2024-0002 should not be present (not known exploited)")
+	for k, v := range expected {
+		if labels[k] != v {
+			t.Errorf("label %s: expected %q, got %q", k, v, labels[k])
+		}
 	}
 }
 
-func TestNodeCollector_ConfigToggles(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test"
+func TestCollectNodeVulnLabels(t *testing.T) {
+	v := database.NodeVulnerabilityForMetrics{
+		NodeName:       "node-1",
+		Hostname:       "node-1.local",
+		CVEID:          "CVE-2024-1234",
+		Severity:       "Critical",
+		Score:          9.8,
+		PackageName:    "openssl",
+		PackageVersion: "3.0.2",
+		PackageType:    "deb",
+		FixStatus:      "fixed",
+		FixVersion:     "1.0.1",
+	}
+	labels := collectNodeVulnLabels("uuid", "cluster", v)
 
+	if labels["vulnerability"] != "CVE-2024-1234" {
+		t.Errorf("Expected vulnerability=CVE-2024-1234, got %q", labels["vulnerability"])
+	}
+	if labels["severity"] != "Critical" {
+		t.Errorf("Expected severity=Critical, got %q", labels["severity"])
+	}
+	if labels["package_name"] != "openssl" {
+		t.Errorf("Expected package_name=openssl, got %q", labels["package_name"])
+	}
+}
+
+func TestCollectNodeScannedMetrics(t *testing.T) {
 	mockDB := &MockNodeDatabaseProvider{
 		scannedNodes: []nodes.NodeWithStatus{
-			{
-				Node: nodes.Node{
-					Name: "node-1",
-				},
-			},
-		},
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "node-1",
-				CVEID:          "CVE-2024-TEST",
-				Severity:       "High",
-				Score:          7.5,
-				KnownExploited: 1,
-				Count:          1,
-			},
+			{Node: nodes.Node{Name: "node-1", Hostname: "node-1.local", Architecture: "amd64"}},
+			{Node: nodes.Node{Name: "node-2", Hostname: "node-2.local", Architecture: "arm64"}},
 		},
 	}
-
-	testCases := []struct {
-		name                  string
-		config                NodeCollectorConfig
-		expectScanned         bool
-		expectVulnerability   bool
-		expectRisk            bool
-		expectExploited       bool
-	}{
-		{
-			name: "All enabled",
-			config: NodeCollectorConfig{
-				NodeScannedEnabled:              true,
-				NodeVulnerabilitiesEnabled:      true,
-				NodeVulnerabilityRiskEnabled:    true,
-				NodeVulnerabilityExploitedEnabled: true,
-			},
-			expectScanned:       true,
-			expectVulnerability: true,
-			expectRisk:          true,
-			expectExploited:     true,
-		},
-		{
-			name: "Only scanned enabled",
-			config: NodeCollectorConfig{
-				NodeScannedEnabled: true,
-			},
-			expectScanned:       true,
-			expectVulnerability: false,
-			expectRisk:          false,
-			expectExploited:     false,
-		},
-		{
-			name: "Only vulnerabilities enabled",
-			config: NodeCollectorConfig{
-				NodeVulnerabilitiesEnabled: true,
-			},
-			expectScanned:       false,
-			expectVulnerability: true,
-			expectRisk:          false,
-			expectExploited:     false,
-		},
-		{
-			name: "All disabled",
-			config: NodeCollectorConfig{
-				NodeScannedEnabled:              false,
-				NodeVulnerabilitiesEnabled:      false,
-				NodeVulnerabilityRiskEnabled:    false,
-				NodeVulnerabilityExploitedEnabled: false,
-			},
-			expectScanned:       false,
-			expectVulnerability: false,
-			expectRisk:          false,
-			expectExploited:     false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, tc.config)
-			data, err := collector.Collect()
-			if err != nil {
-				t.Fatalf("Failed to collect metrics: %v", err)
-			}
-
-			metrics := FormatPrometheus(data)
-
-			hasScanned := strings.Contains(metrics, "bjorn2scan_node_scanned{")
-			hasVulnerability := strings.Contains(metrics, "bjorn2scan_node_vulnerability{")
-			hasRisk := strings.Contains(metrics, "bjorn2scan_node_vulnerability_risk{")
-			hasExploited := strings.Contains(metrics, "bjorn2scan_node_vulnerability_exploited{")
-
-			if hasScanned != tc.expectScanned {
-				t.Errorf("Expected scanned metric present=%v, got=%v", tc.expectScanned, hasScanned)
-			}
-			if hasVulnerability != tc.expectVulnerability {
-				t.Errorf("Expected vulnerability metric present=%v, got=%v", tc.expectVulnerability, hasVulnerability)
-			}
-			if hasRisk != tc.expectRisk {
-				t.Errorf("Expected risk metric present=%v, got=%v", tc.expectRisk, hasRisk)
-			}
-			if hasExploited != tc.expectExploited {
-				t.Errorf("Expected exploited metric present=%v, got=%v", tc.expectExploited, hasExploited)
-			}
-		})
-	}
-}
-
-func TestNodeCollector_NilDatabase(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test"
-
-	config := NodeCollectorConfig{
-		NodeScannedEnabled:              true,
-		NodeVulnerabilitiesEnabled:      true,
-		NodeVulnerabilityRiskEnabled:    true,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	// Pass nil database
-	collector := NewNodeCollector(deploymentUUID, deploymentName, nil, config)
-	data, err := collector.Collect()
+	family, err := collectNodeScannedMetrics("uuid", "cluster", mockDB)
 	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
+		t.Fatalf("collectNodeScannedMetrics failed: %v", err)
 	}
 
-	metrics := FormatPrometheus(data)
-
-	// Should have no metrics when database is nil
-	if strings.Contains(metrics, "bjorn2scan_node_scanned") {
-		t.Error("Should not have node scanned metric with nil database")
+	if family.Name != "bjorn2scan_node_scanned" {
+		t.Errorf("Expected family name bjorn2scan_node_scanned, got %s", family.Name)
 	}
-	if strings.Contains(metrics, "bjorn2scan_node_vulnerability") {
-		t.Error("Should not have node vulnerability metric with nil database")
+	if len(family.Metrics) != 2 {
+		t.Errorf("Expected 2 metrics, got %d", len(family.Metrics))
 	}
-}
-
-func TestNodeCollector_EscapesLabels(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test"
-
-	mockDB := &MockNodeDatabaseProvider{
-		scannedNodes: []nodes.NodeWithStatus{
-			{
-				Node: nodes.Node{
-					Name:          "node-with\"quotes",
-					Hostname:      "host\\with\\backslash",
-					OSRelease:     "OS\"with\"special",
-					KernelVersion: "5.15.0",
-					Architecture:  "amd64",
-				},
-			},
-		},
-	}
-
-	config := NodeCollectorConfig{
-		NodeScannedEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify escaped quotes
-	if !strings.Contains(metrics, `node="node-with\"quotes"`) {
-		t.Error("Expected escaped quotes in node name")
-	}
-	if !strings.Contains(metrics, `hostname="host\\with\\backslash"`) {
-		t.Error("Expected escaped backslashes in hostname")
-	}
-	if !strings.Contains(metrics, `os_release="OS\"with\"special"`) {
-		t.Error("Expected escaped quotes in OS release")
-	}
-}
-
-func TestNodeCollector_EmptyResults(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test"
-
-	mockDB := &MockNodeDatabaseProvider{
-		scannedNodes:    []nodes.NodeWithStatus{},
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{},
-	}
-
-	config := NodeCollectorConfig{
-		NodeScannedEnabled:              true,
-		NodeVulnerabilitiesEnabled:      true,
-		NodeVulnerabilityRiskEnabled:    true,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	// Should have metric families even if empty
-	if len(data.Families) != 4 {
-		t.Errorf("Expected 4 metric families, got %d", len(data.Families))
-	}
-
-	// Verify each family has correct name but empty metrics
-	familyNames := map[string]bool{
-		"bjorn2scan_node_scanned":               false,
-		"bjorn2scan_node_vulnerability":         false,
-		"bjorn2scan_node_vulnerability_risk":    false,
-		"bjorn2scan_node_vulnerability_exploited": false,
-	}
-
-	for _, family := range data.Families {
-		if _, ok := familyNames[family.Name]; ok {
-			familyNames[family.Name] = true
-			if len(family.Metrics) != 0 {
-				t.Errorf("Expected 0 metrics for %s, got %d", family.Name, len(family.Metrics))
-			}
-		}
-	}
-
-	for name, found := range familyNames {
-		if !found {
-			t.Errorf("Expected metric family %s to be present", name)
+	for _, m := range family.Metrics {
+		if m.Value != 1 {
+			t.Errorf("Expected value=1, got %f", m.Value)
 		}
 	}
 }
 
-func TestNodeCollector_SinglePassCollectionSharesLabels(t *testing.T) {
-	deploymentUUID := "test-uuid"
-	deploymentName := "test-cluster"
-
-	mockDB := &MockNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "node-1",
-				Hostname:       "node-1.local",
-				OSRelease:      "Ubuntu 22.04",
-				KernelVersion:  "5.15.0",
-				Architecture:   "amd64",
-				VulnID:         100,
-				CVEID:          "CVE-2024-0001",
-				Severity:       "Critical",
-				Score:          9.8,
-				FixStatus:      "fixed",
-				FixVersion:     "2.0.0",
-				KnownExploited: 1,
-				PackageName:    "openssl",
-				PackageVersion: "3.0.2",
-				PackageType:    "deb",
-				Count:          1,
-			},
+func TestStreamMetrics_NodeVulnerabilityLabels(t *testing.T) {
+	info := &MockInfoProvider{deploymentName: "production", deploymentType: "kubernetes", version: "1.0.0"}
+	provider := newMockStreamingProvider()
+	provider.nodeVulns = []database.NodeVulnerabilityForMetrics{
+		{
+			NodeName:       "prod-node-1",
+			Hostname:       "prod-node-1.example.com",
+			OSRelease:      "Ubuntu 22.04.3 LTS",
+			KernelVersion:  "5.15.0-91-generic",
+			Architecture:   "amd64",
+			CVEID:          "CVE-2024-9999",
+			Severity:       "Critical",
+			Score:          10.0,
+			FixStatus:      "fixed",
+			FixVersion:     "2.0.0",
+			KnownExploited: 0,
+			PackageName:    "critical-lib",
+			PackageVersion: "1.0.0",
+			PackageType:    "deb",
+			Count:          1,
 		},
 	}
+	config := UnifiedConfig{NodeVulnerabilitiesEnabled: true}
 
-	// Enable all three vulnerability metrics to test single-pass collection
-	config := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled:        true,
-		NodeVulnerabilityRiskEnabled:      true,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
+	var buf strings.Builder
+	_, err := StreamMetrics(&buf, info, "prod-uuid", provider, config, nil, time.Now())
 	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
+		t.Fatalf("StreamMetrics failed: %v", err)
 	}
+	output := buf.String()
 
-	// Should have exactly 3 metric families (vuln, risk, exploited)
-	if len(data.Families) != 3 {
-		t.Errorf("Expected 3 metric families, got %d", len(data.Families))
-	}
-
-	// Verify all three families have metrics
-	familyMetricCounts := make(map[string]int)
-	for _, family := range data.Families {
-		familyMetricCounts[family.Name] = len(family.Metrics)
-	}
-
-	if familyMetricCounts["bjorn2scan_node_vulnerability"] != 1 {
-		t.Errorf("Expected 1 vulnerability metric, got %d", familyMetricCounts["bjorn2scan_node_vulnerability"])
-	}
-	if familyMetricCounts["bjorn2scan_node_vulnerability_risk"] != 1 {
-		t.Errorf("Expected 1 risk metric, got %d", familyMetricCounts["bjorn2scan_node_vulnerability_risk"])
-	}
-	if familyMetricCounts["bjorn2scan_node_vulnerability_exploited"] != 1 {
-		t.Errorf("Expected 1 exploited metric, got %d", familyMetricCounts["bjorn2scan_node_vulnerability_exploited"])
-	}
-
-	// Verify label sharing: all three metrics should have the same labels pointer
-	// (since they come from the same vulnerability and single-pass reuses labels)
-	var vulnLabels, riskLabels, exploitedLabels map[string]string
-	for _, family := range data.Families {
-		if len(family.Metrics) > 0 {
-			switch family.Name {
-			case "bjorn2scan_node_vulnerability":
-				vulnLabels = family.Metrics[0].Labels
-			case "bjorn2scan_node_vulnerability_risk":
-				riskLabels = family.Metrics[0].Labels
-			case "bjorn2scan_node_vulnerability_exploited":
-				exploitedLabels = family.Metrics[0].Labels
-			}
-		}
-	}
-
-	// Labels should be the same object (pointer equality) due to single-pass optimization
-	if vulnLabels == nil || riskLabels == nil || exploitedLabels == nil {
-		t.Fatal("Expected all label maps to be non-nil")
-	}
-
-	// Verify label values are correct (even if pointers are different, values should match)
-	expectedVulnID := "test-uuid.100"
-	if vulnLabels["vulnerability_id"] != expectedVulnID {
-		t.Errorf("Expected vulnerability_id=%s, got %s", expectedVulnID, vulnLabels["vulnerability_id"])
-	}
-	if riskLabels["vulnerability_id"] != expectedVulnID {
-		t.Errorf("Expected vulnerability_id=%s in risk labels, got %s", expectedVulnID, riskLabels["vulnerability_id"])
-	}
-	if exploitedLabels["vulnerability_id"] != expectedVulnID {
-		t.Errorf("Expected vulnerability_id=%s in exploited labels, got %s", expectedVulnID, exploitedLabels["vulnerability_id"])
-	}
-}
-
-func TestNodeCollector_VulnerabilityLabelsComplete(t *testing.T) {
-	deploymentUUID := "prod-uuid"
-	deploymentName := "production"
-
-	mockDB := &MockNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{
-				NodeName:       "prod-node-1",
-				Hostname:       "prod-node-1.example.com",
-				OSRelease:      "Ubuntu 22.04.3 LTS",
-				KernelVersion:  "5.15.0-91-generic",
-				Architecture:   "amd64",
-				VulnID:         42,
-				CVEID:          "CVE-2024-9999",
-				Severity:       "Critical",
-				Score:          10.0,
-				FixStatus:      "fixed",
-				FixVersion:     "2.0.0",
-				KnownExploited: 0,
-				PackageName:    "critical-lib",
-				PackageVersion: "1.0.0",
-				PackageType:    "deb",
-				Count:          1,
-			},
-		},
-	}
-
-	config := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled: true,
-	}
-
-	collector := NewNodeCollector(deploymentUUID, deploymentName, mockDB, config)
-
-	data, err := collector.Collect()
-	if err != nil {
-		t.Fatalf("Failed to collect metrics: %v", err)
-	}
-
-	metrics := FormatPrometheus(data)
-
-	// Verify all labels per plan spec
 	expectedLabels := []string{
 		`deployment_uuid="prod-uuid"`,
 		`deployment_name="production"`,
@@ -762,10 +217,8 @@ func TestNodeCollector_VulnerabilityLabelsComplete(t *testing.T) {
 		`os_release="Ubuntu 22.04.3 LTS"`,
 		`kernel_version="5.15.0-91-generic"`,
 		`architecture="amd64"`,
-		`instance_type="NODE"`,
 		`severity="Critical"`,
 		`vulnerability="CVE-2024-9999"`,
-		`vulnerability_id="prod-uuid.42"`,
 		`package_name="critical-lib"`,
 		`package_version="1.0.0"`,
 		`package_type="deb"`,
@@ -774,66 +227,9 @@ func TestNodeCollector_VulnerabilityLabelsComplete(t *testing.T) {
 	}
 
 	for _, label := range expectedLabels {
-		if !strings.Contains(metrics, label) {
-			t.Errorf("Expected label %s to be present in metrics", label)
+		if !strings.Contains(output, label) {
+			t.Errorf("Expected label %s in output", label)
 		}
 	}
 }
 
-func TestNodeCollector_GetStreamingDatabase(t *testing.T) {
-	tests := []struct {
-		name           string
-		db             NodeDatabaseProvider
-		expectStreaming bool
-	}{
-		{
-			name:           "non-streaming database returns nil",
-			db:             &MockNodeDatabaseProvider{},
-			expectStreaming: false,
-		},
-		{
-			name:           "nil database returns nil",
-			db:             nil,
-			expectStreaming: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			collector := NewNodeCollector("uuid", "name", tt.db, NodeCollectorConfig{})
-			streamingDB := collector.GetStreamingDatabase()
-			
-			if tt.expectStreaming && streamingDB == nil {
-				t.Error("Expected streaming database, got nil")
-			}
-			if !tt.expectStreaming && streamingDB != nil {
-				t.Error("Expected nil, got streaming database")
-			}
-		})
-	}
-}
-
-func TestNodeCollector_GetConfig(t *testing.T) {
-	config := NodeCollectorConfig{
-		NodeScannedEnabled:                true,
-		NodeVulnerabilitiesEnabled:        true,
-		NodeVulnerabilityRiskEnabled:      false,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	collector := NewNodeCollector("uuid", "name", nil, config)
-	gotConfig := collector.GetConfig()
-
-	if gotConfig.NodeScannedEnabled != config.NodeScannedEnabled {
-		t.Errorf("NodeScannedEnabled: expected %v, got %v", config.NodeScannedEnabled, gotConfig.NodeScannedEnabled)
-	}
-	if gotConfig.NodeVulnerabilitiesEnabled != config.NodeVulnerabilitiesEnabled {
-		t.Errorf("NodeVulnerabilitiesEnabled: expected %v, got %v", config.NodeVulnerabilitiesEnabled, gotConfig.NodeVulnerabilitiesEnabled)
-	}
-	if gotConfig.NodeVulnerabilityRiskEnabled != config.NodeVulnerabilityRiskEnabled {
-		t.Errorf("NodeVulnerabilityRiskEnabled: expected %v, got %v", config.NodeVulnerabilityRiskEnabled, gotConfig.NodeVulnerabilityRiskEnabled)
-	}
-	if gotConfig.NodeVulnerabilityExploitedEnabled != config.NodeVulnerabilityExploitedEnabled {
-		t.Errorf("NodeVulnerabilityExploitedEnabled: expected %v, got %v", config.NodeVulnerabilityExploitedEnabled, gotConfig.NodeVulnerabilityExploitedEnabled)
-	}
-}

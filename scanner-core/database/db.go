@@ -89,9 +89,11 @@ func New(dbPath string) (*DB, error) {
 		}
 	}
 
-	// Configure connection pool for SQLite
-	conn.SetMaxOpenConns(1) // SQLite works best with a single connection
-	conn.SetMaxIdleConns(1)
+	// Configure connection pool for SQLite.
+	// 2 connections: one for long-running streaming reads, one for concurrent writes
+	// (e.g. staleness upserts during /metrics streaming). WAL mode supports this.
+	conn.SetMaxOpenConns(2)
+	conn.SetMaxIdleConns(2)
 
 	// Configure SQLite for better concurrency
 	_, err = conn.Exec(`

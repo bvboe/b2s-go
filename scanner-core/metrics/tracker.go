@@ -1,146 +1,111 @@
 package metrics
 
 import (
-	"encoding/json"
-	"math"
 	"sort"
-	"sync"
 	"time"
 
+	"github.com/bvboe/b2s-go/scanner-core/database"
 )
-
 
 // DefaultStalenessWindow is the default duration after which metrics are considered stale
 const DefaultStalenessWindow = 60 * time.Minute
 
-// MetricTrackerStore is the interface for persisting metric staleness data
-type MetricTrackerStore interface {
-	LoadMetricStaleness(key string) (string, error)
-	SaveMetricStaleness(key string, data string) error
+// defaultBatchSize is the number of staleness rows flushed to the DB per batch during streaming.
+// At ~200 bytes/row this keeps working memory at ~200KB per batch regardless of total row count.
+const defaultBatchSize = 1000
+
+// StalenessDB is the subset of StreamingProvider needed for staleness operations.
+// This is a separate interface so StalenessStore can be unit-tested with a mock.
+type StalenessDB interface {
+	QueryStaleness(cycleStart, windowSecs int64) ([]database.StalenessRow, error)
+	UpsertStaleness(batch []database.StalenessRow) error
+	DeleteExpiredStaleness(expireBefore int64) error
 }
 
-// MetricTracker tracks metric last-seen times for staleness detection
-// It persists data to the database for survival across restarts
+// StalenessStore tracks per-metric-point staleness using the metric_staleness DB table.
+// It replaces the old MetricTracker (which stored a JSON blob in app_state).
 //
-// Staleness behavior:
-// 1. When a metric is present in source data, its last-seen time is updated
-// 2. When a metric disappears from source, emit NaN immediately (stale marker)
-// 3. Continue emitting NaN for the staleness window duration
-// 4. After stalenessWindow passes, remove from tracking (metric disappears completely)
-type MetricTracker struct {
-	mu              sync.RWMutex
-	lastSeen        map[string]time.Time // metric key -> last seen timestamp
-	stalenessWindow time.Duration        // how long to emit NaN after metric disappears
-	store           MetricTrackerStore   // database interface for persistence
-	storageKey      string               // key used for database storage
-	lastSavedHash   string               // hash of last saved data to avoid unnecessary writes
+// Staleness behavior (unchanged from MetricTracker):
+// 1. A metric present in the current collection cycle has its last_seen_unix updated.
+// 2. A metric that disappears has NaN emitted for up to StalenessWindow duration.
+// 3. After StalenessWindow expires, the row is deleted (metric disappears completely).
+type StalenessStore struct {
+	db              StalenessDB
+	stalenessWindow time.Duration
+	batchSize       int
 }
 
-// MetricTrackerConfig holds configuration for the MetricTracker
-type MetricTrackerConfig struct {
-	StalenessWindow time.Duration      // Duration to emit NaN after metric disappears (default: 60 min)
-	Store           MetricTrackerStore // Database interface for persistence
-	StorageKey      string             // Key used for database storage (default: "metrics")
+// NewStalenessStore creates a StalenessStore backed by the given database.
+func NewStalenessStore(db StalenessDB, stalenessWindow time.Duration) *StalenessStore {
+	if stalenessWindow == 0 {
+		stalenessWindow = DefaultStalenessWindow
+	}
+	return &StalenessStore{
+		db:              db,
+		stalenessWindow: stalenessWindow,
+		batchSize:       defaultBatchSize,
+	}
 }
 
-// NewMetricTracker creates a new MetricTracker
-func NewMetricTracker(cfg MetricTrackerConfig) *MetricTracker {
-	if cfg.StalenessWindow == 0 {
-		cfg.StalenessWindow = DefaultStalenessWindow
-	}
-	if cfg.StorageKey == "" {
-		cfg.StorageKey = "metrics"
-	}
+// QueryStale returns metric rows that were seen in a previous cycle but not in the
+// current one (i.e., they disappeared). The result is small in a stable cluster —
+// safe to load into memory for use when writing NaN lines to the HTTP response.
+func (s *StalenessStore) QueryStale(cycleStart time.Time) ([]database.StalenessRow, error) {
+	return s.db.QueryStaleness(cycleStart.Unix(), int64(s.stalenessWindow.Seconds()))
+}
 
-	mt := &MetricTracker{
-		lastSeen:        make(map[string]time.Time),
-		stalenessWindow: cfg.StalenessWindow,
-		store:           cfg.Store,
-		storageKey:      cfg.StorageKey,
+// FlushBatch upserts a batch of staleness rows to the database, setting lastSeenUnix on all rows.
+func (s *StalenessStore) FlushBatch(batch []database.StalenessRow, lastSeenUnix int64) error {
+	for i := range batch {
+		batch[i].LastSeenUnix = lastSeenUnix
 	}
+	return s.db.UpsertStaleness(batch)
+}
 
-	// Load persisted data from database
-	if cfg.Store != nil {
-		if err := mt.loadFromStore(); err != nil {
-			log.Warn("failed to load persisted metric staleness data", "error", err)
+// FlushAll upserts all staleness rows to the database in batches.
+// Intended to be called after the HTTP response is flushed, so DB writes don't block the client.
+func (s *StalenessStore) FlushAll(rows []database.StalenessRow, cycleStart time.Time) {
+	if len(rows) == 0 {
+		return
+	}
+	cycleStartUnix := cycleStart.Unix()
+	for i := range rows {
+		rows[i].LastSeenUnix = cycleStartUnix
+	}
+	for i := 0; i < len(rows); i += s.batchSize {
+		end := i + s.batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if err := s.db.UpsertStaleness(rows[i:end]); err != nil {
+			log.Warn("failed to flush staleness batch", "error", err)
 		}
 	}
-
-	return mt
 }
 
-// loadFromStore loads the last-seen data from the database
-func (mt *MetricTracker) loadFromStore() error {
-	data, err := mt.store.LoadMetricStaleness(mt.storageKey)
-	if err != nil {
-		return err
+// DeleteExpired removes staleness rows that are past the staleness window.
+// Intended to be called asynchronously after the HTTP response is flushed.
+func (s *StalenessStore) DeleteExpired(cycleStart time.Time) {
+	expireBefore := cycleStart.Unix() - int64(s.stalenessWindow.Seconds())
+	if err := s.db.DeleteExpiredStaleness(expireBefore); err != nil {
+		log.Warn("failed to delete expired staleness entries", "error", err)
 	}
-	if data == "" {
-		return nil // No data yet
-	}
-
-	// Parse JSON: map of metric key -> RFC3339 timestamp
-	var timestamps map[string]string
-	if err := json.Unmarshal([]byte(data), &timestamps); err != nil {
-		return err
-	}
-
-	mt.mu.Lock()
-	defer mt.mu.Unlock()
-
-	for key, ts := range timestamps {
-		t, err := time.Parse(time.RFC3339, ts)
-		if err != nil {
-			log.Warn("invalid timestamp in persisted data",
-				"key", key,
-				"error", err)
-			continue
-		}
-		mt.lastSeen[key] = t
-	}
-
-	log.Debug("loaded metric timestamps from database",
-		"count", len(mt.lastSeen))
-	return nil
 }
 
-// saveToStore persists the last-seen data to the database
-// Only writes if data has changed
-func (mt *MetricTracker) saveToStore() error {
-	if mt.store == nil {
-		return nil
-	}
-
-	mt.mu.RLock()
-	// Convert to JSON-serializable format
-	timestamps := make(map[string]string, len(mt.lastSeen))
-	for key, t := range mt.lastSeen {
-		timestamps[key] = t.Format(time.RFC3339)
-	}
-	mt.mu.RUnlock()
-
-	data, err := json.Marshal(timestamps)
-	if err != nil {
-		return err
-	}
-
-	// Check if data has changed (simple string comparison)
-	dataStr := string(data)
-	if dataStr == mt.lastSavedHash {
-		return nil // No change
-	}
-
-	if err := mt.store.SaveMetricStaleness(mt.storageKey, dataStr); err != nil {
-		return err
-	}
-
-	mt.lastSavedHash = dataStr
-	return nil
+// BatchSize returns the configured batch size (exposed for tests).
+func (s *StalenessStore) BatchSize() int {
+	return s.batchSize
 }
 
-// generateMetricKey creates a unique key for a metric based on its name and labels
+// StalenessWindow returns the configured staleness window.
+func (s *StalenessStore) StalenessWindow() time.Duration {
+	return s.stalenessWindow
+}
+
+// generateMetricKey creates a unique key for a metric based on its family name and labels.
+// Key format: "familyName|label1=value1|label2=value2|..." (labels sorted alphabetically).
+// This key is used as the PRIMARY KEY in the metric_staleness table.
 func generateMetricKey(familyName string, labels map[string]string) string {
-	// Sort labels for consistent key generation
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
 		keys = append(keys, k)
@@ -152,185 +117,4 @@ func generateMetricKey(familyName string, labels map[string]string) string {
 		key += "|" + k + "=" + labels[k]
 	}
 	return key
-}
-
-// ProcessMetrics processes metrics data, updates last-seen times, and adds stale markers
-// Returns the processed metrics data with stale metrics included
-//
-// Staleness logic:
-// - Metrics present in data: update last-seen time
-// - Metrics missing from data but within staleness window: emit NaN (stale marker)
-// - Metrics missing and past staleness window: remove from tracking (metric disappears)
-func (mt *MetricTracker) ProcessMetrics(data *MetricsData) *MetricsData {
-	if data == nil {
-		return nil
-	}
-
-	now := time.Now()
-	currentMetrics := make(map[string]struct{})
-
-	// Build set of current metrics and update last-seen times
-	for _, family := range data.Families {
-		for _, metric := range family.Metrics {
-			key := generateMetricKey(family.Name, metric.Labels)
-			currentMetrics[key] = struct{}{}
-		}
-	}
-
-	// Update last-seen times for current metrics
-	mt.mu.Lock()
-	for key := range currentMetrics {
-		mt.lastSeen[key] = now
-	}
-
-	// Find stale and expired metrics
-	// Stale: metric missing but within staleness window - emit NaN
-	// Expired: metric missing and past staleness window - remove from tracking
-	staleMetrics := make(map[string]time.Time)
-	expiredMetrics := make([]string, 0)
-	stalenessThreshold := now.Add(-mt.stalenessWindow)
-
-	for key, lastTime := range mt.lastSeen {
-		if _, exists := currentMetrics[key]; !exists {
-			// Metric is missing from current data
-			if lastTime.Before(stalenessThreshold) {
-				// Past staleness window - remove from tracking
-				expiredMetrics = append(expiredMetrics, key)
-			} else {
-				// Within staleness window - emit NaN
-				staleMetrics[key] = lastTime
-			}
-		}
-	}
-
-	// Remove expired metrics from tracking
-	for _, key := range expiredMetrics {
-		delete(mt.lastSeen, key)
-	}
-	mt.mu.Unlock()
-
-	// Persist to database (only if changed)
-	if err := mt.saveToStore(); err != nil {
-		log.Warn("failed to persist metric staleness data", "error", err)
-	}
-
-	// Add stale metrics to the output with NaN value
-	if len(staleMetrics) > 0 {
-		data = mt.addStaleMetrics(data, staleMetrics)
-		log.Debug("marked metrics as stale (NaN)",
-			"count", len(staleMetrics))
-	}
-	if len(expiredMetrics) > 0 {
-		log.Debug("purged expired metrics",
-			"count", len(expiredMetrics))
-	}
-
-	return data
-}
-
-// addStaleMetrics adds stale metrics to the data with NaN values
-// It creates a copy of the data to avoid modifying the input
-func (mt *MetricTracker) addStaleMetrics(data *MetricsData, staleMetrics map[string]time.Time) *MetricsData {
-	// Parse stale metric keys and group by family
-	staleByFamily := make(map[string][]MetricPoint)
-
-	for key := range staleMetrics {
-		familyName, labels := parseMetricKey(key)
-		if familyName == "" {
-			continue
-		}
-		staleByFamily[familyName] = append(staleByFamily[familyName], MetricPoint{
-			Labels: labels,
-			Value:  math.NaN(),
-		})
-	}
-
-	// Create a copy of the families slice to avoid modifying the input
-	newFamilies := make([]MetricFamily, len(data.Families))
-	for i, family := range data.Families {
-		// Copy family with new Metrics slice
-		newFamilies[i] = MetricFamily{
-			Name: family.Name,
-			Help: family.Help,
-			Type: family.Type,
-		}
-		if stalePoints, ok := staleByFamily[family.Name]; ok {
-			// Combine existing metrics with stale metrics
-			newFamilies[i].Metrics = make([]MetricPoint, len(family.Metrics)+len(stalePoints))
-			copy(newFamilies[i].Metrics, family.Metrics)
-			copy(newFamilies[i].Metrics[len(family.Metrics):], stalePoints)
-			delete(staleByFamily, family.Name)
-		} else {
-			// Just copy existing metrics
-			newFamilies[i].Metrics = make([]MetricPoint, len(family.Metrics))
-			copy(newFamilies[i].Metrics, family.Metrics)
-		}
-	}
-
-	// Add any remaining stale metrics as new families
-	for familyName, points := range staleByFamily {
-		newFamilies = append(newFamilies, MetricFamily{
-			Name:    familyName,
-			Help:    "Stale metric",
-			Type:    "gauge",
-			Metrics: points,
-		})
-	}
-
-	return &MetricsData{Families: newFamilies}
-}
-
-// parseMetricKey parses a metric key back into family name and labels
-func parseMetricKey(key string) (string, map[string]string) {
-	// Key format: familyName|label1=value1|label2=value2|...
-	labels := make(map[string]string)
-
-	// Find first separator
-	firstSep := -1
-	for i, c := range key {
-		if c == '|' {
-			firstSep = i
-			break
-		}
-	}
-
-	if firstSep == -1 {
-		return key, labels // No labels
-	}
-
-	familyName := key[:firstSep]
-	rest := key[firstSep+1:]
-
-	// Parse remaining label pairs
-	start := 0
-	for i := 0; i <= len(rest); i++ {
-		if i == len(rest) || rest[i] == '|' {
-			pair := rest[start:i]
-			eqIdx := -1
-			for j, c := range pair {
-				if c == '=' {
-					eqIdx = j
-					break
-				}
-			}
-			if eqIdx > 0 {
-				labels[pair[:eqIdx]] = pair[eqIdx+1:]
-			}
-			start = i + 1
-		}
-	}
-
-	return familyName, labels
-}
-
-// GetStalenessWindow returns the configured staleness window
-func (mt *MetricTracker) GetStalenessWindow() time.Duration {
-	return mt.stalenessWindow
-}
-
-// GetTrackedCount returns the number of metrics currently being tracked
-func (mt *MetricTracker) GetTrackedCount() int {
-	mt.mu.RLock()
-	defer mt.mu.RUnlock()
-	return len(mt.lastSeen)
 }
