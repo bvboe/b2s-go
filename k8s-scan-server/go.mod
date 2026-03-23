@@ -5,9 +5,9 @@ go 1.25.8
 require (
 	github.com/KimMachineGun/automemlimit v0.7.5
 	github.com/bvboe/b2s-go/scanner-core v0.0.0
-	k8s.io/api v0.35.2
-	k8s.io/apimachinery v0.35.2
-	k8s.io/client-go v0.35.2
+	k8s.io/api v0.35.3
+	k8s.io/apimachinery v0.35.3
+	k8s.io/client-go v0.35.3
 )
 
 require (
