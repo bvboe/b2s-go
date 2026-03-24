@@ -57,24 +57,24 @@ scanServer:
       memory: 1Gi  # Baseline for vulnerability scanning workload
 
   # Liveness probe - checks if the process is alive
-  # Note: initialDelaySeconds must be long enough for database download (60-90s on first startup)
+  # HTTP server starts within ~2s; Grype DB initializes in background and does not block /health
   livenessProbe:
     httpGet:
       path: /health
       port: 8080
-    initialDelaySeconds: 120     # Allow time for initial database download
+    initialDelaySeconds: 10
     periodSeconds: 10
     failureThreshold: 3
 
-  # Readiness probe using /ready endpoint which checks vulnerability database availability
-  # The database download can take 60-90 seconds on first startup
+  # Readiness probe - /ready returns 200 as soon as the HTTP server is up (~2s)
+  # Grype DB initialization happens in background; DB status is available via /api/db/status
   readinessProbe:
     httpGet:
       path: /ready
       port: 8080
-    initialDelaySeconds: 10      # Wait for startup initialization
-    periodSeconds: 10            # Check every 10 seconds
-    failureThreshold: 12         # Allow up to 2 minutes for database download (12 * 10s)
+    initialDelaySeconds: 2       # Server is up within ~2s
+    periodSeconds: 3             # Check frequently for fast ready state
+    failureThreshold: 10         # Allow up to 30s if startup is slow
     successThreshold: 1
 
   nodeSelector: {}

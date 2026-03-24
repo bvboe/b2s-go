@@ -574,6 +574,52 @@ async function loadConfig() {
     } catch (error) {
         console.error('Error loading config:', error);
     }
+
+    // Start monitoring DB initialization status
+    checkDBStatus();
+}
+
+// Poll /api/db/status and show a banner while the vulnerability database is initializing.
+// Removes itself automatically once the database becomes available.
+async function checkDBStatus() {
+    try {
+        const response = await fetch('/api/db/status');
+        if (!response.ok) return; // Endpoint not present - nothing to show
+
+        const status = await response.json();
+        const bannerId = 'db-init-banner';
+        let banner = document.getElementById(bannerId);
+
+        if (status.available) {
+            if (banner) banner.remove();
+            return; // Database is ready - stop polling
+        }
+
+        // Database not ready - show banner
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = bannerId;
+            banner.style.cssText = [
+                'background:#f0f0f0',
+                'border:1px solid #999',
+                'padding:10px 16px',
+                'margin-bottom:16px',
+                'border-radius:4px',
+                'color:#333',
+                'font-size:14px',
+            ].join(';');
+            const h1 = document.querySelector('h1');
+            if (h1 && h1.parentNode) {
+                h1.parentNode.insertBefore(banner, h1.nextSibling);
+            }
+        }
+        banner.textContent = 'Vulnerability database is initializing. Scans will begin automatically once the database is ready.';
+
+        // Check again in 5 seconds
+        setTimeout(checkDBStatus, 5000);
+    } catch (e) {
+        // Silent fail - don't disrupt the page if this endpoint is unreachable
+    }
 }
 
 // Get current filter query string for navigation links

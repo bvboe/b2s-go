@@ -350,13 +350,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Perform initial sync
-	if err := k8s.SyncInitialPods(ctx, clientset, manager); err != nil {
-		logging.For(logging.ComponentK8s).Error("error performing initial pod sync", "error", err)
-		os.Exit(1)
-	}
-
-	// Start pod watcher in background
+	// Start pod watcher - performs initial sync via informer cache then watches for changes
 	go k8s.WatchPods(ctx, clientset, manager)
 
 	// Create pod-scanner client for SBOM routing
@@ -369,12 +363,7 @@ func main() {
 		nodeManager = nodes.NewManager()
 		nodeManager.SetDatabase(db)
 
-		// Perform initial node sync
-		if err := k8s.SyncInitialNodes(ctx, clientset, nodeManager); err != nil {
-			logging.For(logging.ComponentK8s).Warn("failed to sync initial nodes", "error", err)
-		}
-
-		// Start node watcher in background
+		// Start node watcher - performs initial sync via informer cache then watches for changes
 		go k8s.WatchNodes(ctx, clientset, nodeManager)
 	}
 

@@ -322,6 +322,22 @@ func main() {
 		DBRootDir: "/var/lib/bjorn2scan/cache",
 	}
 
+	// Initialize database readiness state for tracking Grype DB initialization
+	dbReadinessState := handlers.NewDatabaseReadinessState(grypeCfg)
+
+	// Start async Grype database initialization - does not block HTTP server startup
+	go func() {
+		logging.For(logging.ComponentVulnDB).Info("starting background vulnerability database initialization")
+		dbStatus, err := grype.InitializeDatabase(grypeCfg)
+		if err != nil {
+			logging.For(logging.ComponentVulnDB).Warn("failed to initialize vulnerability database", "error", err)
+			logging.For(logging.ComponentVulnDB).Warn("scans will wait for manual database setup")
+		} else {
+			logging.For(logging.ComponentVulnDB).Info("vulnerability database ready", "schema", dbStatus.SchemaVersion, "built", dbStatus.Built)
+		}
+		dbReadinessState.SetReady(dbStatus)
+	}()
+
 	// Create database updater for grype DB status and rescan job
 	// Pass the database as TimestampStore for persistent tracking of grype DB changes
 	dbUpdater, err := vulndb.NewDatabaseUpdaterWithConfig(grypeCfg.DBRootDir, vulndb.DatabaseUpdaterConfig{
@@ -347,6 +363,9 @@ func main() {
 	}
 	scanQueue := scanning.NewJobQueue(db, sbomRetriever, grypeCfg, queueConfig)
 	defer scanQueue.Shutdown()
+
+	// Connect scan queue to DB readiness state so it waits for grype DB before processing vuln scans
+	scanQueue.SetDBReadinessChecker(dbReadinessState)
 
 	// Connect scan queue to manager
 	manager.SetScanQueue(scanQueue)
@@ -505,6 +524,9 @@ func main() {
 		// Add rescan database job - uses grype's native update mechanism
 		if cfg.JobsRescanDatabaseEnabled && dbUpdater != nil {
 			rescanJob := jobs.NewRescanDatabaseJob(dbUpdater, db, scanQueue)
+			// Connect readiness state so db-updater can mark ready after a successful DB update
+			// This fixes the case where initial download fails but db-updater succeeds later
+			rescanJob.SetReadinessSetter(dbReadinessState)
 			// Enable node rescanning on grype DB updates if host scanning is enabled
 			if cfg.HostScanningEnabled {
 				rescanJob.SetNodeScanning(db, scanQueue)
@@ -584,6 +606,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	handlers.RegisterHandlers(mux, infoProvider)
+	handlers.RegisterDatabaseReadinessHandlers(mux, dbReadinessState)
 	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
 
 	// Register static handlers only if web UI is enabled
