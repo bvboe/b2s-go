@@ -90,6 +90,9 @@ func setDefaults(cfg *Config) {
 	if cfg.Verification.CosignIdentityRegexp == "" {
 		cfg.Verification.CosignIdentityRegexp = "https://github.com/bvboe/b2s-go/*"
 	}
+	if cfg.Verification.ReleaseBaseURL == "" {
+		cfg.Verification.ReleaseBaseURL = "https://github.com/bvboe/b2s-go/releases/download"
+	}
 }
 
 func validate(cfg *Config) error {

@@ -64,13 +64,15 @@
   - [ ] GKE
   - [ ] EKS
   - [ ] AKS
-- [ ] Implement cosign signature verification for auto-updates (verifier.go currently returns nil)
-  - [ ] Agent binary verification
-  - [ ] Helm chart verification
-  - [ ] Add SHAs to values.yaml
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 
 ## Recently Completed
+- [x] [2026-03-23] Supply-chain security: cosign signature verification and image digest pinning
+  - **Agent**: Real sigstore/sigstore-go verification in `bjorn2scan-agent/updater/verifier.go` — fetches Sigstore trusted root, verifies `.sigstore` bundle against tarball before extraction; on by default
+  - **Controller**: Real sigstore/sigstore-go verification in `k8s-update-controller/controller/registry_client.go` — downloads bundle from GitHub releases via HTTP, verifies chart `.tgz` before applying; on by default
+  - **Pipeline**: `go-binary-reusable.yaml` now emits `.sigstore` bundle (+ legacy `.sig`/`.cert`); `release.yaml` signs Helm chart `.tgz` as blob and uploads bundle to GitHub releases
+  - **Image digest pinning**: `digest: ""` added to all 3 image blocks in `values.yaml`; templates use `repo@sha256:...` when set; release pipeline injects real digests via `docker buildx imagetools inspect` before `helm package`
+  - **Config**: Added `releaseBaseURL` to update-controller config/types/defaults/configmap/values
 - [x] [2026-03-23] Fast first-ready UX: async startup and Grype DB initialization
   - **Root cause**: Two blocking operations delayed HTTP server: `SyncInitialPods`/`SyncInitialNodes` API calls before server start (k8s-scan-server), and synchronous Grype init in agent
   - **Fix**: Removed redundant blocking sync calls — K8s informers already handle initial cache sync internally via `WaitForCacheSync`

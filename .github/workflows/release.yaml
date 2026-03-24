@@ -130,12 +130,49 @@ jobs:
           git push origin main
         fi
 
+    - name: Log in to Container Registry (for digest inspection)
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Inject image digests into chart values
+      run: |
+        VERSION=${GITHUB_REF_NAME#v}
+
+        # Fetch the multi-arch manifest list digest for each image.
+        # These are immutable content-addressable identifiers.
+        SCAN_SERVER_DIGEST=$(docker buildx imagetools inspect \
+          ${{ env.REGISTRY }}/${{ github.repository }}/k8s-scan-server:${VERSION} \
+          --format '{{.Manifest.Digest}}')
+        POD_SCANNER_DIGEST=$(docker buildx imagetools inspect \
+          ${{ env.REGISTRY }}/${{ github.repository }}/pod-scanner:${VERSION} \
+          --format '{{.Manifest.Digest}}')
+        UPDATE_CONTROLLER_DIGEST=$(docker buildx imagetools inspect \
+          ${{ env.REGISTRY }}/${{ github.repository }}/k8s-update-controller:${VERSION} \
+          --format '{{.Manifest.Digest}}')
+
+        echo "Injecting digests into chart values:"
+        echo "  k8s-scan-server:        ${SCAN_SERVER_DIGEST}"
+        echo "  pod-scanner:            ${POD_SCANNER_DIGEST}"
+        echo "  k8s-update-controller:  ${UPDATE_CONTROLLER_DIGEST}"
+
+        # Install yq for reliable YAML field injection (preserves comments)
+        sudo curl -sfL -o /usr/local/bin/yq \
+          https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+
+        yq -i ".scanServer.image.digest = \"${SCAN_SERVER_DIGEST}\""         helm/bjorn2scan/values.yaml
+        yq -i ".podScanner.image.digest = \"${POD_SCANNER_DIGEST}\""         helm/bjorn2scan/values.yaml
+        yq -i ".updateController.image.digest = \"${UPDATE_CONTROLLER_DIGEST}\"" helm/bjorn2scan/values.yaml
+
     - name: Package Helm chart
       run: |
         # Extract version from tag (remove 'v' prefix)
         VERSION=${GITHUB_REF_NAME#v}
 
-        # Package the chart (Chart.yaml already updated in previous step)
+        # Package the chart (Chart.yaml updated with version; values.yaml updated with digests)
         helm package helm/bjorn2scan --destination .
 
     - name: Push Helm chart as OCI artifact
@@ -150,26 +187,24 @@ jobs:
     - name: Install cosign
       uses: sigstore/cosign-installer@v3
 
-    - name: Log in to Container Registry (for cosign)
-      uses: docker/login-action@v4
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Sign Helm chart OCI artifact
+    - name: Sign Helm chart OCI artifact and blob
       run: |
-        # Extract version from tag (remove 'v' prefix)
         VERSION=${GITHUB_REF_NAME#v}
-
-        # Get the chart digest and sign it
         CHART_REF="${{ env.REGISTRY }}/${{ github.repository }}/bjorn2scan:${VERSION}"
+        CHART_TGZ="bjorn2scan-${VERSION}.tgz"
 
-        # Pull the chart to get its digest
-        helm pull "oci://${CHART_REF}" --version "${VERSION}" 2>&1 | tee pull_output.txt || true
-
-        # Sign the chart using the OCI reference
+        # Sign the OCI artifact (for users verifying manually with cosign CLI)
         cosign sign --yes "${CHART_REF}"
+
+        # Sign the packaged .tgz as a blob and emit a Sigstore bundle.
+        # The bundle is uploaded to GitHub releases so the k8s-update-controller
+        # can fetch and verify it before applying a chart update.
+        cosign sign-blob --yes \
+          --bundle "${CHART_TGZ}.sigstore" \
+          "${CHART_TGZ}"
+
+        echo "OCI artifact signed: ${CHART_REF}"
+        echo "Blob bundle created: ${CHART_TGZ}.sigstore"
 
     - name: Download SBOM artifacts
       uses: actions/download-artifact@v8
@@ -217,6 +252,7 @@ jobs:
       with:
         files: |
           bjorn2scan-*.tgz
+          bjorn2scan-*.tgz.sigstore
           agent-binaries/*
           sboms/**/*.spdx.json
         body: |

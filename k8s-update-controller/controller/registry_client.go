@@ -1,16 +1,22 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/sigstore/sigstore-go/pkg/bundle"
+	"github.com/sigstore/sigstore-go/pkg/root"
+	"github.com/sigstore/sigstore-go/pkg/verify"
 )
-
 
 // RegistryClient handles OCI registry operations
 type RegistryClient struct {
@@ -119,13 +125,98 @@ func (rc *RegistryClient) DownloadChart(ctx context.Context, version string) (st
 	return chartPath, nil
 }
 
-// VerifySignature verifies the cosign signature of a chart
-func (rc *RegistryClient) VerifySignature(ctx context.Context, chartPath string, identityRegexp string, oidcIssuer string) error {
-	// TODO: Implement cosign verification
-	// For now, we'll skip this in the initial implementation
-	// This will be added in a follow-up as it requires cosign library integration
+// VerifySignature verifies the Sigstore bundle for a downloaded Helm chart.
+//
+// The bundle is fetched from GitHub releases at:
+//
+//	<releaseBaseURL>/v<version>/bjorn2scan-<version>.tgz.sigstore
+//
+// It was produced by cosign sign-blob --bundle on the packaged chart. The
+// chart content is identical regardless of whether it came from OCI or a
+// GitHub release asset, so the digest in the bundle matches chartPath.
+func (rc *RegistryClient) VerifySignature(ctx context.Context, chartPath, version, releaseBaseURL, identityRegexp, oidcIssuer string) error {
+	// Build and download the bundle file
+	bundleURL := fmt.Sprintf("%s/v%s/bjorn2scan-%s.tgz.sigstore", releaseBaseURL, version, version)
+	bundlePath, err := downloadToTemp(ctx, bundleURL)
+	if err != nil {
+		return fmt.Errorf("failed to download signature bundle from %s: %w", bundleURL, err)
+	}
+	defer func() { _ = os.Remove(bundlePath) }()
 
-	log := log
-	log.Info("signature verification not yet implemented")
+	// Load the Sigstore bundle
+	b, err := bundle.LoadJSONFromPath(bundlePath)
+	if err != nil {
+		return fmt.Errorf("failed to load signature bundle: %w", err)
+	}
+
+	// Fetch the Sigstore public-good trust root from TUF
+	trustedRoot, err := root.FetchTrustedRoot()
+	if err != nil {
+		return fmt.Errorf("failed to fetch trusted root: %w", err)
+	}
+
+	// Require at least one transparency-log entry and one observer timestamp
+	verifier, err := verify.NewVerifier(trustedRoot,
+		verify.WithTransparencyLog(1),
+		verify.WithObserverTimestamps(1),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create verifier: %w", err)
+	}
+
+	// Read the chart content for artifact digest verification
+	chartBytes, err := os.ReadFile(chartPath)
+	if err != nil {
+		return fmt.Errorf("failed to read chart: %w", err)
+	}
+
+	// Build the certificate identity policy
+	certID, err := verify.NewShortCertificateIdentity(oidcIssuer, "", "", identityRegexp)
+	if err != nil {
+		return fmt.Errorf("invalid certificate identity: %w", err)
+	}
+
+	policy := verify.NewPolicy(
+		verify.WithArtifact(bytes.NewReader(chartBytes)),
+		verify.WithCertificateIdentity(certID),
+	)
+
+	if _, err := verifier.Verify(b, policy); err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
 	return nil
+}
+
+// downloadToTemp downloads a URL to a temporary file and returns its path.
+// The caller is responsible for removing the file when done.
+func downloadToTemp(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
+	}
+
+	f, err := os.CreateTemp("", "sigstore-bundle-*.sigstore")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("failed to write bundle: %w", err)
+	}
+
+	return f.Name(), nil
 }

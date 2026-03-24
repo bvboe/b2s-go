@@ -35,7 +35,7 @@ spec:
       - name: pod-scanner
         securityContext:
           {{- toYaml .Values.podScanner.securityContext | nindent 12 }}
-        image: "{{ .Values.podScanner.image.repository }}:{{ .Values.podScanner.image.tag | default .Chart.AppVersion }}"
+        image: "{{ if .Values.podScanner.image.digest }}{{ .Values.podScanner.image.repository }}@{{ .Values.podScanner.image.digest }}{{ else }}{{ .Values.podScanner.image.repository }}:{{ .Values.podScanner.image.tag | default .Chart.AppVersion }}{{ end }}"
         imagePullPolicy: {{ .Values.podScanner.image.pullPolicy }}
         ports:
         - name: http

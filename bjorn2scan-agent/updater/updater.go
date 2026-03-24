@@ -199,26 +199,28 @@ func (u *Updater) performUpdate(ctx context.Context, release *Release) error {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
-	// Extract binary from tarball
-	log.Info("extracting binary")
-	extractedPath, err := downloader.ExtractBinary(binaryPath)
-	if err != nil {
-		return fmt.Errorf("extraction failed: %w", err)
-	}
-
-	// Verify signature
+	// Verify tarball signature before extraction.
+	// The bundle signs the tarball itself, so we verify before trusting its contents.
 	if u.config.VerifySignatures {
 		u.setStatus(StatusVerifying, "")
 		log.Info("verifying signature")
 
 		verifier := NewVerifier(u.config.CosignIdentityRegexp, u.config.CosignOIDCIssuer)
-		sigPath := fmt.Sprintf("%s.sig", binaryPath)
-		certPath := fmt.Sprintf("%s.cert", binaryPath)
+		bundlePath := binaryPath + ".sigstore"
 
-		if err := verifier.VerifySignature(extractedPath, sigPath, certPath); err != nil {
+		if err := verifier.VerifySignature(binaryPath, bundlePath); err != nil {
 			return fmt.Errorf("signature verification failed: %w", err)
 		}
 		log.Info("signature verified")
+	} else {
+		log.Warn("signature verification disabled; install sigstore bundle verification for supply-chain security")
+	}
+
+	// Extract binary from verified tarball
+	log.Info("extracting binary")
+	extractedPath, err := downloader.ExtractBinary(binaryPath)
+	if err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
 	}
 
 	// Install

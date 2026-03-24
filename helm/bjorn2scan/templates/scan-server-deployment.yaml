@@ -36,7 +36,7 @@ spec:
       - name: scan-server
         securityContext:
           {{- toYaml .Values.scanServer.securityContext | nindent 12 }}
-        image: "{{ .Values.scanServer.image.repository }}:{{ .Values.scanServer.image.tag | default .Chart.AppVersion }}"
+        image: "{{ if .Values.scanServer.image.digest }}{{ .Values.scanServer.image.repository }}@{{ .Values.scanServer.image.digest }}{{ else }}{{ .Values.scanServer.image.repository }}:{{ .Values.scanServer.image.tag | default .Chart.AppVersion }}{{ end }}"
         imagePullPolicy: {{ .Values.scanServer.image.pullPolicy }}
         ports:
         - name: http

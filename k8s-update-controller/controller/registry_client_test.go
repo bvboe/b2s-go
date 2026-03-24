@@ -2,6 +2,10 @@ package controller
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -148,18 +152,139 @@ func TestRegistryClient_DownloadChart_InvalidURL(t *testing.T) {
 	}
 }
 
-func TestRegistryClient_VerifySignature(t *testing.T) {
-	// VerifySignature is not yet implemented, so test that it returns nil
-	// and doesn't panic
-	client := NewRegistryClient("oci://ghcr.io/bvboe/b2s-go/bjorn2scan")
-	ctx := context.Background()
+func TestVerifySignature_BundleNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
 
-	err := client.VerifySignature(ctx, "/path/to/chart.tgz",
-		"https://github.com/bvboe/b2s-go/*",
-		"https://token.actions.githubusercontent.com")
+	rc := NewRegistryClient("oci://ghcr.io/example/chart")
 
+	tmpDir := t.TempDir()
+	chartPath := filepath.Join(tmpDir, "chart.tgz")
+	if err := os.WriteFile(chartPath, []byte("fake chart content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := rc.VerifySignature(context.Background(), chartPath, "1.0.0",
+		srv.URL, "https://github.com/bvboe/b2s-go/*", "https://token.actions.githubusercontent.com")
+	if err == nil {
+		t.Error("expected error when bundle returns 404, got nil")
+	}
+}
+
+func TestVerifySignature_MalformedBundle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not valid json`))
+	}))
+	defer srv.Close()
+
+	rc := NewRegistryClient("oci://ghcr.io/example/chart")
+
+	tmpDir := t.TempDir()
+	chartPath := filepath.Join(tmpDir, "chart.tgz")
+	if err := os.WriteFile(chartPath, []byte("fake chart content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := rc.VerifySignature(context.Background(), chartPath, "1.0.0",
+		srv.URL, "https://github.com/bvboe/b2s-go/*", "https://token.actions.githubusercontent.com")
+	if err == nil {
+		t.Error("expected error for malformed bundle JSON, got nil")
+	}
+}
+
+func TestVerifySignature_EmptyBundle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	rc := NewRegistryClient("oci://ghcr.io/example/chart")
+
+	tmpDir := t.TempDir()
+	chartPath := filepath.Join(tmpDir, "chart.tgz")
+	if err := os.WriteFile(chartPath, []byte("fake chart content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := rc.VerifySignature(context.Background(), chartPath, "1.0.0",
+		srv.URL, "https://github.com/bvboe/b2s-go/*", "https://token.actions.githubusercontent.com")
+	if err == nil {
+		t.Error("expected error for empty bundle JSON, got nil")
+	}
+}
+
+func TestVerifySignature_MissingChart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.1"}`))
+	}))
+	defer srv.Close()
+
+	rc := NewRegistryClient("oci://ghcr.io/example/chart")
+
+	err := rc.VerifySignature(context.Background(), "/nonexistent/chart.tgz", "1.0.0",
+		srv.URL, "https://github.com/bvboe/b2s-go/*", "https://token.actions.githubusercontent.com")
+	if err == nil {
+		t.Error("expected error when chart file is missing, got nil")
+	}
+}
+
+func TestDownloadToTemp_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	_, err := downloadToTemp(context.Background(), srv.URL+"/bundle.sigstore")
+	if err == nil {
+		t.Error("expected error for HTTP 500, got nil")
+	}
+}
+
+func TestDownloadToTemp_Success(t *testing.T) {
+	content := []byte(`{"test":"bundle"}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	}))
+	defer srv.Close()
+
+	path, err := downloadToTemp(context.Background(), srv.URL+"/bundle.sigstore")
 	if err != nil {
-		t.Errorf("VerifySignature() error = %v, want nil (not yet implemented)", err)
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = os.Remove(path) }()
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("downloaded content = %q, want %q", got, content)
+	}
+}
+
+func TestBundleURLConstruction(t *testing.T) {
+	tests := []struct {
+		releaseBaseURL string
+		version        string
+		wantURL        string
+	}{
+		{
+			releaseBaseURL: "https://github.com/bvboe/b2s-go/releases/download",
+			version:        "0.1.122",
+			wantURL:        "https://github.com/bvboe/b2s-go/releases/download/v0.1.122/bjorn2scan-0.1.122.tgz.sigstore",
+		},
+	}
+
+	for _, tt := range tests {
+		got := tt.releaseBaseURL + "/v" + tt.version + "/bjorn2scan-" + tt.version + ".tgz.sigstore"
+		if got != tt.wantURL {
+			t.Errorf("bundle URL = %q, want %q", got, tt.wantURL)
+		}
 	}
 }
 

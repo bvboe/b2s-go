@@ -65,9 +65,8 @@ update_feed_url=https://github.com/bvboe/b2s-go/releases.atom
 # Assets are downloaded from: {base_url}/{version}/{filename}
 update_asset_base_url=https://github.com/bvboe/b2s-go/releases/download
 
-# Verify signatures before installing (default: false)
-# TODO: Enable when cosign verification is implemented
-update_verify_signatures=false
+# Verify cosign signatures before installing (default: true)
+update_verify_signatures=true
 
 # Enable automatic rollback on failure (default: true)
 # If health check fails after update, automatically rollback to previous version

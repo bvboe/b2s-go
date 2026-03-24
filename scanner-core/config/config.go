@@ -108,7 +108,7 @@ func defaultConfig() *Config {
 		AutoUpdateMaxVersion:         "",
 		UpdateFeedURL:                "https://github.com/bvboe/b2s-go/releases.atom",
 		UpdateAssetBaseURL:           "https://github.com/bvboe/b2s-go/releases/download",
-		UpdateVerifySignatures:       false, // TODO: Enable when cosign is implemented
+		UpdateVerifySignatures:       true,
 		UpdateRollbackEnabled:        true,
 		UpdateHealthCheckTimeout:     60 * time.Second,
 		UpdateCosignIdentityRegexp:   "https://github.com/bvboe/b2s-go/*",

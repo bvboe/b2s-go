@@ -206,8 +206,7 @@ func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, wo
 	arch := runtime.GOARCH
 	binaryName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz", arch)
 	checksumName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz.sha256", arch)
-	signatureName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz.sig", arch)
-	certName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz.cert", arch)
+	bundleName := fmt.Sprintf("bjorn2scan-agent-linux-%s.tar.gz.sigstore", arch)
 
 	// Validate all required assets are available before downloading
 	if hd.enableValidation {
@@ -234,18 +233,11 @@ func (hd *HTTPDownloader) DownloadReleaseAssets(ctx context.Context, version, wo
 		return "", fmt.Errorf("failed to download checksum: %w", err)
 	}
 
-	// Download signature (optional - may not exist)
-	sigPath := filepath.Join(workDir, signatureName)
-	if err := hd.DownloadAsset(ctx, version, signatureName, sigPath); err != nil {
-		log.Info("signature not available", "error", err)
-		// Not fatal - signature is optional
-	}
-
-	// Download certificate (optional - may not exist)
-	certPath := filepath.Join(workDir, certName)
-	if err := hd.DownloadAsset(ctx, version, certName, certPath); err != nil {
-		log.Info("certificate not available", "error", err)
-		// Not fatal - certificate is optional
+	// Download Sigstore bundle (optional — may not exist for older releases)
+	bundlePath := filepath.Join(workDir, bundleName)
+	if err := hd.DownloadAsset(ctx, version, bundleName, bundlePath); err != nil {
+		log.Info("sigstore bundle not available (older release?)", "error", err)
+		// Not fatal — verification will fail later if VerifySignatures is enabled
 	}
 
 	return binaryPath, nil

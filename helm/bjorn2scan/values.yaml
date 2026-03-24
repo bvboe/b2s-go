@@ -28,6 +28,10 @@ scanServer:
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
     tag: ""
+    # Pinned to exact multi-arch manifest digest by the release pipeline.
+    # When set, the image reference becomes repo@digest (immutable).
+    # Override with "" to use tag-based reference (e.g. for local test builds).
+    digest: ""
 
   imagePullSecrets: []
 
@@ -181,6 +185,9 @@ podScanner:
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
     tag: ""
+    # Pinned to exact multi-arch manifest digest by the release pipeline.
+    # Override with "" to use tag-based reference.
+    digest: ""
 
   imagePullSecrets: []
 
@@ -262,6 +269,9 @@ updateController:
     repository: ghcr.io/bvboe/b2s-go/k8s-update-controller
     pullPolicy: IfNotPresent
     tag: ""  # Defaults to chart appVersion
+    # Pinned to exact multi-arch manifest digest by the release pipeline.
+    # Override with "" to use tag-based reference.
+    digest: ""
 
   # Cron schedule (standard Kubernetes CronJob format)
   # Examples: "0 2 * * *" (daily at 2am), "0 */6 * * *" (every 6 hours), "@daily"
@@ -301,6 +311,9 @@ updateController:
     autoRollback: true      # Automatically rollback on failure
 
     # Signature verification
-    verificationEnabled: false  # TODO: Enable when cosign verification is implemented
+    # Verifies each downloaded Helm chart against its Sigstore bundle before applying.
+    # The bundle is fetched from releaseBaseURL/v<version>/bjorn2scan-<version>.tgz.sigstore.
+    verificationEnabled: true   # Verify cosign signatures on chart updates
     cosignIdentityRegexp: "https://github.com/bvboe/b2s-go/*"
     cosignOIDCIssuer: "https://token.actions.githubusercontent.com"
+    releaseBaseURL: "https://github.com/bvboe/b2s-go/releases/download"

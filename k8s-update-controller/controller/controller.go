@@ -113,12 +113,15 @@ func (c *Controller) CheckAndUpdate(ctx context.Context) (*UpdateResult, error) 
 	// 6. Verify signature (if enabled)
 	if c.config.Verification.Enabled {
 		log.Info("step 5: verifying chart signature")
-		if err := c.registryClient.VerifySignature(ctx, chartPath,
+		if err := c.registryClient.VerifySignature(ctx, chartPath, latestVersion,
+			c.config.Verification.ReleaseBaseURL,
 			c.config.Verification.CosignIdentityRegexp,
 			c.config.Verification.CosignOIDCIssuer); err != nil {
 			return nil, fmt.Errorf("signature verification failed: %w", err)
 		}
 		log.Info("signature verified")
+	} else {
+		log.Warn("signature verification disabled; enable verification.enabled for supply-chain security")
 	}
 
 	// 7. Perform Helm upgrade

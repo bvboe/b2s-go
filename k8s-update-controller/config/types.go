@@ -59,4 +59,8 @@ type VerificationConfig struct {
 	Enabled              bool   `yaml:"enabled"`
 	CosignIdentityRegexp string `yaml:"cosignIdentityRegexp"`
 	CosignOIDCIssuer     string `yaml:"cosignOIDCIssuer"`
+	// ReleaseBaseURL is the base URL for GitHub release assets, used to fetch
+	// the .sigstore bundle alongside each released Helm chart.
+	// e.g. "https://github.com/bvboe/b2s-go/releases/download"
+	ReleaseBaseURL string `yaml:"releaseBaseURL"`
 }
