@@ -147,6 +147,18 @@ func New(dbPath string) (*DB, error) {
 
 	db := &DB{conn: conn}
 
+	// Checkpoint WAL on startup to merge any writes from before an unclean shutdown
+	// (e.g. OOM kill). Without this the WAL can grow to the same size as the main DB
+	// and every query must replay the entire WAL, causing severe slowdowns.
+	// TRUNCATE resets the WAL to zero bytes after checkpointing.
+	// Safe at startup: the previous pod is dead so no other writer is active.
+	var walBusy, walLog, walCheckpointed int
+	if err := conn.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&walBusy, &walLog, &walCheckpointed); err != nil {
+		log.Warn("startup WAL checkpoint failed", slog.Any("error", err))
+	} else if walLog > 0 {
+		log.Info("startup WAL checkpoint complete", "wal_frames", walLog, "checkpointed", walCheckpointed, "busy", walBusy == 1)
+	}
+
 	// Run migrations to ensure schema is up to date
 	if err := db.ensureSchemaVersion(); err != nil {
 		_ = conn.Close()
