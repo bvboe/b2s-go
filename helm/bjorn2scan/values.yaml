@@ -60,15 +60,18 @@ scanServer:
       cpu: 200m
       memory: 1Gi  # Baseline for vulnerability scanning workload
 
-  # Liveness probe - checks if the process is alive
-  # HTTP server starts within ~2s; Grype DB initializes in background and does not block /health
+  # Liveness probe - checks if the process is alive and the database is not stuck.
+  # /health runs PRAGMA wal_checkpoint(PASSIVE) with a 15s internal timeout to accommodate
+  # slow NFS mounts. Restart is triggered only after 2.5 minutes of consecutive failures,
+  # filtering out transient NFS blips while still catching genuinely hung states.
   livenessProbe:
     httpGet:
       path: /health
       port: 8080
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    failureThreshold: 3
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    failureThreshold: 5
+    timeoutSeconds: 20
 
   # Readiness probe - /ready returns 200 as soon as the HTTP server is up (~2s)
   # Grype DB initialization happens in background; DB status is available via /api/db/status

@@ -605,7 +605,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	handlers.RegisterHandlers(mux, infoProvider)
+	handlers.RegisterHandlers(mux, infoProvider, nil)
 	handlers.RegisterDatabaseReadinessHandlers(mux, dbReadinessState)
 	handlers.RegisterDatabaseHandlers(mux, db, nil) // Use all default handlers
 

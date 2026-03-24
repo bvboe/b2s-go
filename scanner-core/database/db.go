@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
@@ -229,32 +231,43 @@ func Close(db *DB) error {
 	return db.conn.Close()
 }
 
-// HealthCheck performs a database integrity check
-// Returns nil if database is healthy, error if corrupted
+// walUnmergedFramesLimit is the number of unmerged WAL frames above which the
+// database is considered unhealthy. Each frame is 4096 bytes (default page size),
+// so 500,000 frames ≈ 2GB of unmerged WAL — clearly stuck, not just slow.
+const walUnmergedFramesLimit = 500_000
+
+// HealthCheck checks whether the database is responsive and not stuck.
+// It runs PRAGMA wal_checkpoint(PASSIVE) with a generous timeout to accommodate
+// slow NFS mounts. Returns an error if the DB is unresponsive or the WAL has
+// grown to a size that indicates checkpointing is completely broken.
 func HealthCheck(db *DB) error {
 	if db == nil || db.conn == nil {
 		return fmt.Errorf("database connection is nil")
 	}
 
-	// Quick check: can we query the database?
-	var count int
-	err := db.conn.QueryRow("SELECT COUNT(*) FROM sqlite_master").Scan(&count)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// PASSIVE checkpoint: non-blocking, flushes what it can without waiting for
+	// readers. Returns (busy, log, checkpointed):
+	//   busy        = 1 if some frames could not be checkpointed due to active readers
+	//   log         = total WAL frames written since last TRUNCATE
+	//   checkpointed = frames successfully written back to the main DB
+	var busy, walLog, checkpointed int
+	err := db.conn.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &walLog, &checkpointed)
 	if err != nil {
-		return fmt.Errorf("database query failed: %w", err)
+		return fmt.Errorf("database unresponsive: %w", err)
 	}
 
-	// Deep check: integrity check (expensive, use sparingly)
-	// Uncomment if you want to run on startup or periodically
-	/*
-	var result string
-	err = db.conn.QueryRow("PRAGMA integrity_check").Scan(&result)
-	if err != nil {
-		return fmt.Errorf("integrity check failed: %w", err)
+	unmerged := walLog - checkpointed
+	if unmerged > walUnmergedFramesLimit {
+		return fmt.Errorf("WAL too large: %d unmerged frames (~%dMB) — checkpointing may be broken",
+			unmerged, unmerged*4096/1024/1024)
 	}
-	if result != "ok" {
-		return fmt.Errorf("database integrity check failed: %s", result)
+
+	if walLog > 0 {
+		log.Debug("WAL checkpoint health check", "wal_frames", walLog, "checkpointed", checkpointed, "unmerged", unmerged, "busy", busy == 1)
 	}
-	*/
 
 	return nil
 }

@@ -523,7 +523,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Register standard handlers
-	corehandlers.RegisterHandlers(mux, infoProvider)
+	corehandlers.RegisterHandlers(mux, infoProvider, db)
 
 	// Register database readiness handlers (/ready, /api/db/status, /api/debug/db/reinit)
 	corehandlers.RegisterDatabaseReadinessHandlers(mux, dbReadinessState)

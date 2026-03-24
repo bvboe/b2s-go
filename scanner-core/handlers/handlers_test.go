@@ -93,7 +93,7 @@ func TestRegisterHandlers(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterHandlers(mux, provider)
+	RegisterHandlers(mux, provider, nil)
 
 	// Test health endpoint
 	reqHealth := httptest.NewRequest(http.MethodGet, "/health", nil)

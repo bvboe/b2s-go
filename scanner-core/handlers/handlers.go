@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/logging"
 )
 
@@ -30,6 +31,23 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HealthHandlerWithDB returns a health check handler that also verifies the
+// database is responsive and not stuck (e.g. unbounded WAL growth from OOM kills).
+// Returns 503 if the database health check fails, causing Kubernetes to restart the pod.
+func HealthHandlerWithDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := database.HealthCheck(db); err != nil {
+			log.Error("health check failed", "error", err)
+			http.Error(w, "Service Unavailable: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if _, err := fmt.Fprintln(w, "OK"); err != nil {
+			log.Error("error writing health response", "error", err)
+		}
+	}
+}
+
 // InfoHandler creates an HTTP handler for the /info endpoint
 // It accepts an InfoProvider to get component-specific information
 func InfoHandler(provider InfoProvider) http.HandlerFunc {
@@ -44,9 +62,14 @@ func InfoHandler(provider InfoProvider) http.HandlerFunc {
 	}
 }
 
-// RegisterHandlers registers the standard scanner endpoints (/health, /info, and /api/config) on the provided mux
-func RegisterHandlers(mux *http.ServeMux, provider AppInfoProvider) {
-	mux.HandleFunc("/health", HealthHandler)
+// RegisterHandlers registers the standard scanner endpoints (/health, /info, and /api/config) on the provided mux.
+// If db is non-nil, /health performs a database liveness check and returns 503 if the DB is stuck.
+func RegisterHandlers(mux *http.ServeMux, provider AppInfoProvider, db *database.DB) {
+	if db != nil {
+		mux.HandleFunc("/health", HealthHandlerWithDB(db))
+	} else {
+		mux.HandleFunc("/health", HealthHandler)
+	}
 	mux.HandleFunc("/info", InfoHandler(provider))
 	mux.HandleFunc("/api/config", ConfigHandler(provider))
 }
