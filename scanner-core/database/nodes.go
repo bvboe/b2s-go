@@ -1247,9 +1247,11 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 			container_runtime, kubelet_version, status, status_error,
 			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at
 		FROM nodes
-		WHERE status = ?
-		AND (grype_db_built IS NULL OR grype_db_built < ?)
-	`, StatusCompleted.String(), currentGrypeDBBuilt.Format(time.RFC3339))
+		WHERE (
+			(status = ? AND (grype_db_built IS NULL OR grype_db_built < ?))
+			OR (status = 'pending' AND grype_db_built IS NOT NULL AND grype_db_built < ?)
+		)
+	`, StatusCompleted.String(), currentGrypeDBBuilt.Format(time.RFC3339), currentGrypeDBBuilt.Format(time.RFC3339))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query nodes needing rescan: %w", err)
 	}
