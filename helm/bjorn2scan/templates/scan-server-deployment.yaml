@@ -126,6 +126,10 @@ spec:
         - name: grype-cache
           mountPath: {{ .Values.scanServer.grypeStorage.mountPath }}
         {{- end }}
+        {{- if .Values.scanServer.startupProbe }}
+        startupProbe:
+          {{- toYaml .Values.scanServer.startupProbe | nindent 10 }}
+        {{- end }}
         livenessProbe:
           {{- toYaml .Values.scanServer.livenessProbe | nindent 10 }}
         readinessProbe:

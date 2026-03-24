@@ -60,15 +60,25 @@ scanServer:
       cpu: 200m
       memory: 1Gi  # Baseline for vulnerability scanning workload
 
-  # Liveness probe - checks if the process is alive and the database is not stuck.
-  # /health runs PRAGMA wal_checkpoint(PASSIVE) with a 15s internal timeout to accommodate
-  # slow NFS mounts. Restart is triggered only after 2.5 minutes of consecutive failures,
-  # filtering out transient NFS blips while still catching genuinely hung states.
+  # Startup probe - waits for DB initialization including WAL checkpoint.
+  # On slow NFS with a large WAL (e.g. post-OOM-kill recovery), the startup WAL
+  # checkpoint can take 5-10 minutes. This probe allows up to 10 minutes before
+  # giving up, after which the livenessProbe takes over.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    failureThreshold: 60    # 60 × 10s = 10 minutes max startup time
+    periodSeconds: 10
+    timeoutSeconds: 20
+
+  # Liveness probe - activated only after startupProbe succeeds.
+  # Checks if the database is not stuck (PRAGMA wal_checkpoint(PASSIVE) with 15s timeout).
+  # Restart triggered after 2.5 minutes of consecutive failures.
   livenessProbe:
     httpGet:
       path: /health
       port: 8080
-    initialDelaySeconds: 30
     periodSeconds: 30
     failureThreshold: 5
     timeoutSeconds: 20
