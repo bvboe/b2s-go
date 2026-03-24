@@ -232,14 +232,14 @@ func Close(db *DB) error {
 }
 
 // walUnmergedFramesLimit is the number of unmerged WAL frames above which the
-// database is considered unhealthy. Each frame is 4096 bytes (default page size),
+// WAL monitor will emit a warning. Each frame is 4096 bytes (default page size),
 // so 500,000 frames ≈ 2GB of unmerged WAL — clearly stuck, not just slow.
 const walUnmergedFramesLimit = 500_000
 
-// HealthCheck checks whether the database is responsive and not stuck.
-// It runs PRAGMA wal_checkpoint(PASSIVE) with a generous timeout to accommodate
-// slow NFS mounts. Returns an error if the DB is unresponsive or the WAL has
-// grown to a size that indicates checkpointing is completely broken.
+// HealthCheck checks whether the database connection is responsive.
+// It uses SELECT 1 to avoid write I/O (PRAGMA wal_checkpoint) competing with
+// active scan jobs on slow NFS, which caused false-positive liveness probe failures.
+// WAL accumulation is monitored separately by StartWALMonitor.
 func HealthCheck(db *DB) error {
 	if db == nil || db.conn == nil {
 		return fmt.Errorf("database connection is nil")
@@ -248,28 +248,48 @@ func HealthCheck(db *DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// PASSIVE checkpoint: non-blocking, flushes what it can without waiting for
-	// readers. Returns (busy, log, checkpointed):
-	//   busy        = 1 if some frames could not be checkpointed due to active readers
-	//   log         = total WAL frames written since last TRUNCATE
-	//   checkpointed = frames successfully written back to the main DB
-	var busy, walLog, checkpointed int
-	err := db.conn.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &walLog, &checkpointed)
-	if err != nil {
+	var v int
+	if err := db.conn.QueryRowContext(ctx, "SELECT 1").Scan(&v); err != nil {
 		return fmt.Errorf("database unresponsive: %w", err)
 	}
-
-	unmerged := walLog - checkpointed
-	if unmerged > walUnmergedFramesLimit {
-		return fmt.Errorf("WAL too large: %d unmerged frames (~%dMB) — checkpointing may be broken",
-			unmerged, unmerged*4096/1024/1024)
-	}
-
-	if walLog > 0 {
-		log.Debug("WAL checkpoint health check", "wal_frames", walLog, "checkpointed", checkpointed, "unmerged", unmerged, "busy", busy == 1)
-	}
-
 	return nil
+}
+
+// StartWALMonitor runs a background goroutine that periodically checks WAL size
+// and logs a warning if unmerged frames exceed walUnmergedFramesLimit (~2GB).
+// This is separate from HealthCheck so slow NFS I/O does not cause false-positive
+// liveness probe failures. The goroutine exits when ctx is cancelled.
+func StartWALMonitor(ctx context.Context, db *DB) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if db == nil || db.conn == nil {
+					return
+				}
+				checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				var busy, walLog, checkpointed int
+				err := db.conn.QueryRowContext(checkCtx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &walLog, &checkpointed)
+				cancel()
+				if err != nil {
+					log.Warn("WAL monitor: checkpoint query failed", slog.Any("error", err))
+					continue
+				}
+				unmerged := walLog - checkpointed
+				if unmerged > walUnmergedFramesLimit {
+					log.Warn("WAL monitor: WAL too large, checkpointing may be broken",
+						"wal_frames", walLog, "unmerged", unmerged,
+						"unmerged_mb", unmerged*4096/1024/1024)
+				} else if walLog > 0 {
+					log.Debug("WAL monitor: checkpoint ok", "wal_frames", walLog, "checkpointed", checkpointed, "unmerged", unmerged)
+				}
+			}
+		}
+	}()
 }
 
 // RecoverFromCorruption attempts to recover from database corruption

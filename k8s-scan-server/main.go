@@ -520,6 +520,10 @@ func main() {
 		infoProvider.StartPeriodicRefresh(ctx, 5*time.Minute)
 	}
 
+	// Start WAL monitor: logs a warning if unmerged WAL frames exceed ~2GB.
+	// Runs in background every 5 minutes so slow NFS I/O does not affect /health.
+	database.StartWALMonitor(ctx, db)
+
 	mux := http.NewServeMux()
 
 	// Register standard handlers
