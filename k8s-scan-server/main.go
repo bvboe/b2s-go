@@ -327,6 +327,13 @@ func main() {
 	}
 	defer func() { _ = database.Close(db) }()
 
+	// Reset any nodes/images left in transient states from a previous crash or OOM kill.
+	// Must run before watchers and the scan queue are started.
+	if err := db.ResetInterruptedScans(); err != nil {
+		logging.For(logging.ComponentK8s).Error("failed to reset interrupted scans", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize deployment UUID
 	dbDir := filepath.Dir(dbPath)
 	deploymentUUID, err := deployment.NewUUID(dbDir)

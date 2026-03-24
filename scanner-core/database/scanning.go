@@ -222,6 +222,7 @@ func (db *DB) UpdateStatus(digest string, status Status, errorMsg string) error 
 	`, status.String(), errorMsg, sbomScannedAt, vulnsScannedAt, digest)
 
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
@@ -269,6 +270,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 	db.writeMu.Unlock()
 
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to store SBOM: %w", err)
 	}
 
@@ -484,6 +486,7 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 	db.writeMu.Unlock()
 
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to store vulnerabilities: %w", err)
 	}
 

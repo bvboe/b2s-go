@@ -204,6 +204,7 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -213,6 +214,7 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 		VALUES (?, ?, ?, ?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer func() {
@@ -227,6 +229,7 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 		VALUES (?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare details statement: %w", err)
 	}
 	defer func() {
@@ -288,11 +291,13 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 			WHERE id = ?
 		`, arch, imageID)
 		if err != nil {
+			exitOnCorruption(err)
 			log.Warn("failed to update images with architecture info", "error", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -337,6 +342,7 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -349,6 +355,7 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer func() {
@@ -363,6 +370,7 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 		VALUES (?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare details statement: %w", err)
 	}
 	defer func() {
@@ -474,11 +482,13 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 			WHERE id = ?
 		`, osName, osVersion, imageID)
 		if err != nil {
+			exitOnCorruption(err)
 			log.Warn("failed to update images with distro info", "error", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

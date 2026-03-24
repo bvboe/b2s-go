@@ -136,6 +136,11 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 
 	log.Info("node informer cache synced and ready")
 
+	// Run catch-up now that all nodes are in the manager. This handles nodes that
+	// arrived via AddNode after SetScanQueue ran its initial catch-up (timing race),
+	// as well as nodes reset to pending by ResetInterruptedScans at startup.
+	manager.CatchUpScans()
+
 	// Block until context is cancelled
 	<-ctx.Done()
 	log.Info("node watcher shutting down")

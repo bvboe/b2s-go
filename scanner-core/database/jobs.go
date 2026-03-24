@@ -26,6 +26,7 @@ func (db *DB) RecordJobStart(jobName string) (int64, error) {
 		VALUES (?, ?, 'running')
 	`, jobName, time.Now().UTC())
 	if err != nil {
+		exitOnCorruption(err)
 		return 0, fmt.Errorf("failed to record job start: %w", err)
 	}
 
@@ -51,6 +52,7 @@ func (db *DB) RecordJobSuccess(executionID int64) error {
 		WHERE id = ?
 	`, completedAt, completedAt, executionID)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to record job success: %w", err)
 	}
 
@@ -72,6 +74,7 @@ func (db *DB) RecordJobFailure(executionID int64, errorMsg string) error {
 		WHERE id = ?
 	`, completedAt, errorMsg, completedAt, executionID)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to record job failure: %w", err)
 	}
 
@@ -180,6 +183,7 @@ func (db *DB) CleanupOldJobExecutions(daysToKeep int) (int64, error) {
 		WHERE started_at < datetime('now', '-' || ? || ' days')
 	`, daysToKeep)
 	if err != nil {
+		exitOnCorruption(err)
 		return 0, fmt.Errorf("failed to cleanup old job executions: %w", err)
 	}
 

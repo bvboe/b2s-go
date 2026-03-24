@@ -37,6 +37,16 @@ func isCorruptionError(err error) bool {
 		strings.Contains(errMsg, "database disk image is malformed")
 }
 
+// exitOnCorruption exits the process when a corruption error is detected during a
+// write operation. The pod will be restarted by Kubernetes, and the startup integrity
+// check in New() will delete the corrupt database and reinitialize from scratch.
+func exitOnCorruption(err error) {
+	if isCorruptionError(err) {
+		log.Error("fatal: database corruption detected during write, exiting for pod restart", slog.Any("error", err))
+		os.Exit(1)
+	}
+}
+
 // deleteDatabase deletes the database file and associated files (WAL, SHM)
 func deleteDatabase(dbPath string) error {
 	log.Info("deleting database files", "path", dbPath)
@@ -93,6 +103,20 @@ func New(dbPath string) (*DB, error) {
 		}
 	}
 
+	// Run a quick integrity check to catch corruption that doesn't fail Ping().
+	// A corrupt SQLite file can still accept connections but fail on reads/writes.
+	// quick_check is much faster than integrity_check and catches the common cases.
+	var quickCheckResult string
+	if err := conn.QueryRow("PRAGMA quick_check").Scan(&quickCheckResult); err != nil || quickCheckResult != "ok" {
+		_ = conn.Close()
+		log.Error("database failed integrity check on startup, deleting and starting fresh",
+			"result", quickCheckResult, slog.Any("error", err))
+		if err := deleteDatabase(dbPath); err != nil {
+			return nil, fmt.Errorf("failed to delete corrupted database: %w", err)
+		}
+		return New(dbPath)
+	}
+
 	// Configure connection pool for SQLite.
 	// 2 connections: one for long-running streaming reads, one for concurrent writes
 	// (e.g. staleness upserts during /metrics streaming). WAL mode supports this.
@@ -142,6 +166,40 @@ func New(dbPath string) (*DB, error) {
 
 	log.Info("database initialized", "path", dbPath)
 	return db, nil
+}
+
+// ResetInterruptedScans resets any nodes or images left in transient scan states
+// back to pending. This happens when the server crashes or is OOM-killed mid-scan.
+// Should be called once at startup, before the scan queue and watchers are started.
+func (db *DB) ResetInterruptedScans() error {
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+
+	res, err := db.conn.Exec(`
+		UPDATE nodes SET status = 'pending', status_error = ''
+		WHERE status IN ('generating_sbom', 'scanning_vulnerabilities')
+	`)
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to reset interrupted node scans: %w", err)
+	}
+	nodeRows, _ := res.RowsAffected()
+
+	res, err = db.conn.Exec(`
+		UPDATE images SET status = 'pending'
+		WHERE status IN ('generating_sbom', 'scanning_vulnerabilities')
+	`)
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to reset interrupted image scans: %w", err)
+	}
+	imageRows, _ := res.RowsAffected()
+
+	if nodeRows > 0 || imageRows > 0 {
+		log.Warn("reset interrupted scans to pending on startup",
+			"nodes", nodeRows, "images", imageRows)
+	}
+	return nil
 }
 
 // Close closes the database connection gracefully

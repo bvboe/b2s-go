@@ -55,7 +55,7 @@ scanServer:
   resources:
     limits:
       cpu: 2000m
-      memory: 3Gi  # Node scans require ~1.5-2GB for Grype vulnerability scanning
+      memory: 4Gi  # Node scans require ~2-3GB for Grype vulnerability scanning on large nodes
     requests:
       cpu: 200m
       memory: 1Gi  # Baseline for vulnerability scanning workload

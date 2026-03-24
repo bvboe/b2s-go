@@ -55,6 +55,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 			n.ContainerRuntime, n.KubeletVersion, n.Name)
 		db.writeMu.Unlock()
 		if err != nil {
+			exitOnCorruption(err)
 			return false, fmt.Errorf("failed to update node: %w", err)
 		}
 		return false, nil
@@ -73,6 +74,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 	db.writeMu.Unlock()
 
 	if err != nil {
+		exitOnCorruption(err)
 		return false, fmt.Errorf("failed to insert node: %w", err)
 	}
 
@@ -98,6 +100,7 @@ func (db *DB) UpdateNode(n nodes.Node) error {
 		n.ContainerRuntime, n.KubeletVersion, n.Name)
 	db.writeMu.Unlock()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node: %w", err)
 	}
 
@@ -117,6 +120,7 @@ func (db *DB) RemoveNode(name string) error {
 	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -134,22 +138,26 @@ func (db *DB) RemoveNode(name string) error {
 	// Delete node vulnerabilities
 	_, err = tx.Exec(`DELETE FROM node_vulnerabilities WHERE node_id = ?`, nodeID)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete node vulnerabilities: %w", err)
 	}
 
 	// Delete node packages
 	_, err = tx.Exec(`DELETE FROM node_packages WHERE node_id = ?`, nodeID)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete node packages: %w", err)
 	}
 
 	// Delete node
 	_, err = tx.Exec(`DELETE FROM nodes WHERE id = ?`, nodeID)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete node: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -459,6 +467,7 @@ func (db *DB) UpdateNodeStatus(name string, status Status, errorMsg string) erro
 		WHERE name = ?
 	`, status.String(), errorMsg, name)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 	return nil
@@ -535,17 +544,20 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	// Store raw SBOM JSON for API retrieval
 	if _, err = tx.Exec(`UPDATE nodes SET sbom = ? WHERE id = ?`, string(sbomJSON), nodeID); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to store raw SBOM: %w", err)
 	}
 
 	// Delete existing packages for this node
 	if _, err = tx.Exec(`DELETE FROM node_packages WHERE node_id = ?`, nodeID); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete existing packages: %w", err)
 	}
 
@@ -559,6 +571,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 			number_of_instances = excluded.number_of_instances
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare package statement: %w", err)
 	}
 	defer func() { _ = pkgStmt.Close() }()
@@ -568,6 +581,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		VALUES (?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare details statement: %w", err)
 	}
 	defer func() { _ = detailsStmt.Close() }()
@@ -577,6 +591,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		// Insert package (without details)
 		result, err := pkgStmt.Exec(nodeID, key.Name, key.Version, key.Type, data.Language, data.PURL, len(data.Instances))
 		if err != nil {
+			exitOnCorruption(err)
 			return fmt.Errorf("failed to insert package: %w", err)
 		}
 
@@ -601,6 +616,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 
 		// Insert details into separate table
 		if _, err = detailsStmt.Exec(packageID, string(detailsJSON)); err != nil {
+			exitOnCorruption(err)
 			return fmt.Errorf("failed to insert package details: %w", err)
 		}
 	}
@@ -613,10 +629,12 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, StatusScanningVulnerabilities.String(), nodeID); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -738,17 +756,20 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	// Store raw vulnerability JSON for API retrieval
 	if _, err = tx.Exec(`UPDATE nodes SET vulnerabilities = ? WHERE id = ?`, string(vulnJSON), nodeID); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to store raw vulnerabilities: %w", err)
 	}
 
 	// Delete existing vulnerabilities
 	if _, err = tx.Exec(`DELETE FROM node_vulnerabilities WHERE node_id = ?`, nodeID); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete existing vulnerabilities: %w", err)
 	}
 
@@ -757,6 +778,7 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare vulnerability statement: %w", err)
 	}
 	defer func() { _ = vulnStmt.Close() }()
@@ -766,6 +788,7 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		VALUES (?, ?)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to prepare details statement: %w", err)
 	}
 	defer func() { _ = detailsStmt.Close() }()
@@ -806,10 +829,12 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, StatusCompleted.String(), grypeDBBuilt.Format(time.RFC3339), nodeID); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

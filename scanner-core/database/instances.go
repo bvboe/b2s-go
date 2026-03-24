@@ -43,6 +43,7 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -72,11 +73,13 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 			`, imageID, c.Image.Reference, c.NodeName, c.ContainerRuntime, existingID)
 
 			if err != nil {
+				exitOnCorruption(err)
 				return false, fmt.Errorf("failed to update container: %w", err)
 			}
 
 			// Commit the transaction
 			if err := tx.Commit(); err != nil {
+				exitOnCorruption(err)
 				return false, fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
@@ -87,6 +90,7 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 
 		// Image hasn't changed, nothing to do
 		if err := tx.Commit(); err != nil {
+			exitOnCorruption(err)
 			return false, fmt.Errorf("failed to commit transaction: %w", err)
 		}
 		return false, nil
@@ -104,11 +108,13 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 		c.Image.Reference, imageID, c.NodeName, c.ContainerRuntime)
 
 	if err != nil {
+		exitOnCorruption(err)
 		return false, fmt.Errorf("failed to insert container: %w", err)
 	}
 
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -128,6 +134,7 @@ func (db *DB) RemoveContainer(id containers.ContainerID) error {
 	`, id.Namespace, id.Pod, id.Name)
 
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
 
@@ -167,6 +174,7 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 	defer db.writeMu.Unlock()
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -181,6 +189,7 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 	// Delete all existing containers
 	_, err = tx.Exec("DELETE FROM containers")
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to delete containers: %w", err)
 	}
 
@@ -211,12 +220,14 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 			c.Image.Reference, imageID, c.NodeName, c.ContainerRuntime)
 
 		if err != nil {
+			exitOnCorruption(err)
 			return nil, fmt.Errorf("failed to insert container: %w", err)
 		}
 	}
 
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -280,6 +291,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	// Start a transaction
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -382,6 +394,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to delete vulnerability_details: %w", err)
 	}
 
@@ -399,6 +412,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to delete vulnerabilities: %w", err)
 	}
 
@@ -442,6 +456,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to delete package_details: %w", err)
 	}
 
@@ -459,6 +474,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to delete packages: %w", err)
 	}
 
@@ -472,11 +488,13 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`)
 	if err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to delete orphaned images: %w", err)
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

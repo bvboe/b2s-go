@@ -336,6 +336,75 @@ func (m *Manager) GetContainer(namespace, pod, name string) (Container, bool) {
 	return c, exists
 }
 
+// CatchUpScans enqueues scans for all known images that need processing.
+// Called after the K8s pod informer cache has synced to catch images that
+// arrived via AddContainer after SetScanQueue ran its initial catch-up.
+func (m *Manager) CatchUpScans() {
+	m.mu.Lock()
+	if m.db == nil || m.scanQueue == nil || len(m.containers) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	digestToContainer := make(map[string]Container)
+	for _, c := range m.containers {
+		if c.Image.Digest == "" {
+			continue
+		}
+		if _, exists := digestToContainer[c.Image.Digest]; !exists {
+			digestToContainer[c.Image.Digest] = c
+		}
+	}
+	m.mu.Unlock()
+
+	digests := make([]string, 0, len(digestToContainer))
+	for digest := range digestToContainer {
+		digests = append(digests, digest)
+	}
+	if len(digests) == 0 {
+		return
+	}
+
+	scanStatuses, err := m.db.GetImageScanStatusBulk(digests)
+	if err != nil {
+		log.Error("catch-up: failed to fetch image scan statuses", slog.Any("error", err))
+		return
+	}
+
+	scannedDigests := make([]string, 0)
+	for digest, status := range scanStatuses {
+		if status == "scanned" {
+			scannedDigests = append(scannedDigests, digest)
+		}
+	}
+	completenessStatus := make(map[string]bool)
+	if len(scannedDigests) > 0 {
+		completenessStatus, err = m.db.IsScanDataCompleteBulk(scannedDigests)
+		if err != nil {
+			log.Error("catch-up: failed to fetch image completeness", slog.Any("error", err))
+		}
+	}
+
+	enqueuedCount := 0
+	for digest, status := range scanStatuses {
+		c := digestToContainer[digest]
+		switch status {
+		case "pending", "scanning", "failed":
+			m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
+			enqueuedCount++
+		case "scanned":
+			if !completenessStatus[digest] {
+				m.scanQueue.EnqueueForceScan(c.Image, c.NodeName, c.ContainerRuntime)
+				enqueuedCount++
+			}
+		}
+	}
+
+	if enqueuedCount > 0 {
+		log.Info("catch-up after informer sync: enqueued scans",
+			"enqueued", enqueuedCount, "total", len(digests))
+	}
+}
+
 // checkAndEnqueueScan checks if an image needs scanning and enqueues it with appropriate flags
 // This method handles retrying failed or incomplete scans
 func (m *Manager) checkAndEnqueueScan(c Container) {

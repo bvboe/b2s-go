@@ -213,6 +213,11 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 
 	log.Info("pod informer cache synced and ready")
 
+	// Run catch-up now that all containers are in the manager. Handles images whose
+	// AddContainer events raced with SetScanQueue, and images reset to pending by
+	// ResetInterruptedScans at startup.
+	manager.CatchUpScans()
+
 	// Block until context is cancelled
 	<-ctx.Done()
 	log.Info("pod watcher shutting down")

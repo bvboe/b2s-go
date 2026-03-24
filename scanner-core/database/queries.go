@@ -611,6 +611,7 @@ func (db *DB) SaveMetricStaleness(key string, data string) error {
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 	`, key, data)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to save metric staleness: %w", err)
 	}
 	return nil
@@ -784,6 +785,7 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 
 	tx, err := db.conn.Begin()
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -809,10 +811,15 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 		query := "INSERT OR REPLACE INTO metric_staleness (metric_key, family_name, labels_json, last_seen_unix) VALUES " +
 			strings.Join(placeholders, ",")
 		if _, err := tx.Exec(query, args...); err != nil {
+			exitOnCorruption(err)
 			return fmt.Errorf("failed to upsert staleness batch: %w", err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
+		return err
+	}
+	return nil
 }
 
 // DeleteExpiredStaleness removes staleness rows older than expireBefore (unix timestamp).
@@ -822,6 +829,7 @@ func (db *DB) DeleteExpiredStaleness(expireBefore int64) error {
 	defer db.writeMu.Unlock()
 	_, err := db.conn.Exec(`DELETE FROM metric_staleness WHERE last_seen_unix < ?`, expireBefore)
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete expired staleness: %w", err)
 	}
 	return nil
@@ -860,6 +868,7 @@ func (db *DB) SaveGrypeDBTimestamp(t time.Time) error {
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 	`, grypeDBTimestampKey, t.Format(time.RFC3339))
 	if err != nil {
+		exitOnCorruption(err)
 		return fmt.Errorf("failed to save grype DB timestamp: %w", err)
 	}
 	return nil

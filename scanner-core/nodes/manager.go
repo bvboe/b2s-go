@@ -145,6 +145,62 @@ func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 	m.mu.Unlock()
 }
 
+// CatchUpScans enqueues scans for all known nodes that need processing.
+// Called after the K8s node informer cache has synced to catch nodes that
+// arrived via AddNode after SetScanQueue ran its initial catch-up.
+func (m *Manager) CatchUpScans() {
+	m.mu.Lock()
+	if m.db == nil || m.scanQueue == nil || len(m.nodes) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	nodeNames := make([]string, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		nodeNames = append(nodeNames, n.Name)
+	}
+	m.mu.Unlock()
+
+	scanStatuses, err := m.db.GetNodeScanStatusBulk(nodeNames)
+	if err != nil {
+		log.Error("catch-up: failed to fetch node scan statuses", slog.Any("error", err))
+		return
+	}
+
+	scannedNodes := make([]string, 0)
+	for name, status := range scanStatuses {
+		if status == "completed" {
+			scannedNodes = append(scannedNodes, name)
+		}
+	}
+	completenessStatus := make(map[string]bool)
+	if len(scannedNodes) > 0 {
+		completenessStatus, err = m.db.IsNodeScanCompleteBulk(scannedNodes)
+		if err != nil {
+			log.Error("catch-up: failed to fetch node completeness", slog.Any("error", err))
+		}
+	}
+
+	enqueuedCount := 0
+	for name, status := range scanStatuses {
+		switch status {
+		case "pending", "generating_sbom", "scanning_vulnerabilities",
+			"sbom_failed", "sbom_unavailable", "vuln_scan_failed":
+			m.scanQueue.EnqueueHostForceScan(name)
+			enqueuedCount++
+		case "completed":
+			if !completenessStatus[name] {
+				m.scanQueue.EnqueueHostForceScan(name)
+				enqueuedCount++
+			}
+		}
+	}
+
+	if enqueuedCount > 0 {
+		log.Info("catch-up after informer sync: enqueued scans",
+			"enqueued", enqueuedCount, "total", len(nodeNames))
+	}
+}
+
 // AddNode adds or updates a node in the manager
 func (m *Manager) AddNode(n Node) {
 	m.mu.Lock()

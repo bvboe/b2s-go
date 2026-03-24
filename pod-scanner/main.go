@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/bvboe/b2s-go/pod-scanner/handlers"
 	"github.com/bvboe/b2s-go/pod-scanner/runtime"
@@ -143,10 +147,32 @@ func main() {
 
 	http.HandleFunc("/host-sbom", handlers.HostSBOMHandler(hostSBOMCfg))
 
+	server := &http.Server{
+		Addr: ":" + port,
+	}
+
 	slog.Default().With("component", "pod-scanner").Info("pod-scanner starting", "version", version, "port", port, "node", os.Getenv("NODE_NAME"))
 	slog.Default().With("component", "pod-scanner").Info("endpoints registered", "endpoints", "/health, /info, /sbom/{digest}, /host-sbom")
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		slog.Default().With("component", "pod-scanner").Error("server error", "error", err)
-		os.Exit(1)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Default().With("component", "pod-scanner").Error("server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-sigChan
+	slog.Default().With("component", "pod-scanner").Info("shutdown signal received, shutting down gracefully")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Default().With("component", "pod-scanner").Error("error during shutdown", "error", err)
 	}
+
+	slog.Default().With("component", "pod-scanner").Info("pod-scanner stopped")
 }
