@@ -29,11 +29,6 @@
   - [ ] **Related**: Node SBOM memory investigation (Test 2.1 results)
 
 ### Performance & Stability
-- [ ] **[REFACTOR] Unify metrics staleness for container and node metrics**
-  - [ ] **Remaining gap**: Node metrics still have no staleness tracking (disappear immediately on removal); `metrics_staleness_window` only applies to containers
-  - [ ] **Note**: OTEL + `/metrics` collection already unified via `collectMetrics` (2026-03-22)
-  - [ ] **Goal**: Extend `MetricTracker` to cover node metrics so staleness window applies consistently
-  - [ ] **Files**: `scanner-core/metrics/tracker.go`, `scanner-core/metrics/node_metrics.go`
 - [ ] Improve log output format to show component before msg
   - [ ] Update `scanner-core/logging/logger.go` to customize slog handler field ordering
   - [ ] Update standalone loggers in `pod-scanner/main.go` and `k8s-update-controller/main.go`
@@ -64,7 +59,6 @@
   - [ ] GKE
   - [ ] EKS
   - [ ] AKS
-- [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 
 ## Recently Completed
 - [x] [2026-03-23] Supply-chain security: cosign signature verification and image digest pinning
