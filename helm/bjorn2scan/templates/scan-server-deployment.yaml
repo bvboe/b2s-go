@@ -136,6 +136,10 @@ spec:
         {{- else }}
         emptyDir: {}
         {{- end }}
+      {{- if .Values.scanServer.grypeStorage.separateVolume }}
+      - name: grype-cache
+        emptyDir: {}
+      {{- end }}
       - name: tmp
         emptyDir: {}
       {{- with .Values.scanServer.nodeSelector }}
