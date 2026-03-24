@@ -1,10 +1,7 @@
 # bjorn2scan TODO List
 
 ## Active Tasks
-- [ ] Validate v0.1.114 fixes after deployment:
-  - [ ] Verify node rescan works (check logs for successful "host vulnerability scan" without "SBOM not provided" errors)
-  - [ ] Verify refresh-images job runs on agent (check logs for "[refresh-images] Reconciliation completed" every 6 hours)
-  - [ ] Monitor for any regressions in container discovery or vulnerability scanning
+- [ ] None currently
 
 ## In Progress
 - [ ] None currently
@@ -32,60 +29,11 @@
   - [ ] **Related**: Node SBOM memory investigation (Test 2.1 results)
 
 ### Performance & Stability
-- [ ] **[REFACTOR] Unify metrics collection implementation for containers and nodes**
-  - [ ] **Current state**: Two different implementations with inconsistent behavior
-    - [ ] Container metrics: Use `MetricTracker` for staleness tracking, collect all into memory
-    - [ ] Node metrics: No staleness tracking, stream vulnerability data directly to avoid OOM
-  - [ ] **Problem**: Inconsistent behavior across metric types
-    - [ ] Node metrics disappear immediately when node removed (no staleness window)
-    - [ ] Container metrics buffered in memory (potential OOM with large datasets)
-    - [ ] `metrics_staleness_window` config only applies to container metrics
-  - [ ] **Goal**: Unified implementation for all metric types
-    - [ ] Staleness tracking for both container AND node metrics
-    - [ ] Streaming/batched writing for all metrics to avoid memory spikes
-    - [ ] Consistent configuration (staleness window applies to all)
-  - [ ] **Approach**:
-    - [ ] Extend `MetricTracker` to support streaming mode (process metrics one at a time)
-    - [ ] Update `NodeCollector` to use tracker for staleness detection
-    - [ ] Update `Collector` (container metrics) to stream large datasets instead of buffering
-    - [ ] Ensure both use same code paths through `HandlerWithNodes`
-  - [ ] **Files to modify**:
-    - [ ] `scanner-core/metrics/tracker.go` - Add streaming support
-    - [ ] `scanner-core/metrics/node_metrics.go` - Add tracker integration
-    - [ ] `scanner-core/metrics/metrics.go` - Add streaming for container vulnerabilities
-    - [ ] `scanner-core/metrics/handler.go` - Unify handler logic
-  - [ ] **Benefit**: Consistent metrics behavior, reduced memory usage, proper staleness handling
-- [ ] **[DECISION] Move Grype DB from ephemeral to persistent storage**
-  - [ ] **Current state**: Grype DB (300-500 MB) stored on ephemeral storage
-  - [ ] **Problem**: DB re-downloaded on every pod restart/upgrade
-    - [ ] Wastes bandwidth (300-500 MB download per restart)
-    - [ ] Increases startup time significantly (download + initialization)
-    - [ ] Readiness probe must wait 2 minutes (`initialDelaySeconds: 120`)
-  - [ ] **Solution**: Use PersistentVolumeClaim for Grype DB cache directory
-    - [ ] DB persists across pod restarts
-    - [ ] Only downloads when DB is updated (daily/weekly)
-    - [ ] Faster startup times (seconds vs minutes)
-  - [ ] **Tradeoff**: Requires PVC provisioning (storage class needed)
-  - [ ] **Related**: Slow server startup time investigation
-- [ ] **[INVESTIGATE] Slow server startup time**
-  - [ ] **Potential causes**:
-    - [ ] Grype database download/initialization (300-500 MB on first start) ← **PRIMARY SUSPECT**
-    - [ ] Database migrations (may be slow with large existing databases)
-    - [ ] Container discovery and initial scanning activity
-    - [ ] Kubernetes API enumeration (all pods/namespaces)
-    - [ ] Go module/dependency initialization
-  - [ ] **How to measure**:
-    - [ ] Time from pod creation to `/ready` endpoint healthy
-    - [ ] Check readiness probe timing (currently `initialDelaySeconds: 120`)
-    - [ ] Add startup phase timing in logs (Grype init, migrations, K8s discovery)
-    - [ ] Profile with `go tool pprof` or `go tool trace`
-  - [ ] **Investigation steps**:
-    - [ ] Add startup timing instrumentation for key phases
-    - [ ] Measure Grype DB initialization separately
-    - [ ] Measure database migration time
-    - [ ] Compare cold start (no DB) vs warm start (DB exists)
-  - [ ] **Goal**: Identify bottleneck and optimize if >30 seconds
-  - [ ] **Note**: If Grype DB moved to persistent storage, this may resolve startup time issue
+- [ ] **[REFACTOR] Unify metrics staleness for container and node metrics**
+  - [ ] **Remaining gap**: Node metrics still have no staleness tracking (disappear immediately on removal); `metrics_staleness_window` only applies to containers
+  - [ ] **Note**: OTEL + `/metrics` collection already unified via `collectMetrics` (2026-03-22)
+  - [ ] **Goal**: Extend `MetricTracker` to cover node metrics so staleness window applies consistently
+  - [ ] **Files**: `scanner-core/metrics/tracker.go`, `scanner-core/metrics/node_metrics.go`
 - [ ] Improve log output format to show component before msg
   - [ ] Update `scanner-core/logging/logger.go` to customize slog handler field ordering
   - [ ] Update standalone loggers in `pod-scanner/main.go` and `k8s-update-controller/main.go`
@@ -98,18 +46,12 @@
   - [ ] Auto-detect cluster ID from kube-system namespace UID
   - [ ] Fall back to hostname or configurable ID for non-Kubernetes deployments
   - [ ] Add cluster_id label to relevant metrics
-- [ ] Scanner upgrade stability
-- [ ] Scanner stability in general
-- [ ] Grafana data integrity
 - [ ] Add host_ip tracking to metrics (requires storing Kubernetes node IP in database or querying K8s API)
-- [ ] Pick up node tags!
 - [ ] Clean up agent configuration management:
   - [ ] Make defaults.conf the single source of truth (embed in binary at compile time)
   - [ ] Move defaults from scanner-core to component-specific (agent, k8s-scan-server)
   - [ ] Ensure agent.conf.example matches actual code defaults
   - [ ] Add --show-config flag to display current configuration
-- [ ] Node scanning
-- [ ] Remote workers for increased performance?
 - [ ] Test bjorn2scan-agent install.sh on major Linux distributions:
   - [X] Ubuntu 22.04/24.04 LTS
   - [X] Debian 11/12
@@ -129,6 +71,15 @@
 - [ ] Make checkHealth() retry interval configurable (currently hardcoded to 2 seconds)
 
 ## Recently Completed
+- [x] [2026-03-23] Fast first-ready UX: async startup and Grype DB initialization
+  - **Root cause**: Two blocking operations delayed HTTP server: `SyncInitialPods`/`SyncInitialNodes` API calls before server start (k8s-scan-server), and synchronous Grype init in agent
+  - **Fix**: Removed redundant blocking sync calls — K8s informers already handle initial cache sync internally via `WaitForCacheSync`
+  - **Fix**: Added async Grype initialization to bjorn2scan-agent (was previously missing entirely)
+  - **Fix**: Wired `DatabaseReadinessState` into agent scan queue and rescan job
+  - **Fix**: Reduced readiness probe from `initialDelaySeconds:10/periodSeconds:10` → `2/3` (was adding 10–20s of probe wait after server was already ready)
+  - **Enhancement**: Added grey UI banner that shows while Grype DB is initializing, auto-dismisses when ready
+  - **Enhancement**: Grype DB now defaults to data PVC (`/var/lib/bjorn2scan/grype/`) — persists across restarts, no re-download on upgrade
+  - **Files**: `k8s-scan-server/main.go`, `bjorn2scan-agent/main.go`, `scanner-core/static/shared.js`, `helm/bjorn2scan/values.yaml`, helm templates
 - [x] [2026-03-21] Resolved OOMKilled pod restarts during node vulnerability scanning
   - **Root cause**: Node scans require 1.5-2.0 GB peak memory for Grype vulnerability scanning, exceeding 2Gi pod limit
   - **Solution**: Increased scan-server memory limit from 2Gi → 3Gi in `helm/bjorn2scan/values.yaml`
