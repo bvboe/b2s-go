@@ -122,6 +122,10 @@ spec:
           mountPath: {{ .Values.scanServer.persistence.mountPath }}
         - name: tmp
           mountPath: /tmp
+        {{- if .Values.scanServer.grypeStorage.separateVolume }}
+        - name: grype-cache
+          mountPath: {{ .Values.scanServer.grypeStorage.mountPath }}
+        {{- end }}
         livenessProbe:
           {{- toYaml .Values.scanServer.livenessProbe | nindent 10 }}
         readinessProbe:

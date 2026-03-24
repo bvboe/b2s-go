@@ -16,22 +16,3 @@ spec:
     requests:
       storage: {{ .Values.scanServer.persistence.size }}
 {{- end }}
-{{- if and .Values.scanServer.enabled .Values.scanServer.grypeStorage.separateVolume .Values.scanServer.grypeStorage.pvc.enabled }}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "bjorn2scan.fullname" . }}-grype-cache
-  labels:
-    {{- include "bjorn2scan.labels" . | nindent 4 }}
-    app.kubernetes.io/component: scan-server
-spec:
-  accessModes:
-    - {{ .Values.scanServer.grypeStorage.pvc.accessMode }}
-  {{- if .Values.scanServer.grypeStorage.pvc.storageClassName }}
-  storageClassName: {{ .Values.scanServer.grypeStorage.pvc.storageClassName }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.scanServer.grypeStorage.pvc.size }}
-{{- end }}

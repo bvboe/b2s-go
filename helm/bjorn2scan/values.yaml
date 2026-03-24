@@ -172,7 +172,7 @@ scanServer:
   # class for grypeStorage — Grype's in-place DB updates can fail on NFS ("silly rename").
   grypeStorage:
     separateVolume: false
-    mountPath: /tmp
+    mountPath: /var/cache/grype
 
 # Pod Scanner (DaemonSet)
 # Runs on every node to scan local pods using the container runtime API

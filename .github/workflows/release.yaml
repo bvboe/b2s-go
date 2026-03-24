@@ -144,14 +144,14 @@ jobs:
         # Fetch the multi-arch manifest list digest for each image.
         # These are immutable content-addressable identifiers.
         SCAN_SERVER_DIGEST=$(docker buildx imagetools inspect \
-          ${{ env.REGISTRY }}/${{ github.repository }}/k8s-scan-server:${VERSION} \
-          --format '{{.Manifest.Digest}}')
+          --format '{{.Manifest.Digest}}' \
+          ${{ env.REGISTRY }}/${{ github.repository }}/k8s-scan-server:${VERSION})
         POD_SCANNER_DIGEST=$(docker buildx imagetools inspect \
-          ${{ env.REGISTRY }}/${{ github.repository }}/pod-scanner:${VERSION} \
-          --format '{{.Manifest.Digest}}')
+          --format '{{.Manifest.Digest}}' \
+          ${{ env.REGISTRY }}/${{ github.repository }}/pod-scanner:${VERSION})
         UPDATE_CONTROLLER_DIGEST=$(docker buildx imagetools inspect \
-          ${{ env.REGISTRY }}/${{ github.repository }}/k8s-update-controller:${VERSION} \
-          --format '{{.Manifest.Digest}}')
+          --format '{{.Manifest.Digest}}' \
+          ${{ env.REGISTRY }}/${{ github.repository }}/k8s-update-controller:${VERSION})
 
         echo "Injecting digests into chart values:"
         echo "  k8s-scan-server:        ${SCAN_SERVER_DIGEST}"
