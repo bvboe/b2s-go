@@ -374,6 +374,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start WAL monitor: logs a warning if unmerged WAL frames exceed ~2GB.
+	// Agents are long-running processes that may accumulate WAL over weeks without
+	// a restart (which would otherwise trigger the startup TRUNCATE checkpoint).
+	database.StartWALMonitor(ctx, db)
+
 	// Configure host scanning if enabled
 	if cfg.HostScanningEnabled {
 		logging.For(logging.ComponentNodes).Info("host scanning enabled, configuring host SBOM retriever")
