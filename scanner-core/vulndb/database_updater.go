@@ -292,7 +292,40 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 	close(done)
 
 	if err != nil {
-		return false, fmt.Errorf("failed to update vulnerability database: %w", err)
+		if !dbExisted {
+			return false, fmt.Errorf("failed to update vulnerability database: %w", err)
+		}
+		// Update failed with an existing database (e.g. grype DB schema changed and no
+		// compatible delta is available). Delete the existing DB and retry with a full download.
+		log.Warn("incremental update failed, deleting existing database and retrying with full download",
+			"error", err)
+		schemaDir := filepath.Join(du.dbRootDir, "grype", "6")
+		if removeErr := os.RemoveAll(schemaDir); removeErr != nil {
+			log.Warn("failed to remove schema directory before retry", "error", removeErr)
+		}
+		startTime = time.Now()
+		done2 := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done2:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					log.Debug("still downloading database (retry)",
+						"elapsed", time.Since(startTime).Round(time.Second))
+				}
+			}
+		}()
+		dbStatus, err = du.loader(du.distCfg, du.installCfg, false)
+		close(done2)
+		if err != nil {
+			return false, fmt.Errorf("failed to download vulnerability database after retry: %w", err)
+		}
+		log.Info("full database download succeeded after incremental update failure")
 	}
 
 	log.Debug("loader returned",

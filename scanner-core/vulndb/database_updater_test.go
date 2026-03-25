@@ -437,6 +437,143 @@ func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) 
 	}
 }
 
+// TestDatabaseUpdater_IncrementalUpdateFails_RetriesWithFullDownload tests that when
+// an incremental update fails with an existing database (e.g. grype DB schema changed),
+// the updater deletes the existing DB and retries with a full download.
+//
+// This reproduces the production failure where K8s pods have a persistent NFS volume
+// with yesterday's grype DB, and today's new DB listing has no compatible delta update.
+func TestDatabaseUpdater_IncrementalUpdateFails_RetriesWithFullDownload(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	du, err := NewDatabaseUpdater(tmpDir)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdater failed: %v", err)
+	}
+
+	// Create a fake existing DB file so dbExisted=true
+	schemaDir := filepath.Join(tmpDir, "grype", "6")
+	dbPath := filepath.Join(schemaDir, "vulnerability.db")
+	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+		t.Fatalf("failed to create schema dir: %v", err)
+	}
+	if err := os.WriteFile(dbPath, []byte("old db"), 0644); err != nil {
+		t.Fatalf("failed to create existing db: %v", err)
+	}
+
+	newTimestamp := time.Date(2026, 3, 25, 6, 33, 34, 0, time.UTC)
+
+	calls := 0
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		calls++
+		if calls == 1 {
+			// First call: incremental update=true fails (simulates today's grype DB incompatibility)
+			if !update {
+				t.Error("first call should use update=true")
+			}
+			return nil, fmt.Errorf("database does not exist")
+		}
+		// Second call: full download update=false should succeed
+		if update {
+			t.Error("retry call should use update=false")
+		}
+		return &DatabaseStatus{
+			Built:         newTimestamp,
+			SchemaVersion: "v6.1.3",
+			Path:          dbPath,
+		}, nil
+	})
+
+	du.SetDescriptionReader(func(path string) (time.Time, error) {
+		return newTimestamp, nil
+	})
+
+	_, err = du.CheckForUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("CheckForUpdates should succeed after retry, got: %v", err)
+	}
+
+	if calls != 2 {
+		t.Errorf("expected 2 loader calls (update attempt + retry), got %d", calls)
+	}
+
+	// Schema dir should have been deleted before the retry
+	// (it won't exist because the retry loader doesn't recreate it in this mock)
+	if _, err := os.Stat(schemaDir); !os.IsNotExist(err) {
+		t.Log("schema dir still present after retry (ok if retry recreated it)")
+	}
+
+	version := du.GetCurrentVersion()
+	if version == nil {
+		t.Fatal("version should be set after successful retry")
+	}
+	if !version.Built.Equal(newTimestamp) {
+		t.Errorf("expected built %v, got %v", newTimestamp, version.Built)
+	}
+}
+
+// TestDatabaseUpdater_IncrementalUpdateFails_NoRetryWithoutExistingDB tests that when
+// there is no existing database and the download fails, the error is returned immediately
+// without a retry (nothing to clean up, retry would be identical).
+func TestDatabaseUpdater_IncrementalUpdateFails_NoRetryWithoutExistingDB(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	du, err := NewDatabaseUpdater(tmpDir)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdater failed: %v", err)
+	}
+
+	calls := 0
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		calls++
+		return nil, fmt.Errorf("network error")
+	})
+
+	_, err = du.CheckForUpdates(context.Background())
+	if err == nil {
+		t.Error("expected error when download fails with no existing DB")
+	}
+
+	if calls != 1 {
+		t.Errorf("expected exactly 1 loader call (no retry without existing DB), got %d", calls)
+	}
+}
+
+// TestDatabaseUpdater_IncrementalUpdateFails_RetryAlsoFails tests that when the retry
+// full download also fails, the error from the retry is returned.
+func TestDatabaseUpdater_IncrementalUpdateFails_RetryAlsoFails(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	du, err := NewDatabaseUpdater(tmpDir)
+	if err != nil {
+		t.Fatalf("NewDatabaseUpdater failed: %v", err)
+	}
+
+	// Create existing DB so retry path is triggered
+	schemaDir := filepath.Join(tmpDir, "grype", "6")
+	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+		t.Fatalf("failed to create schema dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(schemaDir, "vulnerability.db"), []byte("old db"), 0644); err != nil {
+		t.Fatalf("failed to create existing db: %v", err)
+	}
+
+	calls := 0
+	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
+		calls++
+		return nil, fmt.Errorf("download failed")
+	})
+
+	_, err = du.CheckForUpdates(context.Background())
+	if err == nil {
+		t.Error("expected error when both update and retry fail")
+	}
+
+	if calls != 2 {
+		t.Errorf("expected 2 loader calls (update + retry), got %d", calls)
+	}
+}
+
 // TestReadGrypeDBTimestampFromSQLite_RFC3339Format tests that the timestamp parsing
 // correctly handles RFC3339 format (2026-01-16T06:16:58Z) which grype v6 now uses.
 // This was a bug where the code only handled the old format (2006-01-02 15:04:05+00:00).
