@@ -2,21 +2,71 @@ package metrics
 
 import (
 	"context"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bvboe/b2s-go/scanner-core/database"
 	"github.com/bvboe/b2s-go/scanner-core/nodes"
+	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 )
 
-// makeTestOTELExporter creates an OTELExporter for testing.
-// provider may be nil if the test does not exercise data collection paths.
-// Marks the test as slow because Shutdown() blocks while the OTEL SDK tries to flush.
-func makeTestOTELExporter(t *testing.T, provider *MockStreamingProvider, cfg OTELConfig, config UnifiedConfig) *OTELExporter {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("slow: requires OTEL endpoint flush timeout")
+// MockDirectOTLPSender is a test double for DirectOTLPSender.
+type MockDirectOTLPSender struct {
+	mu          sync.Mutex
+	sendCalls   int
+	closeCalls  int
+	allMetrics  [][]*metricsv1.Metric
+	sendErr     error
+}
+
+func newMockDirectOTLPSender() *MockDirectOTLPSender {
+	return &MockDirectOTLPSender{}
+}
+
+func (m *MockDirectOTLPSender) Send(_ context.Context, metrics []*metricsv1.Metric) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
 	}
+	// Deep copy the slice so callers can't mutate stored data
+	cp := make([]*metricsv1.Metric, len(metrics))
+	copy(cp, metrics)
+	m.allMetrics = append(m.allMetrics, cp)
+	m.sendCalls++
+	return nil
+}
+
+func (m *MockDirectOTLPSender) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeCalls++
+	return nil
+}
+
+func (m *MockDirectOTLPSender) TotalDataPoints() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	total := 0
+	for _, batch := range m.allMetrics {
+		for _, metric := range batch {
+			total += len(metric.GetGauge().GetDataPoints())
+		}
+	}
+	return total
+}
+
+func (m *MockDirectOTLPSender) SendCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sendCalls
+}
+
+// makeTestOTELExporter creates an OTELExporter wired to a MockDirectOTLPSender for testing.
+// Returns both the exporter and the mock so tests can inspect what was sent.
+func makeTestOTELExporter(t *testing.T, provider *MockStreamingProvider, cfg OTELConfig, config UnifiedConfig) (*OTELExporter, *MockDirectOTLPSender) {
+	t.Helper()
 	ctx := context.Background()
 	info := &MockInfoProvider{deploymentName: "test-cluster", deploymentType: "kubernetes", version: "1.0.0"}
 
@@ -36,7 +86,10 @@ func makeTestOTELExporter(t *testing.T, provider *MockStreamingProvider, cfg OTE
 	if err != nil {
 		t.Fatalf("Failed to create OTEL exporter: %v", err)
 	}
-	return e
+
+	mock := newMockDirectOTLPSender()
+	e.setSender(mock)
+	return e, mock
 }
 
 func defaultOTELConfig() OTELConfig {
@@ -48,119 +101,21 @@ func defaultOTELConfig() OTELConfig {
 	}
 }
 
-func TestCreateExporter_GRPC(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: OTEL exporter shutdown blocks on gRPC timeout")
-	}
-	ctx := context.Background()
-	exporter, err := createExporter(ctx, OTELConfig{
-		Endpoint:     "localhost:4317",
-		Protocol:     OTELProtocolGRPC,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create gRPC exporter: %v", err)
-	}
-	if exporter == nil {
-		t.Fatal("Expected non-nil exporter")
-	}
-	_ = exporter.Shutdown(ctx)
-}
-
-func TestCreateExporter_HTTP(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: OTEL exporter shutdown blocks on HTTP timeout")
-	}
-	ctx := context.Background()
-	exporter, err := createExporter(ctx, OTELConfig{
-		Endpoint:     "localhost:9090",
-		Protocol:     OTELProtocolHTTP,
-		PushInterval: 1 * time.Minute,
-		Insecure:     true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create HTTP exporter: %v", err)
-	}
-	if exporter == nil {
-		t.Fatal("Expected non-nil exporter")
-	}
-	_ = exporter.Shutdown(ctx)
-}
-
-func TestCreateExporter_InvalidProtocol(t *testing.T) {
-	ctx := context.Background()
-	exporter, err := createExporter(ctx, OTELConfig{
-		Endpoint: "localhost:4317",
-		Protocol: OTELProtocol("invalid"),
-	})
-	if err == nil {
-		t.Fatal("Expected error for invalid protocol")
-	}
-	if exporter != nil {
-		t.Fatal("Expected nil exporter for invalid protocol")
-	}
-	if !strings.Contains(err.Error(), "unsupported OTLP protocol") {
-		t.Errorf("Expected error to contain 'unsupported OTLP protocol', got %q", err.Error())
-	}
-}
-
-func TestCreateExporter_ProtocolCaseInsensitive(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: OTEL exporter shutdown blocks on network timeout")
-	}
-	tests := []struct {
-		name     string
-		protocol string
-		wantErr  bool
-	}{
-		{"grpc lowercase", "grpc", false},
-		{"GRPC uppercase", "GRPC", false},
-		{"http lowercase", "http", false},
-		{"HTTP uppercase", "HTTP", false},
-		{"invalid", "invalid", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			exporter, err := createExporter(ctx, OTELConfig{
-				Endpoint:     "localhost:4317",
-				Protocol:     OTELProtocol(tt.protocol),
-				PushInterval: 1 * time.Minute,
-				Insecure:     true,
-			})
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error for protocol %q", tt.protocol)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error for protocol %q: %v", tt.protocol, err)
-				}
-				if exporter != nil {
-					_ = exporter.Shutdown(ctx)
-				}
-			}
-		})
-	}
-}
-
 func TestNewOTELExporter_Success(t *testing.T) {
-	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{DeploymentEnabled: true})
+	e, mock := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{DeploymentEnabled: true})
 	defer func() { _ = e.Shutdown() }()
 
-	if e.meterProvider == nil {
-		t.Error("Expected non-nil meterProvider")
-	}
-	if e.gauges == nil {
-		t.Error("Expected non-nil gauges map")
+	if e.sender == nil {
+		t.Error("Expected non-nil sender")
 	}
 	if e.ctx == nil {
 		t.Error("Expected non-nil context")
 	}
 	if e.cancel == nil {
 		t.Error("Expected non-nil cancel function")
+	}
+	if mock == nil {
+		t.Error("Expected non-nil mock sender")
 	}
 }
 
@@ -171,7 +126,7 @@ func TestNewOTELExporter_WithHTTPProtocol(t *testing.T) {
 		PushInterval: 30 * time.Second,
 		Insecure:     true,
 	}
-	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	e, _ := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
 	defer func() { _ = e.Shutdown() }()
 
 	if e.config.Protocol != OTELProtocolHTTP {
@@ -183,34 +138,120 @@ func TestNewOTELExporter_WithHTTPProtocol(t *testing.T) {
 }
 
 func TestRecordMetrics_NilProvider(t *testing.T) {
-	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{DeploymentEnabled: true})
+	e, _ := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{DeploymentEnabled: true})
 	defer func() { _ = e.Shutdown() }()
 
-	// recordMetrics with nil provider should not panic (guards against nil checks)
+	// recordMetrics with nil provider should not panic
 	e.recordMetrics()
 }
 
-func TestRecordMetrics_WithProvider(t *testing.T) {
+func TestRecordMetrics_SendsToSender(t *testing.T) {
 	provider := newMockStreamingProvider()
 	config := UnifiedConfig{
 		DeploymentEnabled:        true,
 		ScannedContainersEnabled: true,
 		NodeScannedEnabled:       true,
 	}
-	e := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	e, mock := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
 	defer func() { _ = e.Shutdown() }()
 
 	e.recordMetrics()
+
+	if mock.SendCallCount() == 0 {
+		t.Error("Expected sender.Send to be called after recordMetrics")
+	}
+}
+
+func TestRecordMetrics_DeploymentMetricSent(t *testing.T) {
+	provider := newMockStreamingProvider()
+	config := UnifiedConfig{DeploymentEnabled: true}
+	e, mock := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	defer func() { _ = e.Shutdown() }()
+
 	e.recordMetrics()
 
-	// After recording, at least the deployment gauge should have been created
-	if len(e.gauges) == 0 {
-		t.Error("Expected gauges to be created after recording metrics")
+	if mock.TotalDataPoints() == 0 {
+		t.Error("Expected at least one data point after recordMetrics")
+	}
+	// Verify deployment metric is present
+	found := false
+	mock.mu.Lock()
+	for _, batch := range mock.allMetrics {
+		for _, m := range batch {
+			if m.Name == "bjorn2scan_deployment" {
+				found = true
+			}
+		}
+	}
+	mock.mu.Unlock()
+	if !found {
+		t.Error("Expected bjorn2scan_deployment metric in sent data")
+	}
+}
+
+func TestRecordMetrics_NodeVulnsGoThroughAccumulator(t *testing.T) {
+	provider := newMockStreamingProvider()
+	provider.nodeVulns = []database.NodeVulnerabilityForMetrics{
+		{NodeName: "node-1", CVEID: "CVE-2024-001", Severity: "Critical", Score: 9.8, Count: 1},
+		{NodeName: "node-1", CVEID: "CVE-2024-002", Severity: "High", Score: 7.5, Count: 1},
+	}
+	config := UnifiedConfig{
+		NodeVulnerabilitiesEnabled:   true,
+		NodeVulnerabilityRiskEnabled: true,
+	}
+	e, mock := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	defer func() { _ = e.Shutdown() }()
+
+	e.recordMetrics()
+
+	// Node vulns should appear in sent data
+	foundVuln := false
+	foundRisk := false
+	mock.mu.Lock()
+	for _, batch := range mock.allMetrics {
+		for _, m := range batch {
+			if m.Name == "bjorn2scan_node_vulnerability" {
+				foundVuln = true
+			}
+			if m.Name == "bjorn2scan_node_vulnerability_risk" {
+				foundRisk = true
+			}
+		}
+	}
+	mock.mu.Unlock()
+	if !foundVuln {
+		t.Error("Expected bjorn2scan_node_vulnerability in sent data")
+	}
+	if !foundRisk {
+		t.Error("Expected bjorn2scan_node_vulnerability_risk in sent data")
+	}
+}
+
+func TestRecordMetrics_NaNForStaleMetrics(t *testing.T) {
+	provider := newMockStreamingProvider()
+	// Pre-seed a stale row in the staleness DB
+	staleRow := database.StalenessRow{
+		MetricKey:    "bjorn2scan_deployment|deployment_name=old-cluster|deployment_uuid=old-uuid",
+		FamilyName:   "bjorn2scan_deployment",
+		LabelsJSON:   `{"deployment_name":"old-cluster","deployment_uuid":"old-uuid"}`,
+		LastSeenUnix: 1, // very old
+	}
+	provider.stalenessDB.rows = []database.StalenessRow{staleRow}
+
+	config := UnifiedConfig{DeploymentEnabled: true}
+	e, mock := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	defer func() { _ = e.Shutdown() }()
+
+	e.recordMetrics()
+
+	// Should have sent data — the NaN for the stale metric plus the live deployment metric
+	if mock.SendCallCount() == 0 {
+		t.Error("Expected Send to be called")
 	}
 }
 
 func TestShutdown_GracefulShutdown(t *testing.T) {
-	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
+	e, _ := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
 	_ = e.Shutdown()
 
 	select {
@@ -222,9 +263,21 @@ func TestShutdown_GracefulShutdown(t *testing.T) {
 }
 
 func TestShutdown_MultipleShutdowns(t *testing.T) {
-	e := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
+	e, _ := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
 	_ = e.Shutdown()
 	_ = e.Shutdown() // second shutdown should not panic
+}
+
+func TestShutdown_ClosesSender(t *testing.T) {
+	e, mock := makeTestOTELExporter(t, nil, defaultOTELConfig(), UnifiedConfig{})
+	_ = e.Shutdown()
+
+	mock.mu.Lock()
+	closes := mock.closeCalls
+	mock.mu.Unlock()
+	if closes == 0 {
+		t.Error("Expected sender.Close to be called on Shutdown")
+	}
 }
 
 func TestStart_StartsBackgroundPush(t *testing.T) {
@@ -234,7 +287,7 @@ func TestStart_StartsBackgroundPush(t *testing.T) {
 		PushInterval: 100 * time.Millisecond,
 		Insecure:     true,
 	}
-	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	e, _ := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
 	defer func() { _ = e.Shutdown() }()
 
 	e.Start()
@@ -249,7 +302,7 @@ func TestStart_StopsOnShutdown(t *testing.T) {
 		PushInterval: 50 * time.Millisecond,
 		Insecure:     true,
 	}
-	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
+	e, _ := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
 	e.Start()
 	time.Sleep(100 * time.Millisecond)
 	_ = e.Shutdown()
@@ -294,78 +347,6 @@ func TestOTELConfig_AllFields(t *testing.T) {
 	}
 }
 
-func TestOTELExporter_WithDirectExport(t *testing.T) {
-	cfg := OTELConfig{
-		Endpoint:        "localhost:4317",
-		Protocol:        OTELProtocolGRPC,
-		PushInterval:    1 * time.Minute,
-		Insecure:        true,
-		UseDirectExport: true,
-		DirectBatchSize: 1000,
-	}
-	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
-	defer func() { _ = e.Shutdown() }()
-
-	if e.directExporter == nil {
-		t.Error("Expected directExporter to be set when UseDirectExport=true")
-	}
-	if e.infoProvider == nil {
-		t.Error("Expected infoProvider to be set")
-	}
-	if e.deploymentUUID != "test-uuid" {
-		t.Errorf("Expected deploymentUUID='test-uuid', got %q", e.deploymentUUID)
-	}
-}
-
-func TestOTELExporter_WithoutDirectExport(t *testing.T) {
-	cfg := OTELConfig{
-		Endpoint:        "localhost:4317",
-		Protocol:        OTELProtocolGRPC,
-		PushInterval:    1 * time.Minute,
-		Insecure:        true,
-		UseDirectExport: false,
-	}
-	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
-	defer func() { _ = e.Shutdown() }()
-
-	if e.directExporter != nil {
-		t.Error("Expected directExporter=nil when UseDirectExport=false")
-	}
-}
-
-func TestOTELExporter_DirectExportShutdown(t *testing.T) {
-	cfg := OTELConfig{
-		Endpoint:        "localhost:4317",
-		Protocol:        OTELProtocolGRPC,
-		PushInterval:    1 * time.Minute,
-		Insecure:        true,
-		UseDirectExport: true,
-		DirectBatchSize: 5000,
-	}
-	e := makeTestOTELExporter(t, nil, cfg, UnifiedConfig{})
-
-	_ = e.Shutdown()
-	_ = e.Shutdown() // multiple shutdowns should be safe
-}
-
-func TestOTELConfig_DirectExportFields(t *testing.T) {
-	config := OTELConfig{
-		Endpoint:        "localhost:9090",
-		Protocol:        OTELProtocolHTTP,
-		PushInterval:    5 * time.Minute,
-		Insecure:        true,
-		UseDirectExport: true,
-		DirectBatchSize: 10000,
-	}
-
-	if !config.UseDirectExport {
-		t.Error("Expected UseDirectExport=true")
-	}
-	if config.DirectBatchSize != 10000 {
-		t.Errorf("Expected DirectBatchSize=10000, got %d", config.DirectBatchSize)
-	}
-}
-
 func TestOTELExporter_RecordMetrics_WithNodeData(t *testing.T) {
 	provider := newMockStreamingProvider()
 	provider.scannedNodes = []nodes.NodeWithStatus{
@@ -375,12 +356,12 @@ func TestOTELExporter_RecordMetrics_WithNodeData(t *testing.T) {
 		DeploymentEnabled:  true,
 		NodeScannedEnabled: true,
 	}
-	e := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
+	e, mock := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)
 	defer func() { _ = e.Shutdown() }()
 
 	e.recordMetrics()
 
-	if len(e.gauges) == 0 {
-		t.Error("Expected gauges to be created after recording metrics")
+	if mock.TotalDataPoints() == 0 {
+		t.Error("Expected data points after recording metrics with node data")
 	}
 }

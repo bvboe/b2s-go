@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/database"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -303,148 +302,124 @@ func (e *DirectOTLPExporter) Close() error {
 	return nil
 }
 
-// StreamNodeVulnerabilityMetrics streams node vulnerability metrics directly to OTLP endpoint.
-// Memory usage is constant - only one batch is held at a time.
-// provider must implement StreamNodeVulnerabilitiesForMetrics (e.g. *database.DB or StreamingProvider).
-func (e *DirectOTLPExporter) StreamNodeVulnerabilityMetrics(
-	ctx context.Context,
-	provider interface {
-		StreamNodeVulnerabilitiesForMetrics(func(database.NodeVulnerabilityForMetrics) error) error
-	},
-	nodeConfig NodeCollectorConfig,
-	deploymentUUID, deploymentName string,
-) error {
-	// Collect data points in batches
-	var vulnPoints []*metricsv1.NumberDataPoint
-	var riskPoints []*metricsv1.NumberDataPoint
-	var exploitedPoints []*metricsv1.NumberDataPoint
+// DirectEmitAccumulator accumulates metric data points and sends them via DirectOTLPSender
+// in bounded batches. It implements the emit(familyName, help, labels, value) callback
+// pattern used by collectMetrics, routing all metrics — including node vulnerabilities —
+// through a single transport path without any SDK buffering.
+//
+// Usage:
+//
+//	acc := NewDirectEmitAccumulator(ctx, sender, batchSize, timeUnixNano)
+//	collectMetrics(provider, config, ..., acc.Record, onBatchFull)
+//	if err := acc.Flush(); err != nil { ... }
+type DirectEmitAccumulator struct {
+	ctx          context.Context
+	sender       DirectOTLPSender
+	batchSize    int
+	timeUnixNano uint64
+	pending      map[string]*metricsv1.Metric // keyed by familyName
+	pendingCount int
+	batchesSent  int
+	totalPoints  int
+	err          error // first send error; subsequent Records are no-ops
+}
 
-	now := uint64(time.Now().UnixNano())
-	batchCount := 0
-	totalPoints := 0
+// NewDirectEmitAccumulator creates an accumulator for a single metrics collection cycle.
+// timeUnixNano should be set once per cycle (e.g. uint64(time.Now().UnixNano())).
+func NewDirectEmitAccumulator(ctx context.Context, sender DirectOTLPSender, batchSize int, timeUnixNano uint64) *DirectEmitAccumulator {
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	return &DirectEmitAccumulator{
+		ctx:          ctx,
+		sender:       sender,
+		batchSize:    batchSize,
+		timeUnixNano: timeUnixNano,
+		pending:      make(map[string]*metricsv1.Metric),
+	}
+}
 
-	flush := func() error {
-		if len(vulnPoints) == 0 && len(riskPoints) == 0 && len(exploitedPoints) == 0 {
-			return nil
-		}
-
-		metrics := make([]*metricsv1.Metric, 0, 3)
-
-		if len(vulnPoints) > 0 {
-			metrics = append(metrics, &metricsv1.Metric{
-				Name:        "bjorn2scan_node_vulnerability",
-				Description: "Bjorn2scan vulnerability information for nodes",
-				Data: &metricsv1.Metric_Gauge{
-					Gauge: &metricsv1.Gauge{DataPoints: vulnPoints},
-				},
-			})
-		}
-		if len(riskPoints) > 0 {
-			metrics = append(metrics, &metricsv1.Metric{
-				Name:        "bjorn2scan_node_vulnerability_risk",
-				Description: "Bjorn2scan vulnerability risk scores for nodes",
-				Data: &metricsv1.Metric_Gauge{
-					Gauge: &metricsv1.Gauge{DataPoints: riskPoints},
-				},
-			})
-		}
-		if len(exploitedPoints) > 0 {
-			metrics = append(metrics, &metricsv1.Metric{
-				Name:        "bjorn2scan_node_vulnerability_exploited",
-				Description: "Bjorn2scan known exploited vulnerabilities (CISA KEV) on nodes",
-				Data: &metricsv1.Metric_Gauge{
-					Gauge: &metricsv1.Gauge{DataPoints: exploitedPoints},
-				},
-			})
-		}
-
-		if err := e.sender.Send(ctx, metrics); err != nil {
-			return fmt.Errorf("failed to send batch %d: %w", batchCount, err)
-		}
-
-		batchCount++
-		totalPoints += len(vulnPoints) + len(riskPoints) + len(exploitedPoints)
-
-		// Clear slices for next batch (reuse underlying arrays)
-		vulnPoints = vulnPoints[:0]
-		riskPoints = riskPoints[:0]
-		exploitedPoints = exploitedPoints[:0]
-
-		return nil
+// Record adds a data point for the given metric family. NaN values pass through as-is
+// (IEEE 754 NaN is valid in protobuf double — Prometheus interprets them as stale markers).
+// If a mid-stream flush fails, the error is stored and subsequent calls are no-ops;
+// the error is returned by Flush().
+func (a *DirectEmitAccumulator) Record(familyName, help string, labels map[string]string, value float64) {
+	if a.err != nil {
+		return
 	}
 
-	err := provider.StreamNodeVulnerabilitiesForMetrics(func(v database.NodeVulnerabilityForMetrics) error {
-		attrs := buildVulnAttributes(v, deploymentUUID, deploymentName)
-
-		if nodeConfig.NodeVulnerabilitiesEnabled {
-			vulnPoints = append(vulnPoints, &metricsv1.NumberDataPoint{
-				Attributes:   attrs,
-				TimeUnixNano: now,
-				Value:        &metricsv1.NumberDataPoint_AsDouble{AsDouble: float64(v.Count)},
-			})
+	m, ok := a.pending[familyName]
+	if !ok {
+		m = &metricsv1.Metric{
+			Name:        familyName,
+			Description: help,
+			Data:        &metricsv1.Metric_Gauge{Gauge: &metricsv1.Gauge{}},
 		}
+		a.pending[familyName] = m
+	}
 
-		if nodeConfig.NodeVulnerabilityRiskEnabled {
-			riskPoints = append(riskPoints, &metricsv1.NumberDataPoint{
-				Attributes:   attrs,
-				TimeUnixNano: now,
-				Value:        &metricsv1.NumberDataPoint_AsDouble{AsDouble: v.Score * float64(v.Count)},
-			})
-		}
-
-		if nodeConfig.NodeVulnerabilityExploitedEnabled && v.KnownExploited > 0 {
-			exploitedPoints = append(exploitedPoints, &metricsv1.NumberDataPoint{
-				Attributes:   attrs,
-				TimeUnixNano: now,
-				Value:        &metricsv1.NumberDataPoint_AsDouble{AsDouble: float64(v.KnownExploited * v.Count)},
-			})
-		}
-
-		// Flush when any slice reaches batch size
-		if len(vulnPoints) >= e.config.BatchSize ||
-			len(riskPoints) >= e.config.BatchSize ||
-			len(exploitedPoints) >= e.config.BatchSize {
-			if err := flush(); err != nil {
-				return err
-			}
-		}
-
-		return nil
+	attrs := make([]*commonv1.KeyValue, 0, len(labels))
+	for k, v := range labels {
+		attrs = append(attrs, stringKV(k, v))
+	}
+	m.GetGauge().DataPoints = append(m.GetGauge().DataPoints, &metricsv1.NumberDataPoint{
+		Attributes:   attrs,
+		TimeUnixNano: a.timeUnixNano,
+		Value:        &metricsv1.NumberDataPoint_AsDouble{AsDouble: value},
 	})
+	a.pendingCount++
 
-	if err != nil {
+	if a.pendingCount >= a.batchSize {
+		if err := a.flush(); err != nil {
+			a.err = err
+		}
+	}
+}
+
+// Flush sends any remaining pending data points. Must be called after all Record calls.
+// Returns the first error encountered during any flush (including mid-stream flushes).
+func (a *DirectEmitAccumulator) Flush() error {
+	if a.err != nil {
+		return a.err
+	}
+	if err := a.flush(); err != nil {
 		return err
 	}
-
-	// Flush remaining data points
-	if err := flush(); err != nil {
-		return err
+	if a.totalPoints > 0 || a.batchesSent > 0 {
+		log.Debug("sent data points to OTLP",
+			"total_points", a.totalPoints,
+			"batch_count", a.batchesSent)
 	}
-
-	log.Debug("sent data points to OTLP",
-		"total_points", totalPoints,
-		"batch_count", batchCount)
 	return nil
 }
 
-// Helper to build attributes for a vulnerability
-func buildVulnAttributes(v database.NodeVulnerabilityForMetrics, deploymentUUID, deploymentName string) []*commonv1.KeyValue {
-	return []*commonv1.KeyValue{
-		stringKV("deployment_uuid", deploymentUUID),
-		stringKV("deployment_name", deploymentName),
-		stringKV("node_name", v.NodeName),
-		stringKV("hostname", v.Hostname),
-		stringKV("os_release", v.OSRelease),
-		stringKV("kernel_version", v.KernelVersion),
-		stringKV("architecture", v.Architecture),
-		stringKV("cve_id", v.CVEID),
-		stringKV("severity", v.Severity),
-		stringKV("fix_status", v.FixStatus),
-		stringKV("fix_version", v.FixVersion),
-		stringKV("package_name", v.PackageName),
-		stringKV("package_version", v.PackageVersion),
-		stringKV("package_type", v.PackageType),
+func (a *DirectEmitAccumulator) flush() error {
+	if a.pendingCount == 0 {
+		return nil
 	}
+
+	metrics := make([]*metricsv1.Metric, 0, len(a.pending))
+	for _, m := range a.pending {
+		if len(m.GetGauge().DataPoints) > 0 {
+			metrics = append(metrics, m)
+		}
+	}
+
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	if err := a.sender.Send(a.ctx, metrics); err != nil {
+		return fmt.Errorf("failed to send batch %d: %w", a.batchesSent, err)
+	}
+
+	a.batchesSent++
+	a.totalPoints += a.pendingCount
+
+	// Reset pending for the next batch
+	a.pending = make(map[string]*metricsv1.Metric)
+	a.pendingCount = 0
+	return nil
 }
 
 // Helper to create string KeyValue

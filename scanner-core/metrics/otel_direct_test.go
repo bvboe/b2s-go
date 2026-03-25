@@ -4,51 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/bvboe/b2s-go/scanner-core/database"
-	"github.com/bvboe/b2s-go/scanner-core/nodes"
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 )
-
-// MockStreamingNodeDatabaseProvider implements StreamingNodeDatabaseProvider for testing
-type MockStreamingNodeDatabaseProvider struct {
-	scannedNodes    []nodes.NodeWithStatus
-	vulnerabilities []database.NodeVulnerabilityForMetrics
-	err             error
-	callbackCount   int
-}
-
-func (m *MockStreamingNodeDatabaseProvider) GetScannedNodes() ([]nodes.NodeWithStatus, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.scannedNodes, nil
-}
-
-func (m *MockStreamingNodeDatabaseProvider) GetNodeVulnerabilitiesForMetrics() ([]database.NodeVulnerabilityForMetrics, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.vulnerabilities, nil
-}
-
-func (m *MockStreamingNodeDatabaseProvider) StreamNodeVulnerabilitiesForMetrics(callback func(v database.NodeVulnerabilityForMetrics) error) error {
-	if m.err != nil {
-		return m.err
-	}
-	for _, v := range m.vulnerabilities {
-		m.callbackCount++
-		if err := callback(v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func TestDirectOTLPConfig_Defaults(t *testing.T) {
 	config := DirectOTLPConfig{
@@ -435,274 +400,194 @@ func TestDirectOTLPExporter_Close(t *testing.T) {
 	}
 }
 
-func TestDirectOTLPExporter_StreamNodeVulnerabilityMetrics(t *testing.T) {
-	// Create a test server
-	batchesReceived := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		batchesReceived++
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	config := DirectOTLPConfig{
-		Endpoint:       server.URL,
-		Protocol:       "http",
-		BatchSize:      2, // Small batch size to test batching
-		Timeout:        5 * time.Second,
-		MaxRetries:     1,
-		Insecure:       true,
-		ServiceName:    "bjorn2scan",
-		ServiceVersion: "1.0.0",
-		DeploymentName: "test-cluster",
-		DeploymentUUID: "test-uuid",
-	}
-
-	exporter, err := NewDirectOTLPExporter(config)
-	if err != nil {
-		t.Fatalf("Failed to create exporter: %v", err)
-	}
-	defer func() { _ = exporter.Close() }()
-
-	// Create mock database with several vulnerabilities
-	mockDB := &MockStreamingNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{NodeName: "node-1", CVEID: "CVE-2024-001", Severity: "Critical", Score: 9.8, Count: 1},
-			{NodeName: "node-1", CVEID: "CVE-2024-002", Severity: "High", Score: 7.5, Count: 1},
-			{NodeName: "node-2", CVEID: "CVE-2024-003", Severity: "Medium", Score: 5.0, Count: 1},
-			{NodeName: "node-2", CVEID: "CVE-2024-004", Severity: "Low", Score: 3.0, Count: 1, KnownExploited: 1},
-			{NodeName: "node-3", CVEID: "CVE-2024-005", Severity: "Critical", Score: 10.0, Count: 2},
-		},
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled:        true,
-		NodeVulnerabilityRiskEnabled:      true,
-		NodeVulnerabilityExploitedEnabled: true,
-	}
-
-	ctx := context.Background()
-	err = exporter.StreamNodeVulnerabilityMetrics(ctx, mockDB, nodeConfig, "test-uuid", "test-cluster")
-	if err != nil {
-		t.Fatalf("Failed to stream metrics: %v", err)
-	}
-
-	// With batch size of 2 and 5 vulnerabilities, we should have multiple batches
-	// The exact number depends on how the batching logic works
-	if batchesReceived == 0 {
-		t.Error("Expected at least one batch to be received")
-	}
+// mockDirectSender is a simple in-memory sender for accumulator tests.
+type mockDirectSender struct {
+	mu         sync.Mutex
+	sendCalls  int
+	allMetrics [][]*metricsv1.Metric
+	sendErr    error
 }
 
-func TestDirectOTLPExporter_StreamNodeVulnerabilityMetrics_EmptyDB(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	config := DirectOTLPConfig{
-		Endpoint:       server.URL,
-		Protocol:       "http",
-		BatchSize:      5000,
-		Insecure:       true,
-		ServiceName:    "bjorn2scan",
-		ServiceVersion: "1.0.0",
+func (m *mockDirectSender) Send(_ context.Context, metrics []*metricsv1.Metric) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
 	}
-
-	exporter, err := NewDirectOTLPExporter(config)
-	if err != nil {
-		t.Fatalf("Failed to create exporter: %v", err)
-	}
-	defer func() { _ = exporter.Close() }()
-
-	// Empty database
-	mockDB := &MockStreamingNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{},
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled: true,
-	}
-
-	ctx := context.Background()
-	err = exporter.StreamNodeVulnerabilityMetrics(ctx, mockDB, nodeConfig, "test-uuid", "test-cluster")
-	if err != nil {
-		t.Fatalf("Expected no error for empty database, got: %v", err)
-	}
+	cp := make([]*metricsv1.Metric, len(metrics))
+	copy(cp, metrics)
+	m.allMetrics = append(m.allMetrics, cp)
+	m.sendCalls++
+	return nil
 }
 
-func TestDirectOTLPExporter_StreamNodeVulnerabilityMetrics_DBError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
+func (m *mockDirectSender) Close() error { return nil }
 
-	config := DirectOTLPConfig{
-		Endpoint:       server.URL,
-		Protocol:       "http",
-		BatchSize:      5000,
-		Insecure:       true,
-		ServiceName:    "bjorn2scan",
-		ServiceVersion: "1.0.0",
-	}
-
-	exporter, err := NewDirectOTLPExporter(config)
-	if err != nil {
-		t.Fatalf("Failed to create exporter: %v", err)
-	}
-	defer func() { _ = exporter.Close() }()
-
-	// Database that returns error
-	mockDB := &MockStreamingNodeDatabaseProvider{
-		err: errors.New("database connection error"),
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled: true,
-	}
-
-	ctx := context.Background()
-	err = exporter.StreamNodeVulnerabilityMetrics(ctx, mockDB, nodeConfig, "test-uuid", "test-cluster")
-	if err == nil {
-		t.Fatal("Expected error from database")
-	}
-}
-
-func TestDirectOTLPExporter_StreamNodeVulnerabilityMetrics_ServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("server error"))
-	}))
-	defer server.Close()
-
-	config := DirectOTLPConfig{
-		Endpoint:       server.URL,
-		Protocol:       "http",
-		BatchSize:      2,
-		Timeout:        1 * time.Second,
-		MaxRetries:     1,
-		Insecure:       true,
-		ServiceName:    "bjorn2scan",
-		ServiceVersion: "1.0.0",
-	}
-
-	exporter, err := NewDirectOTLPExporter(config)
-	if err != nil {
-		t.Fatalf("Failed to create exporter: %v", err)
-	}
-	defer func() { _ = exporter.Close() }()
-
-	mockDB := &MockStreamingNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{NodeName: "node-1", CVEID: "CVE-2024-001", Severity: "Critical", Count: 1},
-		},
-	}
-
-	nodeConfig := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled: true,
-	}
-
-	ctx := context.Background()
-	err = exporter.StreamNodeVulnerabilityMetrics(ctx, mockDB, nodeConfig, "test-uuid", "test-cluster")
-	if err == nil {
-		t.Fatal("Expected error from server failure")
-	}
-}
-
-func TestDirectOTLPExporter_StreamNodeVulnerabilityMetrics_DisabledMetrics(t *testing.T) {
-	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	config := DirectOTLPConfig{
-		Endpoint:       server.URL,
-		Protocol:       "http",
-		BatchSize:      5000,
-		Insecure:       true,
-		ServiceName:    "bjorn2scan",
-		ServiceVersion: "1.0.0",
-	}
-
-	exporter, err := NewDirectOTLPExporter(config)
-	if err != nil {
-		t.Fatalf("Failed to create exporter: %v", err)
-	}
-	defer func() { _ = exporter.Close() }()
-
-	mockDB := &MockStreamingNodeDatabaseProvider{
-		vulnerabilities: []database.NodeVulnerabilityForMetrics{
-			{NodeName: "node-1", CVEID: "CVE-2024-001", Severity: "Critical", Count: 1},
-		},
-	}
-
-	// All metrics disabled
-	nodeConfig := NodeCollectorConfig{
-		NodeVulnerabilitiesEnabled:        false,
-		NodeVulnerabilityRiskEnabled:      false,
-		NodeVulnerabilityExploitedEnabled: false,
-	}
-
-	ctx := context.Background()
-	err = exporter.StreamNodeVulnerabilityMetrics(ctx, mockDB, nodeConfig, "test-uuid", "test-cluster")
-	if err != nil {
-		t.Fatalf("Expected no error with disabled metrics, got: %v", err)
-	}
-
-	// No requests should be made since no metrics are enabled
-	// (flush would be called but with empty slices)
-	// This depends on implementation - if empty flush sends no requests
-}
-
-func TestBuildVulnAttributes(t *testing.T) {
-	v := database.NodeVulnerabilityForMetrics{
-		NodeName:       "test-node",
-		Hostname:       "test-node.local",
-		OSRelease:      "Ubuntu 22.04",
-		KernelVersion:  "5.15.0",
-		Architecture:   "amd64",
-		CVEID:          "CVE-2024-1234",
-		Severity:       "Critical",
-		FixStatus:      "fixed",
-		FixVersion:     "1.2.3",
-		PackageName:    "openssl",
-		PackageVersion: "1.1.1",
-		PackageType:    "deb",
-	}
-
-	attrs := buildVulnAttributes(v, "deploy-uuid", "deploy-name")
-
-	// Verify we have the expected number of attributes
-	expectedCount := 14 // All the fields we're setting
-	if len(attrs) != expectedCount {
-		t.Errorf("Expected %d attributes, got %d", expectedCount, len(attrs))
-	}
-
-	// Verify some specific attributes
-	attrMap := make(map[string]string)
-	for _, attr := range attrs {
-		attrMap[attr.Key] = attr.Value.GetStringValue()
-	}
-
-	tests := []struct {
-		key      string
-		expected string
-	}{
-		{"deployment_uuid", "deploy-uuid"},
-		{"deployment_name", "deploy-name"},
-		{"node_name", "test-node"},
-		{"cve_id", "CVE-2024-1234"},
-		{"severity", "Critical"},
-		{"package_name", "openssl"},
-	}
-
-	for _, tt := range tests {
-		if val, ok := attrMap[tt.key]; !ok {
-			t.Errorf("Missing attribute %s", tt.key)
-		} else if val != tt.expected {
-			t.Errorf("Attribute %s: expected %q, got %q", tt.key, tt.expected, val)
+func (m *mockDirectSender) totalDataPoints() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, batch := range m.allMetrics {
+		for _, metric := range batch {
+			n += len(metric.GetGauge().GetDataPoints())
 		}
+	}
+	return n
+}
+
+func TestDirectEmitAccumulator_Record_LiveValue(t *testing.T) {
+	sender := &mockDirectSender{}
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 100, uint64(time.Now().UnixNano()))
+
+	acc.Record("bjorn2scan_deployment", "Deployment info", map[string]string{"env": "prod"}, 1.0)
+
+	if err := acc.Flush(); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+
+	if sender.totalDataPoints() != 1 {
+		t.Errorf("Expected 1 data point, got %d", sender.totalDataPoints())
+	}
+	if sender.sendCalls != 1 {
+		t.Errorf("Expected 1 Send call, got %d", sender.sendCalls)
+	}
+}
+
+func TestDirectEmitAccumulator_Record_NaN(t *testing.T) {
+	sender := &mockDirectSender{}
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 100, uint64(time.Now().UnixNano()))
+
+	acc.Record("bjorn2scan_deployment", "Deployment info", map[string]string{"env": "old"}, math.NaN())
+
+	if err := acc.Flush(); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+
+	if sender.totalDataPoints() != 1 {
+		t.Errorf("Expected 1 NaN data point, got %d", sender.totalDataPoints())
+	}
+	// Verify the value is NaN
+	dp := sender.allMetrics[0][0].GetGauge().GetDataPoints()[0]
+	if !math.IsNaN(dp.GetAsDouble()) {
+		t.Errorf("Expected NaN value, got %v", dp.GetAsDouble())
+	}
+}
+
+func TestDirectEmitAccumulator_BatchFlush(t *testing.T) {
+	sender := &mockDirectSender{}
+	// batchSize=2: every 2 records triggers a mid-stream flush
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 2, uint64(time.Now().UnixNano()))
+
+	for i := 0; i < 5; i++ {
+		acc.Record("bjorn2scan_deployment", "help", map[string]string{"i": "x"}, float64(i))
+	}
+
+	if err := acc.Flush(); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+
+	if sender.totalDataPoints() != 5 {
+		t.Errorf("Expected 5 total data points, got %d", sender.totalDataPoints())
+	}
+	// With batchSize=2: flushes at 2, 4, then final flush at 5 → 3 Send calls
+	if sender.sendCalls != 3 {
+		t.Errorf("Expected 3 Send calls (at 2, 4, and final 1), got %d", sender.sendCalls)
+	}
+}
+
+func TestDirectEmitAccumulator_MultipleFamilies(t *testing.T) {
+	sender := &mockDirectSender{}
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 100, uint64(time.Now().UnixNano()))
+
+	acc.Record("bjorn2scan_deployment", "help-a", map[string]string{"a": "1"}, 1.0)
+	acc.Record("bjorn2scan_image_scanned", "help-b", map[string]string{"b": "2"}, 2.0)
+
+	if err := acc.Flush(); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+
+	// Both families should be in one batch
+	if sender.sendCalls != 1 {
+		t.Errorf("Expected 1 Send call, got %d", sender.sendCalls)
+	}
+	batch := sender.allMetrics[0]
+	if len(batch) != 2 {
+		t.Errorf("Expected 2 metrics in batch, got %d", len(batch))
+	}
+	names := map[string]bool{}
+	for _, m := range batch {
+		names[m.Name] = true
+	}
+	if !names["bjorn2scan_deployment"] || !names["bjorn2scan_image_scanned"] {
+		t.Errorf("Expected both metric families in batch, got: %v", names)
+	}
+}
+
+func TestDirectEmitAccumulator_SameFamily(t *testing.T) {
+	sender := &mockDirectSender{}
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 100, uint64(time.Now().UnixNano()))
+
+	acc.Record("bjorn2scan_image_vulnerability", "help", map[string]string{"cve": "CVE-1"}, 1.0)
+	acc.Record("bjorn2scan_image_vulnerability", "help", map[string]string{"cve": "CVE-2"}, 2.0)
+	acc.Record("bjorn2scan_image_vulnerability", "help", map[string]string{"cve": "CVE-3"}, 3.0)
+
+	if err := acc.Flush(); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+
+	// One metric family, three data points, one Send call
+	if sender.sendCalls != 1 {
+		t.Errorf("Expected 1 Send call, got %d", sender.sendCalls)
+	}
+	if sender.totalDataPoints() != 3 {
+		t.Errorf("Expected 3 data points, got %d", sender.totalDataPoints())
+	}
+}
+
+func TestDirectEmitAccumulator_Flush_SendError(t *testing.T) {
+	sender := &mockDirectSender{sendErr: errors.New("network error")}
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 100, uint64(time.Now().UnixNano()))
+
+	acc.Record("bjorn2scan_deployment", "help", map[string]string{}, 1.0)
+
+	err := acc.Flush()
+	if err == nil {
+		t.Fatal("Expected error from Flush when sender fails")
+	}
+	if !strings.Contains(err.Error(), "network error") {
+		t.Errorf("Expected error to contain 'network error', got: %v", err)
+	}
+}
+
+func TestDirectEmitAccumulator_MidStreamError_DropsRemainingRecords(t *testing.T) {
+	sender := &mockDirectSender{sendErr: errors.New("network error")}
+	// batchSize=1: every Record triggers a flush
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 1, uint64(time.Now().UnixNano()))
+
+	acc.Record("bjorn2scan_deployment", "help", map[string]string{"k": "1"}, 1.0)
+	// Second record should be a no-op because the first flush errored
+	acc.Record("bjorn2scan_deployment", "help", map[string]string{"k": "2"}, 2.0)
+
+	err := acc.Flush()
+	if err == nil {
+		t.Fatal("Expected error from Flush")
+	}
+	// Only 1 Send attempt (the failing mid-stream flush)
+	if sender.sendCalls != 0 {
+		t.Errorf("Expected 0 successful Send calls, got %d", sender.sendCalls)
+	}
+}
+
+func TestDirectEmitAccumulator_EmptyFlush(t *testing.T) {
+	sender := &mockDirectSender{}
+	acc := NewDirectEmitAccumulator(context.Background(), sender, 100, uint64(time.Now().UnixNano()))
+
+	// Flush with no records — should be a no-op
+	if err := acc.Flush(); err != nil {
+		t.Errorf("Expected no error on empty flush, got: %v", err)
+	}
+	if sender.sendCalls != 0 {
+		t.Errorf("Expected 0 Send calls for empty flush, got %d", sender.sendCalls)
 	}
 }
 
