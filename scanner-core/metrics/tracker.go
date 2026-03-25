@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -10,29 +11,28 @@ import (
 // DefaultStalenessWindow is the default duration after which metrics are considered stale
 const DefaultStalenessWindow = 60 * time.Minute
 
-// defaultBatchSize is the number of staleness rows flushed to the DB per batch during streaming.
-// At ~200 bytes/row this keeps working memory at ~200KB per batch regardless of total row count.
-const defaultBatchSize = 1000
-
 // StalenessDB is the subset of StreamingProvider needed for staleness operations.
 // This is a separate interface so StalenessStore can be unit-tested with a mock.
 type StalenessDB interface {
-	QueryStaleness(cycleStart, windowSecs int64) ([]database.StalenessRow, error)
-	UpsertStaleness(batch []database.StalenessRow) error
+	QueryStaleness(cycleStart int64) ([]database.StalenessRow, error)
+	LoadStalenessState(cycleStart int64) ([]database.StalenessRow, error)
+	InsertNewMetrics(batch []database.StalenessRow) error
+	MarkMetricsStale(keys []string, expiresAtUnix int64) error
+	MarkMetricsActive(keys []string) error
 	DeleteExpiredStaleness(expireBefore int64) error
 }
 
 // StalenessStore tracks per-metric-point staleness using the metric_staleness DB table.
-// It replaces the old MetricTracker (which stored a JSON blob in app_state).
 //
-// Staleness behavior (unchanged from MetricTracker):
-// 1. A metric present in the current collection cycle has its last_seen_unix updated.
-// 2. A metric that disappears has NaN emitted for up to StalenessWindow duration.
-// 3. After StalenessWindow expires, the row is deleted (metric disappears completely).
+// Staleness behavior:
+// 1. A metric seen in the current cycle that is new gets one INSERT (active, NULL expiry).
+// 2. A metric that disappears gets one UPDATE to set expires_at_unix (stale with deadline).
+// 3. During the stale grace period the metric emits NaN; after it expires the row is deleted.
+// 4. A stale metric that reappears gets one UPDATE to clear expires_at_unix.
+// 5. Active metrics that remain active require zero DB writes per cycle.
 type StalenessStore struct {
 	db              StalenessDB
 	stalenessWindow time.Duration
-	batchSize       int
 }
 
 // NewStalenessStore creates a StalenessStore backed by the given database.
@@ -43,58 +43,88 @@ func NewStalenessStore(db StalenessDB, stalenessWindow time.Duration) *Staleness
 	return &StalenessStore{
 		db:              db,
 		stalenessWindow: stalenessWindow,
-		batchSize:       defaultBatchSize,
 	}
 }
 
-// QueryStale returns metric rows that were seen in a previous cycle but not in the
-// current one (i.e., they disappeared). The result is small in a stable cluster —
-// safe to load into memory for use when writing NaN lines to the HTTP response.
+// QueryStale returns metric rows in the stale grace period (disappeared but not yet expired).
+// These are emitted as NaN in the current collection cycle.
 func (s *StalenessStore) QueryStale(cycleStart time.Time) ([]database.StalenessRow, error) {
-	return s.db.QueryStaleness(cycleStart.Unix(), int64(s.stalenessWindow.Seconds()))
+	return s.db.QueryStaleness(cycleStart.Unix())
 }
 
-// FlushBatch upserts a batch of staleness rows to the database, setting lastSeenUnix on all rows.
-func (s *StalenessStore) FlushBatch(batch []database.StalenessRow, lastSeenUnix int64) error {
-	for i := range batch {
-		batch[i].LastSeenUnix = lastSeenUnix
+// ApplyDiff compares currentRows (all metric series seen this cycle) against the DB state
+// and writes only what changed:
+//   - New series (not previously tracked) → INSERT
+//   - Disappeared series (tracked as active, not seen this cycle) → mark stale
+//   - Reappeared series (tracked as stale, seen this cycle) → clear stale marker
+//   - Stable series (tracked as active, seen this cycle) → no write
+//
+// In a stable cluster this is one read and zero writes.
+func (s *StalenessStore) ApplyDiff(currentRows []database.StalenessRow, cycleStart time.Time) error {
+	dbRows, err := s.db.LoadStalenessState(cycleStart.Unix())
+	if err != nil {
+		return fmt.Errorf("failed to load staleness state: %w", err)
 	}
-	return s.db.UpsertStaleness(batch)
-}
 
-// FlushAll upserts all staleness rows to the database in batches.
-// Intended to be called after the HTTP response is flushed, so DB writes don't block the client.
-func (s *StalenessStore) FlushAll(rows []database.StalenessRow, cycleStart time.Time) {
-	if len(rows) == 0 {
-		return
-	}
-	cycleStartUnix := cycleStart.Unix()
-	for i := range rows {
-		rows[i].LastSeenUnix = cycleStartUnix
-	}
-	for i := 0; i < len(rows); i += s.batchSize {
-		end := i + s.batchSize
-		if end > len(rows) {
-			end = len(rows)
-		}
-		if err := s.db.UpsertStaleness(rows[i:end]); err != nil {
-			log.Warn("failed to flush staleness batch", "error", err)
+	activeInDB := make(map[string]bool, len(dbRows))
+	staleInDB := make(map[string]bool)
+	for _, r := range dbRows {
+		if r.ExpiresAtUnix == nil {
+			activeInDB[r.MetricKey] = true
+		} else {
+			staleInDB[r.MetricKey] = true
 		}
 	}
+
+	currentKeys := make(map[string]bool, len(currentRows))
+	var toInsert []database.StalenessRow
+	var toActivate []string
+	for _, r := range currentRows {
+		currentKeys[r.MetricKey] = true
+		switch {
+		case activeInDB[r.MetricKey]:
+			// Already active — no write needed
+		case staleInDB[r.MetricKey]:
+			// Was stale, now back — clear stale marker
+			toActivate = append(toActivate, r.MetricKey)
+		default:
+			// Brand new — insert
+			toInsert = append(toInsert, r)
+		}
+	}
+
+	expiresAt := cycleStart.Unix() + int64(s.stalenessWindow.Seconds())
+	var toStale []string
+	for key := range activeInDB {
+		if !currentKeys[key] {
+			toStale = append(toStale, key)
+		}
+	}
+
+	if len(toInsert) > 0 {
+		if err := s.db.InsertNewMetrics(toInsert); err != nil {
+			return fmt.Errorf("failed to insert new metrics: %w", err)
+		}
+	}
+	if len(toActivate) > 0 {
+		if err := s.db.MarkMetricsActive(toActivate); err != nil {
+			return fmt.Errorf("failed to reactivate metrics: %w", err)
+		}
+	}
+	if len(toStale) > 0 {
+		if err := s.db.MarkMetricsStale(toStale, expiresAt); err != nil {
+			return fmt.Errorf("failed to mark metrics stale: %w", err)
+		}
+	}
+	return nil
 }
 
-// DeleteExpired removes staleness rows that are past the staleness window.
-// Intended to be called asynchronously after the HTTP response is flushed.
+// DeleteExpired removes staleness rows whose expiry has passed.
+// Intended to be called asynchronously after each collection cycle.
 func (s *StalenessStore) DeleteExpired(cycleStart time.Time) {
-	expireBefore := cycleStart.Unix() - int64(s.stalenessWindow.Seconds())
-	if err := s.db.DeleteExpiredStaleness(expireBefore); err != nil {
+	if err := s.db.DeleteExpiredStaleness(cycleStart.Unix()); err != nil {
 		log.Warn("failed to delete expired staleness entries", "error", err)
 	}
-}
-
-// BatchSize returns the configured batch size (exposed for tests).
-func (s *StalenessStore) BatchSize() int {
-	return s.batchSize
 }
 
 // StalenessWindow returns the configured staleness window.

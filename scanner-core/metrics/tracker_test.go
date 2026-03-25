@@ -13,14 +13,16 @@ import (
 // since they all live in the same package.
 // mu protects all fields because DeleteExpired runs in a goroutine concurrently with QueryStale.
 type mockStalenessDB struct {
-	mu      sync.Mutex
-	rows    []database.StalenessRow
-	upserts [][]database.StalenessRow
-	deleted int64
-	err     error
+	mu        sync.Mutex
+	rows      []database.StalenessRow
+	inserts   []database.StalenessRow
+	staled    []string
+	activated []string
+	deleted   int64
+	err       error
 }
 
-func (m *mockStalenessDB) QueryStaleness(cycleStart, windowSecs int64) ([]database.StalenessRow, error) {
+func (m *mockStalenessDB) QueryStaleness(cycleStart int64) ([]database.StalenessRow, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
@@ -28,31 +30,80 @@ func (m *mockStalenessDB) QueryStaleness(cycleStart, windowSecs int64) ([]databa
 	}
 	var stale []database.StalenessRow
 	for _, r := range m.rows {
-		if r.LastSeenUnix < cycleStart && r.LastSeenUnix >= cycleStart-windowSecs {
+		if r.ExpiresAtUnix != nil && *r.ExpiresAtUnix > cycleStart {
 			stale = append(stale, r)
 		}
 	}
 	return stale, nil
 }
 
-func (m *mockStalenessDB) UpsertStaleness(batch []database.StalenessRow) error {
+func (m *mockStalenessDB) LoadStalenessState(cycleStart int64) ([]database.StalenessRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return nil, m.err
+	}
+	var result []database.StalenessRow
+	for _, r := range m.rows {
+		if r.ExpiresAtUnix == nil || *r.ExpiresAtUnix > cycleStart {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockStalenessDB) InsertNewMetrics(batch []database.StalenessRow) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
 	}
-	m.upserts = append(m.upserts, batch)
 	for _, newRow := range batch {
 		found := false
-		for i, r := range m.rows {
+		for _, r := range m.rows {
 			if r.MetricKey == newRow.MetricKey {
-				m.rows[i] = newRow
 				found = true
 				break
 			}
 		}
 		if !found {
 			m.rows = append(m.rows, newRow)
+			m.inserts = append(m.inserts, newRow)
+		}
+	}
+	return nil
+}
+
+func (m *mockStalenessDB) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.staled = append(m.staled, keys...)
+	for _, key := range keys {
+		for i, r := range m.rows {
+			if r.MetricKey == key {
+				v := expiresAtUnix
+				m.rows[i].ExpiresAtUnix = &v
+			}
+		}
+	}
+	return nil
+}
+
+func (m *mockStalenessDB) MarkMetricsActive(keys []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.activated = append(m.activated, keys...)
+	for _, key := range keys {
+		for i, r := range m.rows {
+			if r.MetricKey == key {
+				m.rows[i].ExpiresAtUnix = nil
+			}
 		}
 	}
 	return nil
@@ -67,7 +118,7 @@ func (m *mockStalenessDB) DeleteExpiredStaleness(expireBefore int64) error {
 	m.deleted = expireBefore
 	var kept []database.StalenessRow
 	for _, r := range m.rows {
-		if r.LastSeenUnix >= expireBefore {
+		if r.ExpiresAtUnix == nil || *r.ExpiresAtUnix >= expireBefore {
 			kept = append(kept, r)
 		}
 	}
@@ -75,15 +126,16 @@ func (m *mockStalenessDB) DeleteExpiredStaleness(expireBefore int64) error {
 	return nil
 }
 
+func ptr64(v int64) *int64 { return &v }
+
+// ── StalenessStore construction ──────────────────────────────────────────────
+
 func TestNewStalenessStore_Defaults(t *testing.T) {
 	db := &mockStalenessDB{}
 	s := NewStalenessStore(db, 0) // zero → DefaultStalenessWindow
 
 	if s.StalenessWindow() != DefaultStalenessWindow {
 		t.Errorf("Expected default window %v, got %v", DefaultStalenessWindow, s.StalenessWindow())
-	}
-	if s.BatchSize() != defaultBatchSize {
-		t.Errorf("Expected batch size %d, got %d", defaultBatchSize, s.BatchSize())
 	}
 }
 
@@ -97,22 +149,25 @@ func TestNewStalenessStore_CustomWindow(t *testing.T) {
 	}
 }
 
+// ── QueryStale ───────────────────────────────────────────────────────────────
+
 func TestStalenessStore_QueryStale(t *testing.T) {
 	cycleStart := time.Unix(2000000, 0)
-	window := time.Hour
+	futureExpiry := cycleStart.Unix() + 3600 // expires 1 hour after cycleStart
+	pastExpiry := cycleStart.Unix() - 1      // already expired
 
 	db := &mockStalenessDB{
 		rows: []database.StalenessRow{
-			// Within staleness window — should be returned
-			{MetricKey: "stale_metric", FamilyName: "family1", LastSeenUnix: cycleStart.Unix() - 100},
-			// Past the staleness window — should NOT be returned
-			{MetricKey: "expired_metric", FamilyName: "family2", LastSeenUnix: cycleStart.Unix() - int64(window.Seconds()) - 1},
-			// Same timestamp as cycleStart — not stale (current cycle)
-			{MetricKey: "current_metric", FamilyName: "family3", LastSeenUnix: cycleStart.Unix()},
+			// Stale, not yet expired — should be returned
+			{MetricKey: "stale_metric", FamilyName: "f1", LabelsJSON: `{}`, ExpiresAtUnix: ptr64(futureExpiry)},
+			// Already expired — should NOT be returned
+			{MetricKey: "expired_metric", FamilyName: "f2", LabelsJSON: `{}`, ExpiresAtUnix: ptr64(pastExpiry)},
+			// Active (nil expiry) — should NOT be returned
+			{MetricKey: "active_metric", FamilyName: "f3", LabelsJSON: `{}`, ExpiresAtUnix: nil},
 		},
 	}
 
-	s := NewStalenessStore(db, window)
+	s := NewStalenessStore(db, time.Hour)
 	stale, err := s.QueryStale(cycleStart)
 	if err != nil {
 		t.Fatalf("QueryStale failed: %v", err)
@@ -139,74 +194,149 @@ func TestStalenessStore_QueryStale_Empty(t *testing.T) {
 	}
 }
 
-func TestStalenessStore_FlushBatch(t *testing.T) {
-	db := &mockStalenessDB{}
+// ── ApplyDiff ────────────────────────────────────────────────────────────────
+
+func TestApplyDiff_NewMetrics(t *testing.T) {
+	db := &mockStalenessDB{} // empty DB
 	s := NewStalenessStore(db, time.Hour)
 
-	batch := []database.StalenessRow{
+	current := []database.StalenessRow{
 		{MetricKey: "m1", FamilyName: "f1", LabelsJSON: `{}`},
-		{MetricKey: "m2", FamilyName: "f2", LabelsJSON: `{}`},
+		{MetricKey: "m2", FamilyName: "f1", LabelsJSON: `{}`},
 	}
 
-	lastSeen := int64(1000000)
-	if err := s.FlushBatch(batch, lastSeen); err != nil {
-		t.Fatalf("FlushBatch failed: %v", err)
+	if err := s.ApplyDiff(current, time.Now()); err != nil {
+		t.Fatalf("ApplyDiff failed: %v", err)
 	}
 
-	if len(db.upserts) != 1 {
-		t.Fatalf("Expected 1 upsert call, got %d", len(db.upserts))
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if len(db.inserts) != 2 {
+		t.Errorf("Expected 2 inserts for new metrics, got %d", len(db.inserts))
 	}
-	for _, row := range db.upserts[0] {
-		if row.LastSeenUnix != lastSeen {
-			t.Errorf("Expected LastSeenUnix=%d, got %d", lastSeen, row.LastSeenUnix)
-		}
+	if len(db.staled) != 0 {
+		t.Errorf("Expected 0 stale marks, got %d", len(db.staled))
 	}
-
-	// Verify rows are stored in mock
-	if len(db.rows) != 2 {
-		t.Errorf("Expected 2 rows stored, got %d", len(db.rows))
+	if len(db.activated) != 0 {
+		t.Errorf("Expected 0 activations, got %d", len(db.activated))
 	}
 }
 
-func TestStalenessStore_FlushBatch_Upsert(t *testing.T) {
+func TestApplyDiff_StableCluster_NoWrites(t *testing.T) {
+	// Active rows in DB that match current cycle exactly — zero writes.
 	db := &mockStalenessDB{
 		rows: []database.StalenessRow{
-			{MetricKey: "m1", FamilyName: "f1", LastSeenUnix: 100},
+			{MetricKey: "m1", FamilyName: "f1", LabelsJSON: `{}`, ExpiresAtUnix: nil},
+			{MetricKey: "m2", FamilyName: "f1", LabelsJSON: `{}`, ExpiresAtUnix: nil},
 		},
 	}
 	s := NewStalenessStore(db, time.Hour)
 
-	// Upsert same key with new timestamp
-	batch := []database.StalenessRow{
+	current := []database.StalenessRow{
 		{MetricKey: "m1", FamilyName: "f1", LabelsJSON: `{}`},
-	}
-	if err := s.FlushBatch(batch, 200); err != nil {
-		t.Fatalf("FlushBatch failed: %v", err)
+		{MetricKey: "m2", FamilyName: "f1", LabelsJSON: `{}`},
 	}
 
-	if len(db.rows) != 1 {
-		t.Errorf("Expected 1 row (upsert not insert), got %d", len(db.rows))
+	if err := s.ApplyDiff(current, time.Now()); err != nil {
+		t.Fatalf("ApplyDiff failed: %v", err)
 	}
-	if db.rows[0].LastSeenUnix != 200 {
-		t.Errorf("Expected LastSeenUnix=200 after upsert, got %d", db.rows[0].LastSeenUnix)
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if len(db.inserts) != 0 {
+		t.Errorf("Expected 0 inserts for stable cluster, got %d", len(db.inserts))
+	}
+	if len(db.staled) != 0 {
+		t.Errorf("Expected 0 stale marks for stable cluster, got %d", len(db.staled))
+	}
+	if len(db.activated) != 0 {
+		t.Errorf("Expected 0 activations for stable cluster, got %d", len(db.activated))
 	}
 }
 
+func TestApplyDiff_DisappearedMetric(t *testing.T) {
+	// m1 was active, not seen this cycle → mark stale
+	// m2 was active, still present → no write
+	db := &mockStalenessDB{
+		rows: []database.StalenessRow{
+			{MetricKey: "m1", FamilyName: "f1", LabelsJSON: `{}`, ExpiresAtUnix: nil},
+			{MetricKey: "m2", FamilyName: "f1", LabelsJSON: `{}`, ExpiresAtUnix: nil},
+		},
+	}
+	s := NewStalenessStore(db, time.Hour)
+
+	current := []database.StalenessRow{
+		{MetricKey: "m2", FamilyName: "f1", LabelsJSON: `{}`},
+	}
+
+	cycleStart := time.Unix(2000000, 0)
+	if err := s.ApplyDiff(current, cycleStart); err != nil {
+		t.Fatalf("ApplyDiff failed: %v", err)
+	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if len(db.staled) != 1 || db.staled[0] != "m1" {
+		t.Errorf("Expected m1 to be marked stale, got %v", db.staled)
+	}
+	// Verify expiry is set correctly
+	for _, r := range db.rows {
+		if r.MetricKey == "m1" {
+			if r.ExpiresAtUnix == nil {
+				t.Error("Expected m1 to have expires_at_unix set")
+			} else {
+				expected := cycleStart.Unix() + int64(time.Hour.Seconds())
+				if *r.ExpiresAtUnix != expected {
+					t.Errorf("Expected expires_at_unix=%d, got %d", expected, *r.ExpiresAtUnix)
+				}
+			}
+		}
+	}
+}
+
+func TestApplyDiff_ReappearedMetric(t *testing.T) {
+	// m1 was stale (has expires_at_unix), reappears this cycle → mark active
+	futureExpiry := time.Now().Add(30 * time.Minute).Unix()
+	db := &mockStalenessDB{
+		rows: []database.StalenessRow{
+			{MetricKey: "m1", FamilyName: "f1", LabelsJSON: `{}`, ExpiresAtUnix: ptr64(futureExpiry)},
+		},
+	}
+	s := NewStalenessStore(db, time.Hour)
+
+	current := []database.StalenessRow{
+		{MetricKey: "m1", FamilyName: "f1", LabelsJSON: `{}`},
+	}
+
+	if err := s.ApplyDiff(current, time.Now()); err != nil {
+		t.Fatalf("ApplyDiff failed: %v", err)
+	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if len(db.activated) != 1 || db.activated[0] != "m1" {
+		t.Errorf("Expected m1 to be reactivated, got %v", db.activated)
+	}
+	if len(db.inserts) != 0 {
+		t.Errorf("Expected 0 inserts (was already tracked), got %d", len(db.inserts))
+	}
+}
+
+// ── DeleteExpired ─────────────────────────────────────────────────────────────
+
 func TestStalenessStore_DeleteExpired(t *testing.T) {
 	db := &mockStalenessDB{}
-	window := time.Hour
-	s := NewStalenessStore(db, window)
+	s := NewStalenessStore(db, time.Hour)
 
 	cycleStart := time.Unix(2000000, 0)
 	s.DeleteExpired(cycleStart)
 
-	// Should wait for async goroutine to finish — but DeleteExpired is sync in StalenessStore.
-	// The implementation calls db.DeleteExpiredStaleness synchronously.
-	expectedExpire := cycleStart.Unix() - int64(window.Seconds())
-	if db.deleted != expectedExpire {
-		t.Errorf("Expected expireBefore=%d, got %d", expectedExpire, db.deleted)
+	if db.deleted != cycleStart.Unix() {
+		t.Errorf("Expected expireBefore=%d, got %d", cycleStart.Unix(), db.deleted)
 	}
 }
+
+// ── generateMetricKey ─────────────────────────────────────────────────────────
 
 func TestGenerateMetricKey(t *testing.T) {
 	tests := []struct {

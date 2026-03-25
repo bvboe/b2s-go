@@ -93,12 +93,24 @@ func (m *MockStreamingProvider) StreamNodeVulnerabilitiesForMetrics(cb func(data
 	return nil
 }
 
-func (m *MockStreamingProvider) QueryStaleness(cycleStart, windowSecs int64) ([]database.StalenessRow, error) {
-	return m.stalenessDB.QueryStaleness(cycleStart, windowSecs)
+func (m *MockStreamingProvider) QueryStaleness(cycleStart int64) ([]database.StalenessRow, error) {
+	return m.stalenessDB.QueryStaleness(cycleStart)
 }
 
-func (m *MockStreamingProvider) UpsertStaleness(batch []database.StalenessRow) error {
-	return m.stalenessDB.UpsertStaleness(batch)
+func (m *MockStreamingProvider) LoadStalenessState(cycleStart int64) ([]database.StalenessRow, error) {
+	return m.stalenessDB.LoadStalenessState(cycleStart)
+}
+
+func (m *MockStreamingProvider) InsertNewMetrics(batch []database.StalenessRow) error {
+	return m.stalenessDB.InsertNewMetrics(batch)
+}
+
+func (m *MockStreamingProvider) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
+	return m.stalenessDB.MarkMetricsStale(keys, expiresAtUnix)
+}
+
+func (m *MockStreamingProvider) MarkMetricsActive(keys []string) error {
+	return m.stalenessDB.MarkMetricsActive(keys)
 }
 
 func (m *MockStreamingProvider) DeleteExpiredStaleness(expireBefore int64) error {
@@ -126,7 +138,9 @@ func streamMetricsToString(
 	if err != nil {
 		t.Fatalf("StreamMetrics returned error: %v", err)
 	}
-	staleness.FlushAll(batch, time.Now())
+	if err := staleness.ApplyDiff(batch, time.Now()); err != nil {
+		t.Fatalf("ApplyDiff failed: %v", err)
+	}
 	return buf.String()
 }
 
@@ -320,11 +334,13 @@ func TestStreamMetrics_StalenessTracking(t *testing.T) {
 		t.Fatalf("StreamMetrics failed: %v", err)
 	}
 
-	// FlushAll simulates what the handler does after the HTTP response is flushed.
-	staleness.FlushAll(batch, time.Now())
+	// ApplyDiff simulates what the handler does after the HTTP response is flushed.
+	if err := staleness.ApplyDiff(batch, time.Now()); err != nil {
+		t.Fatalf("ApplyDiff failed: %v", err)
+	}
 
-	// Verify staleness upserts were made
-	if len(provider.stalenessDB.upserts) == 0 {
-		t.Error("Expected staleness upserts to be called after FlushAll")
+	// Verify new metrics were inserted (first cycle — nothing in DB yet)
+	if len(provider.stalenessDB.inserts) == 0 {
+		t.Error("Expected new metrics to be inserted after ApplyDiff")
 	}
 }

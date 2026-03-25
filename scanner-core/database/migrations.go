@@ -195,6 +195,11 @@ var migrations = []migration{
 		name:    "add_metric_staleness_dedicated_table",
 		up:      migrateToV36,
 	},
+	{
+		version: 37,
+		name:    "metric_staleness_expires_at",
+		up:      migrateToV37,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -2434,6 +2439,33 @@ func migrateToV35(conn *sql.DB) error {
 	log.Info("migration v35: successfully added sbom and vulnerabilities columns to nodes table")
 	log.Info("migration v35: sbom: Stores raw SBOM JSON from Syft")
 	log.Info("migration v35: vulnerabilities: Stores raw vulnerability JSON from Grype")
+	return nil
+}
+
+// migrateToV37 replaces last_seen_unix with expires_at_unix in metric_staleness.
+// expires_at_unix is NULL for active metrics and set to the expiry timestamp when
+// a metric disappears. This eliminates the need to rewrite all rows on every cycle:
+// active metrics require no writes; only appearances and disappearances trigger writes.
+func migrateToV37(conn *sql.DB) error {
+	log.Info("migration v37: converting metric_staleness to expires_at_unix model")
+	_, err := conn.Exec(`
+		CREATE TABLE metric_staleness_v37 (
+			metric_key      TEXT PRIMARY KEY,
+			family_name     TEXT NOT NULL,
+			labels_json     TEXT NOT NULL,
+			expires_at_unix INTEGER
+		);
+		INSERT INTO metric_staleness_v37 (metric_key, family_name, labels_json, expires_at_unix)
+			SELECT metric_key, family_name, labels_json, NULL FROM metric_staleness;
+		DROP TABLE metric_staleness;
+		ALTER TABLE metric_staleness_v37 RENAME TO metric_staleness;
+		CREATE INDEX IF NOT EXISTS idx_metric_staleness_expires
+			ON metric_staleness(expires_at_unix) WHERE expires_at_unix IS NOT NULL;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate metric_staleness to v37: %w", err)
+	}
+	log.Info("migration v37: metric_staleness migrated; existing rows marked active (expires_at_unix = NULL)")
 	return nil
 }
 

@@ -47,10 +47,12 @@ func NewMetricsHandler(
 			log.Error("error streaming metrics", "error", err)
 		}
 
-		// Flush staleness DB and delete expired entries after the HTTP response is flushed,
+		// Apply staleness diff and delete expired entries after the HTTP response is flushed,
 		// so slow PVC writes don't block the client.
 		go func() {
-			staleness.FlushAll(batch, cycleStart)
+			if err := staleness.ApplyDiff(batch, cycleStart); err != nil {
+				log.Warn("failed to apply staleness diff", "error", err)
+			}
 			staleness.DeleteExpired(cycleStart)
 		}()
 	}

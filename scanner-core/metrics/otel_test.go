@@ -229,12 +229,13 @@ func TestRecordMetrics_NodeVulnsGoThroughAccumulator(t *testing.T) {
 
 func TestRecordMetrics_NaNForStaleMetrics(t *testing.T) {
 	provider := newMockStreamingProvider()
-	// Pre-seed a stale row in the staleness DB
+	// Pre-seed a stale row with a future expiry so QueryStaleness returns it.
+	futureExpiry := time.Now().Add(1 * time.Hour).Unix()
 	staleRow := database.StalenessRow{
-		MetricKey:    "bjorn2scan_deployment|deployment_name=old-cluster|deployment_uuid=old-uuid",
-		FamilyName:   "bjorn2scan_deployment",
-		LabelsJSON:   `{"deployment_name":"old-cluster","deployment_uuid":"old-uuid"}`,
-		LastSeenUnix: 1, // very old
+		MetricKey:     "bjorn2scan_deployment|deployment_name=old-cluster|deployment_uuid=old-uuid",
+		FamilyName:    "bjorn2scan_deployment",
+		LabelsJSON:    `{"deployment_name":"old-cluster","deployment_uuid":"old-uuid"}`,
+		ExpiresAtUnix: &futureExpiry,
 	}
 	provider.stalenessDB.rows = []database.StalenessRow{staleRow}
 

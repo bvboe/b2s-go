@@ -72,10 +72,9 @@ func collectMetrics(
 		key := generateMetricKey(familyName, labels)
 		liveKeys[key] = struct{}{}
 		batch = append(batch, database.StalenessRow{
-			MetricKey:    key,
-			FamilyName:   familyName,
-			LabelsJSON:   string(labelsJSON),
-			LastSeenUnix: cycleStartUnix,
+			MetricKey:  key,
+			FamilyName: familyName,
+			LabelsJSON: string(labelsJSON),
 		})
 		if onBatchFull != nil && len(batch) >= batchSize {
 			onBatchFull(batch)

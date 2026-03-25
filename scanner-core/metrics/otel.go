@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
 // OTELProtocol represents the protocol to use for OTLP
@@ -147,26 +145,22 @@ func (e *OTELExporter) recordMetrics() {
 
 	accumulator := NewDirectEmitAccumulator(e.ctx, e.sender, batchSize, timeUnixNano)
 
-	onBatchFull := func(batch []database.StalenessRow) {
-		if err := e.staleness.FlushBatch(batch, cycleStartUnix); err != nil {
-			log.Warn("failed to flush staleness batch in OTEL exporter", "error", err)
-		}
-	}
-
 	remaining, err := collectMetrics(e.provider, e.unifiedConfig, e.infoProvider, e.deploymentUUID,
-		deploymentName, cycleStartUnix, staleRows, e.staleness.BatchSize(), accumulator.Record, onBatchFull)
+		deploymentName, cycleStartUnix, staleRows, 0, accumulator.Record, nil)
 	if err != nil {
 		log.Error("error collecting metrics for OTEL", "error", err)
-	}
-	if len(remaining) > 0 {
-		onBatchFull(remaining)
 	}
 
 	if err := accumulator.Flush(); err != nil {
 		log.Error("error flushing OTEL metrics", "error", err)
 	}
 
-	go e.staleness.DeleteExpired(cycleStart)
+	go func() {
+		if err := e.staleness.ApplyDiff(remaining, cycleStart); err != nil {
+			log.Warn("failed to apply staleness diff in OTEL exporter", "error", err)
+		}
+		e.staleness.DeleteExpired(cycleStart)
+	}()
 }
 
 // Shutdown gracefully shuts down the OTEL exporter

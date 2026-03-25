@@ -514,12 +514,13 @@ func (db *DB) SaveMetricStaleness(key string, data string) error {
 }
 
 // StalenessRow represents a single row in the metric_staleness table.
-// Each row tracks when a specific metric data point was last seen during a collection cycle.
+// ExpiresAtUnix is nil for active metrics. It is set to an expiry timestamp when a metric
+// disappears; after that time the row is deleted and NaN emission stops.
 type StalenessRow struct {
-	MetricKey    string // "familyName|label1=v1|label2=v2|..." — unique key for this metric point
-	FamilyName   string // Prometheus metric family name (e.g. "bjorn2scan_image_vulnerability")
-	LabelsJSON   string // JSON-encoded label map, used to reconstruct NaN lines for stale metrics
-	LastSeenUnix int64  // Unix timestamp of the collection cycle that last saw this metric
+	MetricKey     string // "familyName|label1=v1|label2=v2|..." — unique key for this metric point
+	FamilyName    string // Prometheus metric family name (e.g. "bjorn2scan_image_vulnerability")
+	LabelsJSON    string // JSON-encoded label map, used to reconstruct NaN lines for stale metrics
+	ExpiresAtUnix *int64 // nil = active; non-nil = expiry timestamp (set when metric disappears)
 }
 
 // StreamScannedContainers calls callback for each completed container scan row.
@@ -637,17 +638,15 @@ func (db *DB) StreamContainerVulnerabilities(callback func(ContainerVulnerabilit
 	return rows.Err()
 }
 
-// QueryStaleness returns metric rows that were seen in a previous collection cycle but not
-// updated since cycleStart. These are metrics that have recently disappeared and should
-// emit NaN to signal staleness to Prometheus.
-func (db *DB) QueryStaleness(cycleStart, windowSecs int64) ([]StalenessRow, error) {
+// QueryStaleness returns rows in the stale grace period: expires_at_unix is set and
+// has not yet passed. These metrics should emit NaN to signal staleness to Prometheus.
+func (db *DB) QueryStaleness(cycleStart int64) ([]StalenessRow, error) {
 	rows, err := db.conn.Query(`
-		SELECT metric_key, family_name, labels_json, last_seen_unix
+		SELECT metric_key, family_name, labels_json, expires_at_unix
 		FROM metric_staleness
-		WHERE last_seen_unix < ?
-		  AND last_seen_unix >= ?
+		WHERE expires_at_unix IS NOT NULL AND expires_at_unix > ?
 		ORDER BY family_name, metric_key
-	`, cycleStart, cycleStart-windowSecs)
+	`, cycleStart)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query staleness: %w", err)
 	}
@@ -660,18 +659,53 @@ func (db *DB) QueryStaleness(cycleStart, windowSecs int64) ([]StalenessRow, erro
 	var result []StalenessRow
 	for rows.Next() {
 		var r StalenessRow
-		if err := rows.Scan(&r.MetricKey, &r.FamilyName, &r.LabelsJSON, &r.LastSeenUnix); err != nil {
+		var expiresAt int64
+		if err := rows.Scan(&r.MetricKey, &r.FamilyName, &r.LabelsJSON, &expiresAt); err != nil {
 			return nil, fmt.Errorf("failed to scan staleness row: %w", err)
+		}
+		r.ExpiresAtUnix = &expiresAt
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// LoadStalenessState returns all non-expired rows: active (expires_at_unix IS NULL) and
+// stale-in-window (expires_at_unix > cycleStart). Used by StalenessStore.ApplyDiff to
+// compute the diff between the previous and current collection cycle.
+func (db *DB) LoadStalenessState(cycleStart int64) ([]StalenessRow, error) {
+	rows, err := db.conn.Query(`
+		SELECT metric_key, family_name, labels_json, expires_at_unix
+		FROM metric_staleness
+		WHERE expires_at_unix IS NULL OR expires_at_unix > ?
+	`, cycleStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load staleness state: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Warn("failed to close staleness state rows", "error", err)
+		}
+	}()
+
+	var result []StalenessRow
+	for rows.Next() {
+		var r StalenessRow
+		var expiresAt sql.NullInt64
+		if err := rows.Scan(&r.MetricKey, &r.FamilyName, &r.LabelsJSON, &expiresAt); err != nil {
+			return nil, fmt.Errorf("failed to scan staleness state row: %w", err)
+		}
+		if expiresAt.Valid {
+			r.ExpiresAtUnix = &expiresAt.Int64
 		}
 		result = append(result, r)
 	}
 	return result, rows.Err()
 }
 
-// UpsertStaleness bulk-upserts metric staleness rows into the metric_staleness table.
-// Uses INSERT OR REPLACE to handle both new metrics and updates to existing ones.
-// The batch is limited to 1000 rows per call to keep memory bounded.
-func (db *DB) UpsertStaleness(batch []StalenessRow) error {
+// InsertNewMetrics inserts metric rows that are new to the staleness table.
+// Uses INSERT OR IGNORE so re-inserts for already-tracked metrics are no-ops.
+// expires_at_unix is set to NULL (active) for all inserted rows.
+func (db *DB) InsertNewMetrics(batch []StalenessRow) error {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -686,9 +720,8 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// SQLite has a limit of 999 parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
-	// With 4 columns per row, max safe batch size is 249 rows. We process in chunks.
-	const chunkSize = 200
+	// 3 params per row (metric_key, family_name, labels_json); expires_at_unix is literal NULL.
+	const chunkSize = 250
 	for start := 0; start < len(batch); start += chunkSize {
 		end := start + chunkSize
 		if end > len(batch) {
@@ -696,19 +729,18 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 		}
 		chunk := batch[start:end]
 
-		// Build multi-value INSERT OR REPLACE
-		args := make([]any, 0, len(chunk)*4)
+		args := make([]any, 0, len(chunk)*3)
 		placeholders := make([]string, 0, len(chunk))
 		for _, r := range chunk {
-			placeholders = append(placeholders, "(?,?,?,?)")
-			args = append(args, r.MetricKey, r.FamilyName, r.LabelsJSON, r.LastSeenUnix)
+			placeholders = append(placeholders, "(?,?,?,NULL)")
+			args = append(args, r.MetricKey, r.FamilyName, r.LabelsJSON)
 		}
 
-		query := "INSERT OR REPLACE INTO metric_staleness (metric_key, family_name, labels_json, last_seen_unix) VALUES " +
+		query := "INSERT OR IGNORE INTO metric_staleness (metric_key, family_name, labels_json, expires_at_unix) VALUES " +
 			strings.Join(placeholders, ",")
 		if _, err := tx.Exec(query, args...); err != nil {
 			exitOnCorruption(err)
-			return fmt.Errorf("failed to upsert staleness batch: %w", err)
+			return fmt.Errorf("failed to insert new metrics: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -718,12 +750,87 @@ func (db *DB) UpsertStaleness(batch []StalenessRow) error {
 	return nil
 }
 
-// DeleteExpiredStaleness removes staleness rows older than expireBefore (unix timestamp).
-// Called asynchronously after each collection cycle to prune expired entries.
+// MarkMetricsStale sets expires_at_unix on the given metric keys to signal they have
+// disappeared. Called once per disappeared metric; not called on subsequent cycles.
+func (db *DB) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+
+	// 1 param for expires_at_unix + 1 per key; chunk at 500 keys.
+	const chunkSize = 500
+	for start := 0; start < len(keys); start += chunkSize {
+		end := start + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[start:end]
+
+		args := make([]any, 0, 1+len(chunk))
+		args = append(args, expiresAtUnix)
+		placeholders := make([]string, len(chunk))
+		for i, k := range chunk {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+
+		query := "UPDATE metric_staleness SET expires_at_unix = ? WHERE metric_key IN (" +
+			strings.Join(placeholders, ",") + ")"
+		if _, err := db.conn.Exec(query, args...); err != nil {
+			exitOnCorruption(err)
+			return fmt.Errorf("failed to mark metrics stale: %w", err)
+		}
+	}
+	return nil
+}
+
+// MarkMetricsActive clears expires_at_unix for metrics that have reappeared after being
+// marked stale. Called once per reappeared metric; not called for already-active metrics.
+func (db *DB) MarkMetricsActive(keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+
+	const chunkSize = 900
+	for start := 0; start < len(keys); start += chunkSize {
+		end := start + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[start:end]
+
+		args := make([]any, len(chunk))
+		placeholders := make([]string, len(chunk))
+		for i, k := range chunk {
+			placeholders[i] = "?"
+			args[i] = k
+		}
+
+		query := "UPDATE metric_staleness SET expires_at_unix = NULL WHERE metric_key IN (" +
+			strings.Join(placeholders, ",") + ")"
+		if _, err := db.conn.Exec(query, args...); err != nil {
+			exitOnCorruption(err)
+			return fmt.Errorf("failed to mark metrics active: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteExpiredStaleness removes rows whose expires_at_unix has passed.
+// Called asynchronously after each collection cycle.
 func (db *DB) DeleteExpiredStaleness(expireBefore int64) error {
 	db.writeMu.Lock()
 	defer db.writeMu.Unlock()
-	_, err := db.conn.Exec(`DELETE FROM metric_staleness WHERE last_seen_unix < ?`, expireBefore)
+	_, err := db.conn.Exec(
+		`DELETE FROM metric_staleness WHERE expires_at_unix IS NOT NULL AND expires_at_unix < ?`,
+		expireBefore,
+	)
 	if err != nil {
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete expired staleness: %w", err)
