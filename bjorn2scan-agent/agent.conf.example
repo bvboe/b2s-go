@@ -147,15 +147,6 @@ jobs_rescan_database_interval=30m
 # Should be long enough to scan all images in your environment
 jobs_rescan_database_timeout=30m
 
-# --- Future Jobs ---
-# Additional scheduled jobs can be configured here as they are implemented
-# Examples:
-#
-# jobs_telemetry_enabled=false
-# jobs_telemetry_interval=5m
-# jobs_telemetry_jitter=2m
-# jobs_telemetry_timeout=30s
-
 # ============================================================================
 # OPENTELEMETRY METRICS CONFIGURATION
 # ============================================================================

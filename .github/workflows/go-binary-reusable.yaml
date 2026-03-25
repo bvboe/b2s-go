@@ -194,10 +194,14 @@ jobs:
           if [ -f "$file" ]; then
             echo "Signing $file..."
             # Emit a Sigstore bundle (.sigstore) for programmatic verification by the
-            # auto-updater (sigstore/sigstore-go).  The legacy .sig/.cert pair is kept
-            # alongside for users who verify manually with the cosign CLI.
+            # auto-updater (sigstore/sigstore-go).  --new-bundle-format is required so
+            # sigstore-go's bundle.LoadJSONFromPath can parse it (the old default format
+            # uses base64Signature which sigstore-go v1.1.4+ does not understand).
+            # The legacy .sig/.cert pair is kept alongside for users who verify manually
+            # with the cosign CLI.
             cosign sign-blob --yes "$file" \
               --bundle "${file}.sigstore" \
+              --new-bundle-format \
               --output-signature "${file}.sig" \
               --output-certificate "${file}.cert"
             echo "✓ Signed: $file (bundle: ${file}.sigstore)"

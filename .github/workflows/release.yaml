@@ -201,8 +201,13 @@ jobs:
         # Sign the packaged .tgz as a blob and emit a Sigstore bundle.
         # The bundle is uploaded to GitHub releases so the k8s-update-controller
         # can fetch and verify it before applying a chart update.
+        # --new-bundle-format emits the Sigstore bundle spec format (mediaType +
+        # verificationMaterial), which is required by sigstore-go's bundle.LoadJSONFromPath.
+        # The old default format (base64Signature + cert + rekorBundle) is not understood
+        # by sigstore-go v1.1.4+ and will fail with "unknown field base64Signature".
         cosign sign-blob --yes \
           --bundle "${CHART_TGZ}.sigstore" \
+          --new-bundle-format \
           "${CHART_TGZ}"
 
         echo "OCI artifact signed: ${CHART_REF}"
