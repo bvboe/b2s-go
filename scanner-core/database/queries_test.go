@@ -62,8 +62,12 @@ func TestGetScannedContainers(t *testing.T) {
 		t.Fatalf("Failed to update status: %v", err)
 	}
 
-	// Get scanned instances
-	instances, err := db.GetScannedContainers()
+	// Get scanned instances via streaming variant
+	var instances []ScannedContainer
+	err = db.StreamScannedContainers(func(sc ScannedContainer) error {
+		instances = append(instances, sc)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to get scanned instances: %v", err)
 	}
@@ -157,7 +161,11 @@ func TestGetScannedContainers_OnlyReturnsCompleted(t *testing.T) {
 	}
 
 	// Get scanned instances - should only return completed instances
-	instances, err := db.GetScannedContainers()
+	var instances []ScannedContainer
+	err = db.StreamScannedContainers(func(sc ScannedContainer) error {
+		instances = append(instances, sc)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to get scanned instances: %v", err)
 	}
@@ -239,8 +247,12 @@ func TestGetContainerVulnerabilities(t *testing.T) {
 		t.Fatalf("Failed to insert vulnerability 2: %v", err)
 	}
 
-	// Get vulnerability instances
-	vulnInstances, err := db.GetContainerVulnerabilities()
+	// Get vulnerability instances via streaming variant
+	var vulnInstances []ContainerVulnerability
+	err = db.StreamContainerVulnerabilities(func(cv ContainerVulnerability) error {
+		vulnInstances = append(vulnInstances, cv)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to get vulnerability instances: %v", err)
 	}
@@ -334,7 +346,11 @@ func TestGetContainerVulnerabilities_EmptyResult(t *testing.T) {
 	}
 
 	// Get vulnerability instances - should be empty
-	vulnInstances, err := db.GetContainerVulnerabilities()
+	var vulnInstances []ContainerVulnerability
+	err = db.StreamContainerVulnerabilities(func(cv ContainerVulnerability) error {
+		vulnInstances = append(vulnInstances, cv)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to get vulnerability instances: %v", err)
 	}
@@ -436,7 +452,11 @@ func TestGetContainerVulnerabilities_OnlyCompletedScans(t *testing.T) {
 	}
 
 	// Get vulnerability instances - should only return completed
-	vulnInstances, err := db.GetContainerVulnerabilities()
+	var vulnInstances []ContainerVulnerability
+	err = db.StreamContainerVulnerabilities(func(cv ContainerVulnerability) error {
+		vulnInstances = append(vulnInstances, cv)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Failed to get vulnerability instances: %v", err)
 	}

@@ -27,6 +27,8 @@ type NodeRow struct {
 	GrypeDBBuilt     sql.NullString
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	PackageCount     int
+	VulnerabilityCount int
 }
 
 // AddNode adds a new node to the database or returns existing
@@ -171,7 +173,9 @@ func (db *DB) GetNode(name string) (*nodes.NodeWithStatus, error) {
 	err := db.conn.QueryRow(`
 		SELECT id, name, hostname, os_release, kernel_version, architecture,
 			container_runtime, kubelet_version, status, status_error,
-			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at
+			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at,
+			(SELECT COUNT(*) FROM node_packages WHERE node_id = nodes.id),
+			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = nodes.id)
 		FROM nodes
 		WHERE name = ?
 	`, name).Scan(
@@ -179,6 +183,7 @@ func (db *DB) GetNode(name string) (*nodes.NodeWithStatus, error) {
 		&row.Architecture, &row.ContainerRuntime, &row.KubeletVersion,
 		&row.Status, &row.StatusError, &row.SBOMScannedAt, &row.VulnsScannedAt,
 		&row.GrypeDBBuilt, &row.CreatedAt, &row.UpdatedAt,
+		&row.PackageCount, &row.VulnerabilityCount,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -195,7 +200,9 @@ func (db *DB) GetAllNodes() ([]nodes.NodeWithStatus, error) {
 	rows, err := db.conn.Query(`
 		SELECT id, name, hostname, os_release, kernel_version, architecture,
 			container_runtime, kubelet_version, status, status_error,
-			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at
+			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at,
+			(SELECT COUNT(*) FROM node_packages WHERE node_id = nodes.id),
+			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = nodes.id)
 		FROM nodes
 		ORDER BY name
 	`)
@@ -203,8 +210,6 @@ func (db *DB) GetAllNodes() ([]nodes.NodeWithStatus, error) {
 		return nil, fmt.Errorf("failed to query nodes: %w", err)
 	}
 
-	// Collect all rows first before making additional queries
-	// This avoids SQLite connection issues with nested queries
 	var nodeRows []NodeRow
 	for rows.Next() {
 		var row NodeRow
@@ -213,6 +218,7 @@ func (db *DB) GetAllNodes() ([]nodes.NodeWithStatus, error) {
 			&row.Architecture, &row.ContainerRuntime, &row.KubeletVersion,
 			&row.Status, &row.StatusError, &row.SBOMScannedAt, &row.VulnsScannedAt,
 			&row.GrypeDBBuilt, &row.CreatedAt, &row.UpdatedAt,
+			&row.PackageCount, &row.VulnerabilityCount,
 		)
 		if err != nil {
 			_ = rows.Close()
@@ -284,23 +290,8 @@ func (db *DB) nodeRowToNodeWithStatus(row *NodeRow) (*nodes.NodeWithStatus, erro
 		node.GrypeDBBuilt = &t
 	}
 
-	// Get package count
-	var pkgCount int
-	err := db.conn.QueryRow(`
-		SELECT COUNT(*) FROM node_packages WHERE node_id = ?
-	`, row.ID).Scan(&pkgCount)
-	if err == nil {
-		node.PackageCount = pkgCount
-	}
-
-	// Get vulnerability count
-	var vulnCount int
-	err = db.conn.QueryRow(`
-		SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = ?
-	`, row.ID).Scan(&vulnCount)
-	if err == nil {
-		node.VulnerabilityCount = vulnCount
-	}
+	node.PackageCount = row.PackageCount
+	node.VulnerabilityCount = row.VulnerabilityCount
 
 	return node, nil
 }
@@ -1245,7 +1236,9 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 	rows, err := db.conn.Query(`
 		SELECT id, name, hostname, os_release, kernel_version, architecture,
 			container_runtime, kubelet_version, status, status_error,
-			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at
+			sbom_scanned_at, vulns_scanned_at, grype_db_built, created_at, updated_at,
+			(SELECT COUNT(*) FROM node_packages WHERE node_id = nodes.id),
+			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = nodes.id)
 		FROM nodes
 		WHERE (
 			(status = ? AND (grype_db_built IS NULL OR grype_db_built < ?))
@@ -1256,8 +1249,6 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 		return nil, fmt.Errorf("failed to query nodes needing rescan: %w", err)
 	}
 
-	// Collect all rows first before making additional queries
-	// This avoids SQLite connection issues with nested queries
 	var nodeRows []NodeRow
 	for rows.Next() {
 		var row NodeRow
@@ -1266,6 +1257,7 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 			&row.Architecture, &row.ContainerRuntime, &row.KubeletVersion,
 			&row.Status, &row.StatusError, &row.SBOMScannedAt, &row.VulnsScannedAt,
 			&row.GrypeDBBuilt, &row.CreatedAt, &row.UpdatedAt,
+			&row.PackageCount, &row.VulnerabilityCount,
 		)
 		if err != nil {
 			_ = rows.Close()
@@ -1275,8 +1267,6 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 	}
 	_ = rows.Close()
 
-	// Now convert rows to NodeWithStatus (which makes additional queries)
-	// Initialize as empty slice (not nil) so JSON encodes as [] instead of null
 	result := make([]nodes.NodeWithStatus, 0, len(nodeRows))
 	for _, row := range nodeRows {
 		node, err := db.nodeRowToNodeWithStatus(&row)

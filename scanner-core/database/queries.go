@@ -256,26 +256,42 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 		SELECT
 			img.id, img.digest, img.status,
 			img.created_at, img.updated_at, img.sbom_scanned_at,
-			(SELECT COUNT(*) FROM packages WHERE image_id = img.id),
+			COUNT(DISTINCT p.id) as package_count,
 			COALESCE(img.os_name, ''),
-			COALESCE(img.os_version, '')
+			COALESCE(img.os_version, ''),
+			COALESCE(SUM(CASE WHEN LOWER(v.severity) = 'critical' THEN v.count ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN LOWER(v.severity) = 'high' THEN v.count ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN LOWER(v.severity) = 'medium' THEN v.count ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN LOWER(v.severity) IN ('low', 'negligible') THEN v.count ELSE 0 END), 0),
+			COALESCE(SUM(v.count), 0) as vuln_count
 		FROM images img
+		LEFT JOIN packages p ON p.image_id = img.id
+		LEFT JOIN vulnerabilities v ON v.image_id = img.id
+		GROUP BY img.id
 		ORDER BY img.created_at DESC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query images: %w", err)
 	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Warn("failed to close rows", "error", err)
+		}
+	}()
 
-	// Read all images first to avoid deadlock
 	var images []ImageDetails
 	for rows.Next() {
 		var details ImageDetails
 		var scannedAt sql.NullString
 		var osName, osVersion sql.NullString
 
-		err := rows.Scan(&details.ID, &details.Digest, &details.Status,
-			&details.CreatedAt, &details.UpdatedAt, &scannedAt, &details.PackageCount,
-			&osName, &osVersion)
+		err := rows.Scan(
+			&details.ID, &details.Digest, &details.Status,
+			&details.CreatedAt, &details.UpdatedAt, &scannedAt,
+			&details.PackageCount, &osName, &osVersion,
+			&details.CriticalCount, &details.HighCount, &details.MediumCount,
+			&details.LowCount, &details.VulnerabilityCount,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan image row: %w", err)
 		}
@@ -291,45 +307,6 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 		}
 
 		images = append(images, details)
-	}
-	if err := rows.Close(); err != nil {
-		log.Warn("failed to close rows", "error", err)
-	}
-
-	// Now get vulnerability counts for each image
-	for i := range images {
-		vulnRows, err := db.conn.Query(`
-			SELECT
-				LOWER(severity),
-				SUM(count) as total
-			FROM vulnerabilities
-			WHERE image_id = ?
-			GROUP BY LOWER(severity)
-		`, images[i].ID)
-		if err == nil {
-			totalVulns := 0
-			for vulnRows.Next() {
-				var severity string
-				var count int
-				if err := vulnRows.Scan(&severity, &count); err == nil {
-					totalVulns += count
-					switch severity {
-					case "critical":
-						images[i].CriticalCount = count
-					case "high":
-						images[i].HighCount = count
-					case "medium":
-						images[i].MediumCount = count
-					case "low", "negligible":
-						images[i].LowCount += count
-					}
-				}
-			}
-			images[i].VulnerabilityCount = totalVulns
-			if err := vulnRows.Close(); err != nil {
-				log.Warn("failed to close vulnerability rows", "error", err)
-			}
-		}
 	}
 
 	return images, nil
@@ -384,53 +361,6 @@ type ScannedContainer struct {
 	Architecture string `json:"architecture"`
 }
 
-// GetScannedContainers returns all containers where scan is completed
-func (db *DB) GetScannedContainers() ([]ScannedContainer, error) {
-	rows, err := db.conn.Query(`
-		SELECT
-			c.namespace,
-			c.pod,
-			c.name,
-			c.node_name,
-			c.reference,
-			img.digest,
-			COALESCE(img.os_name, '') as os_name,
-			COALESCE(img.architecture, '') as architecture
-		FROM containers c
-		JOIN images img ON c.image_id = img.id
-		WHERE img.status = 'completed'
-		ORDER BY c.namespace, c.pod, c.name
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query scanned containers: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			log.Warn("failed to close rows", "error", err)
-		}
-	}()
-
-	var result []ScannedContainer
-	for rows.Next() {
-		var sc ScannedContainer
-		err := rows.Scan(
-			&sc.Namespace,
-			&sc.Pod,
-			&sc.Name,
-			&sc.NodeName,
-			&sc.Reference,
-			&sc.Digest,
-			&sc.OSName,
-			&sc.Architecture,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan container row: %w", err)
-		}
-		result = append(result, sc)
-	}
-
-	return result, nil
-}
 
 // ImageScanStatusCount represents the count of images by scan status
 type ImageScanStatusCount struct {
@@ -520,72 +450,6 @@ type ContainerVulnerability struct {
 	Risk           float64 `json:"risk"`
 }
 
-// GetContainerVulnerabilities returns all vulnerabilities for all running containers
-func (db *DB) GetContainerVulnerabilities() ([]ContainerVulnerability, error) {
-	rows, err := db.conn.Query(`
-		SELECT
-			v.id,
-			c.namespace,
-			c.pod,
-			c.name,
-			c.node_name,
-			c.reference,
-			img.digest,
-			COALESCE(img.os_name, '') as os_name,
-			v.cve_id,
-			COALESCE(v.package_name, '') as package_name,
-			COALESCE(v.package_version, '') as package_version,
-			COALESCE(v.severity, '') as severity,
-			COALESCE(v.fix_status, '') as fix_status,
-			COALESCE(v.fixed_version, '') as fixed_version,
-			v.count,
-			v.known_exploited,
-			v.risk
-		FROM containers c
-		JOIN images img ON c.image_id = img.id
-		JOIN vulnerabilities v ON img.id = v.image_id
-		WHERE img.status = 'completed'
-		ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query container vulnerabilities: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			log.Warn("failed to close rows", "error", err)
-		}
-	}()
-
-	var result []ContainerVulnerability
-	for rows.Next() {
-		var cv ContainerVulnerability
-		err := rows.Scan(
-			&cv.VulnID,
-			&cv.Namespace,
-			&cv.Pod,
-			&cv.Name,
-			&cv.NodeName,
-			&cv.Reference,
-			&cv.Digest,
-			&cv.OSName,
-			&cv.CVEID,
-			&cv.PackageName,
-			&cv.PackageVersion,
-			&cv.Severity,
-			&cv.FixStatus,
-			&cv.FixedVersion,
-			&cv.Count,
-			&cv.KnownExploited,
-			&cv.Risk,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan container vulnerability row: %w", err)
-		}
-		result = append(result, cv)
-	}
-
-	return result, nil
-}
 
 // LoadMetricStaleness loads the metric staleness data from the database
 // Returns empty string if no data exists
