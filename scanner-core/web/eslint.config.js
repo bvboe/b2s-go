@@ -32,6 +32,8 @@ const sharedGlobals = {
     renderVersionFooter: "readonly",
     checkForUpdates: "readonly",
     initPage: "readonly",
+    // Classes
+    CustomMultiSelect: "readonly",
     // Global variables
     pageConfig: "writable",
     currentPage: "writable",

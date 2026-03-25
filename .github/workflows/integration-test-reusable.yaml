@@ -151,7 +151,7 @@ jobs:
         minikube image load k8s-update-controller:test
 
     - name: Set up Helm
-      uses: azure/setup-helm@v4
+      uses: azure/setup-helm@v5
       with:
         version: 'latest'
 
