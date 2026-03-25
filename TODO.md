@@ -61,6 +61,12 @@
   - [ ] AKS
 
 ## Recently Completed
+- [x] [2026-03-25] Eliminated N+1 database queries and fixed WAL growth
+  - Replaced `GetAllImageDetails` 1+N pattern (one vuln GROUP BY per image) with a single LEFT JOIN + conditional SUM query
+  - Inlined COUNT subqueries in `GetNode`/`GetAllNodes`/`GetNodesNeedingRescan` — eliminated 2 extra `QueryRow` calls per node
+  - Switched WAL checkpoint from PASSIVE to RESTART so the monitor makes progress while long-running readers (Prometheus scrapes, OTEL exports) are active
+  - Lowered WAL warning threshold from 500k to 25k frames (~100MB)
+  - Deleted dead code: `GetScannedContainers` and `GetContainerVulnerabilities` (streaming variants used everywhere)
 - [x] [2026-03-23] Supply-chain security: cosign signature verification and image digest pinning
   - **Agent**: Real sigstore/sigstore-go verification in `bjorn2scan-agent/updater/verifier.go` — fetches Sigstore trusted root, verifies `.sigstore` bundle against tarball before extraction; on by default
   - **Controller**: Real sigstore/sigstore-go verification in `k8s-update-controller/controller/registry_client.go` — downloads bundle from GitHub releases via HTTP, verifies chart `.tgz` before applying; on by default
