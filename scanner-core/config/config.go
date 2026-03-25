@@ -138,7 +138,7 @@ func defaultConfig() *Config {
 		OTELMetricsEnabled:      false,
 		OTELMetricsEndpoint:     "localhost:4317",
 		OTELMetricsProtocol:     "grpc", // Use "http" for Prometheus native OTLP
-		OTELMetricsPushInterval: 1 * time.Minute,
+		OTELMetricsPushInterval: 15 * time.Minute,
 		OTELMetricsInsecure:     true,
 		OTELUseDirectExport:     true,  // Bypass SDK buffering for high-cardinality node metrics
 		OTELDirectBatchSize:     5000,  // Batch size for direct export
