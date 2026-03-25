@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -237,36 +238,36 @@ func registerUpdaterHandlers(mux *http.ServeMux, u *updater.Updater) {
 	})
 }
 
-// setupLogging configures logging to write to both stdout and a log file
-func setupLogging() (*os.File, error) {
+// setupLogging configures logging to write to both stderr (journald) and a log file.
+// Returns the open log file so the caller can defer its Close().
+func setupLogging() *os.File {
 	logDir := "/var/log/bjorn2scan"
 	logFile := filepath.Join(logDir, "agent.log")
 
-	// Try to create log file, but don't fail if we can't
 	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		// If we can't create the log file, just log to stdout
-		logging.For(logging.ComponentHTTP).Warn("could not open log file (logging to stdout only)", "path", logFile, "error", err)
-		return nil, nil
+		// Can't open log file — fall back to stderr only
+		logging.InitFromEnv()
+		logging.For(logging.ComponentHTTP).Warn("could not open log file (logging to stderr only)", "path", logFile, "error", err)
+		return nil
 	}
 
-	// Log to both stdout (systemd journal) and file
-	multiWriter := io.MultiWriter(os.Stdout, file)
-	log.SetOutput(multiWriter)
+	// Tee all structured logs to both stderr (journald) and the file
+	w := io.MultiWriter(os.Stderr, file)
+	logging.InitWithWriter(w, slog.LevelInfo, false)
+
+	// Also redirect stdlib log to the same writer for any third-party log.Printf calls
+	log.SetOutput(w)
 	log.SetFlags(log.LstdFlags)
 
-	return file, nil
+	return file
 }
 
 func main() {
-	// Setup logging to both stdout and file
-	logFile, _ := setupLogging()
-	if logFile != nil {
+	// Setup logging to both stderr (journald) and file; logging.Init is called inside
+	if logFile := setupLogging(); logFile != nil {
 		defer func() { _ = logFile.Close() }()
 	}
-
-	// Initialize logging first
-	logging.InitFromEnv()
 
 	// Load configuration from file with environment variable overrides
 	cfg, err := config.LoadConfigWithDefaults()

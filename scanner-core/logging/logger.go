@@ -14,6 +14,7 @@
 package logging
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -79,6 +80,37 @@ func Init(level slog.Level, jsonFormat bool) {
 		mu.Unlock()
 
 		// Also set as default slog logger for stdlib compatibility
+		slog.SetDefault(defaultLogger)
+	})
+}
+
+// InitWithWriter initializes the logger writing to w instead of os.Stderr.
+// Use this to tee logs to multiple destinations (e.g. journald + file):
+//
+//	w := io.MultiWriter(os.Stderr, logFile)
+//	logging.InitWithWriter(w, slog.LevelInfo, false)
+func InitWithWriter(w io.Writer, level slog.Level, jsonFormat bool) {
+	once.Do(func() {
+		if envLevel := os.Getenv("LOG_LEVEL"); envLevel != "" {
+			level = parseLevel(envLevel)
+		}
+		if envFormat := os.Getenv("LOG_FORMAT"); envFormat != "" {
+			jsonFormat = strings.ToLower(envFormat) == "json"
+		}
+
+		opts := &slog.HandlerOptions{Level: level}
+
+		var handler slog.Handler
+		if jsonFormat {
+			handler = slog.NewJSONHandler(w, opts)
+		} else {
+			handler = slog.NewTextHandler(w, opts)
+		}
+
+		mu.Lock()
+		defaultLogger = slog.New(handler)
+		mu.Unlock()
+
 		slog.SetDefault(defaultLogger)
 	})
 }
