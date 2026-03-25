@@ -312,41 +312,73 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 	return images, nil
 }
 
-// GetLastUpdatedTimestamp returns a change signature that detects any data modifications
-// dataType parameter can be "image", "all", or empty (defaults to "all")
-// Returns a signature in format: "timestamp|count" (e.g., "2025-12-24T18:00:00Z|42")
-//
-// This signature changes when:
-// - images.updated_at changes (scans complete, data updated)
-// - containers count changes (pods added/deleted)
-//
-// Using row count is necessary to detect deletions, since deleted rows have no
-// timestamp to update.
-func (db *DB) GetLastUpdatedTimestamp(dataType string) (string, error) {
-	var signature sql.NullString
+// GetLastUpdatedTimestamp returns a change-detection signature for the UI poll
+// endpoint (/api/lastupdated). The signature is maintained in-memory and updated
+// by notifyWrite() after every write operation, so this call never touches the DB.
+// dataType is accepted for interface compatibility but is not used.
+func (db *DB) GetLastUpdatedTimestamp(_ string) (string, error) {
+	db.cachesMu.RLock()
+	sig := db.lastUpdatedSig
+	db.cachesMu.RUnlock()
+	return sig, nil
+}
 
-	// Build a signature combining timestamp and row count
-	// This detects both data updates (timestamp) and structural changes (count)
-	// Returns empty string if no images exist yet
-	query := `
-		SELECT
-			CASE
-				WHEN COUNT(*) = 0 THEN NULL
-				ELSE MAX(updated_at) || '|' || (SELECT COUNT(*) FROM containers)
-			END
-		FROM images
-	`
+// FilterOptions holds cached distinct values for image filter dropdowns.
+type FilterOptions struct {
+	Namespaces   []string
+	OSNames      []string
+	VulnStatuses []string
+	PackageTypes []string
+}
 
-	err := db.conn.QueryRow(query).Scan(&signature)
-	if err != nil {
-		return "", fmt.Errorf("failed to get last updated signature: %w", err)
+// GetFilterOptions returns image filter options, serving from in-memory cache
+// when available. The cache is invalidated on every write by notifyWrite().
+func (db *DB) GetFilterOptions() (*FilterOptions, error) {
+	db.cachesMu.RLock()
+	cached := db.filterOpts
+	db.cachesMu.RUnlock()
+	if cached != nil {
+		return cached, nil
 	}
 
-	if !signature.Valid {
-		return "", nil
+	opts := &FilterOptions{
+		Namespaces:   make([]string, 0),
+		OSNames:      make([]string, 0),
+		VulnStatuses: make([]string, 0),
+		PackageTypes: make([]string, 0),
 	}
 
-	return signature.String, nil
+	type querySpec struct {
+		sql  string
+		dest *[]string
+	}
+	queries := []querySpec{
+		{"SELECT DISTINCT namespace FROM containers WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace", &opts.Namespaces},
+		{"SELECT DISTINCT os_name FROM images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name", &opts.OSNames},
+		{"SELECT DISTINCT fix_status FROM vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status", &opts.VulnStatuses},
+		{"SELECT DISTINCT type FROM packages WHERE type IS NOT NULL AND type != '' ORDER BY type", &opts.PackageTypes},
+	}
+
+	for _, q := range queries {
+		rows, err := db.conn.Query(q.sql)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query filter options: %w", err)
+		}
+		for rows.Next() {
+			var val string
+			if err := rows.Scan(&val); err == nil && val != "" {
+				*q.dest = append(*q.dest, val)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("failed to close filter options rows: %w", err)
+		}
+	}
+
+	db.cachesMu.Lock()
+	db.filterOpts = opts
+	db.cachesMu.Unlock()
+	return opts, nil
 }
 
 // ScannedContainer represents a container for metrics

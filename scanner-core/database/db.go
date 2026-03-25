@@ -18,9 +18,42 @@ var log = logging.For(logging.ComponentDatabase)
 // DB wraps the database connection.
 // writeMu serializes all write transactions at the Go level so that SQLite
 // never receives a concurrent write and SQLITE_BUSY is impossible.
+// cachesMu protects in-memory caches that eliminate read queries on hot paths.
 type DB struct {
 	writeMu sync.Mutex
 	conn    *sql.DB
+
+	// in-memory caches — updated by notifyWrite() after every successful write
+	cachesMu       sync.RWMutex
+	lastUpdatedSig string            // change-detection signature for /api/lastupdated
+	filterOpts     *FilterOptions    // nil = stale; populated on demand
+	nodeFilterOpts *NodeFilterOptions // nil = stale; populated on demand
+}
+
+// notifyWrite updates the in-memory last-updated signature and invalidates
+// filter-option caches. Must be called after every successful write operation.
+func (db *DB) notifyWrite() {
+	db.cachesMu.Lock()
+	db.lastUpdatedSig = time.Now().UTC().Format(time.RFC3339Nano)
+	db.filterOpts = nil
+	db.nodeFilterOpts = nil
+	db.cachesMu.Unlock()
+}
+
+// seedLastUpdated reads the current last-updated signature from the DB once
+// so that the in-memory cache is non-empty before any write occurs on this run.
+func (db *DB) seedLastUpdated() {
+	var sig sql.NullString
+	_ = db.conn.QueryRow(`
+		SELECT CASE WHEN COUNT(*) = 0 THEN NULL
+			ELSE MAX(updated_at) || '|' || (SELECT COUNT(*) FROM containers)
+		END FROM images
+	`).Scan(&sig)
+	if sig.Valid && sig.String != "" {
+		db.cachesMu.Lock()
+		db.lastUpdatedSig = sig.String
+		db.cachesMu.Unlock()
+	}
 }
 
 // GetConnection returns the underlying database connection (for testing)
@@ -177,6 +210,10 @@ func New(dbPath string) (*DB, error) {
 
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
+
+	// Seed the lastUpdated cache from DB so /api/lastupdated returns a non-empty
+	// value immediately, without hitting the DB on every poll.
+	db.seedLastUpdated()
 
 	log.Info("database initialized", "path", dbPath)
 	return db, nil

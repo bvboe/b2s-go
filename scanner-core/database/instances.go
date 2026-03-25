@@ -121,6 +121,7 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	log.Info("new container added to database",
 		"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
 
+	db.notifyWrite()
 	return true, nil
 }
 
@@ -146,6 +147,7 @@ func (db *DB) RemoveContainer(id containers.ContainerID) error {
 	if rowsAffected > 0 {
 		log.Info("container removed from database",
 			"namespace", id.Namespace, "pod", id.Pod, "name", id.Name)
+		db.notifyWrite()
 	}
 
 	return nil
@@ -233,6 +235,7 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 
 	log.Info("reconciliation complete",
 		"added", stats.ContainersAdded, "removed", stats.ContainersRemoved, "new_images", stats.ImagesAdded)
+	db.notifyWrite()
 	return stats, nil
 }
 

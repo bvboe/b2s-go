@@ -26,24 +26,30 @@ func (m *mockQueryProvider) ExecuteReadOnlyQuery(query string) (*database.QueryR
 	}, nil
 }
 
+// mockFilterOptionsProvider implements FilterOptionsProvider for testing
+type mockFilterOptionsProvider struct {
+	opts *database.FilterOptions
+	err  error
+}
+
+func (m *mockFilterOptionsProvider) GetFilterOptions() (*database.FilterOptions, error) {
+	return m.opts, m.err
+}
+
 func TestFilterOptionsHandler(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockResponse   map[string][]map[string]interface{}
+		opts           *database.FilterOptions
 		expectedStatus int
 		checkResponse  func(t *testing.T, body string)
 	}{
 		{
 			name: "returns filter options successfully",
-			mockResponse: map[string][]map[string]interface{}{
-				"namespaces": {
-					{"namespace": "default"},
-					{"namespace": "kube-system"},
-				},
-				"osNames": {
-					{"os_name": "alpine:3.18"},
-					{"os_name": "ubuntu:22.04"},
-				},
+			opts: &database.FilterOptions{
+				Namespaces:   []string{"default", "kube-system"},
+				OSNames:      []string{"alpine:3.18", "ubuntu:22.04"},
+				VulnStatuses: []string{},
+				PackageTypes: []string{},
 			},
 			expectedStatus: http.StatusOK,
 			checkResponse: func(t *testing.T, body string) {
@@ -61,9 +67,11 @@ func TestFilterOptionsHandler(t *testing.T) {
 		},
 		{
 			name: "handles empty results",
-			mockResponse: map[string][]map[string]interface{}{
-				"namespaces": {},
-				"osNames":    {},
+			opts: &database.FilterOptions{
+				Namespaces:   []string{},
+				OSNames:      []string{},
+				VulnStatuses: []string{},
+				PackageTypes: []string{},
 			},
 			expectedStatus: http.StatusOK,
 			checkResponse: func(t *testing.T, body string) {
@@ -81,30 +89,7 @@ func TestFilterOptionsHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := &mockQueryProvider{
-				queryFunc: func(query string) (*database.QueryResult, error) {
-					// Determine which query based on content
-					var rows []map[string]interface{}
-					var columns []string
-
-					if strings.Contains(query, "namespace") {
-						rows = tt.mockResponse["namespaces"]
-						columns = []string{"namespace"}
-					} else if strings.Contains(query, "os_name") {
-						rows = tt.mockResponse["osNames"]
-						columns = []string{"os_name"}
-					} else if strings.Contains(query, "fix_status") {
-						columns = []string{"fix_status"}
-					} else if strings.Contains(query, "type") {
-						columns = []string{"type"}
-					}
-
-					return &database.QueryResult{
-						Columns: columns,
-						Rows:    rows,
-					}, nil
-				},
-			}
+			provider := &mockFilterOptionsProvider{opts: tt.opts}
 
 			handler := FilterOptionsHandler(provider)
 			req := httptest.NewRequest(http.MethodGet, "/api/filter-options", nil)

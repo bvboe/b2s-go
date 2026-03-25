@@ -29,6 +29,14 @@
   - [ ] **Related**: Node SBOM memory investigation (Test 2.1 results)
 
 ### Performance & Stability
+- [ ] Cache `/api/summary/*` endpoints with write-triggered invalidation
+  - [ ] Apply same notifyWrite() pattern to summary endpoints (scan-status, by-namespace, by-distribution)
+  - [ ] These hit the DB on every UI load; caching eliminates read transactions during WAL-heavy periods
+- [ ] Move OTEL staleness tracking entirely to memory (eliminate per-cycle bulk DB writes)
+  - [ ] Track `last_seen_unix` per metric series in memory only
+  - [ ] Only flush to DB when a series disappears (tombstone write) or on graceful shutdown
+  - [ ] Eliminates ~6,500 WAL frames/5-min on k3s (~26,400 staleness rows rewritten every minute)
+  - [ ] Risk: staleness state lost on crash; stale metrics may persist until next cycle flushes tombstones
 - [ ] Improve log output format to show component before msg
   - [ ] Update `scanner-core/logging/logger.go` to customize slog handler field ordering
   - [ ] Update standalone loggers in `pod-scanner/main.go` and `k8s-update-controller/main.go`

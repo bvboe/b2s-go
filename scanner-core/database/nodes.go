@@ -60,6 +60,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 			exitOnCorruption(err)
 			return false, fmt.Errorf("failed to update node: %w", err)
 		}
+		db.notifyWrite()
 		return false, nil
 	}
 
@@ -82,6 +83,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 
 	id, _ := result.LastInsertId()
 	log.Info("new node added to database", "name", n.Name, "id", id)
+	db.notifyWrite()
 	return true, nil
 }
 
@@ -108,11 +110,12 @@ func (db *DB) UpdateNode(n nodes.Node) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		// Node doesn't exist, add it
+		// Node doesn't exist, add it (AddNode calls notifyWrite internally)
 		_, err = db.AddNode(n)
 		return err
 	}
 
+	db.notifyWrite()
 	return nil
 }
 
@@ -164,6 +167,7 @@ func (db *DB) RemoveNode(name string) error {
 	}
 
 	log.Info("removed node from database", "name", name, "id", nodeID)
+	db.notifyWrite()
 	return nil
 }
 
@@ -449,7 +453,6 @@ func (db *DB) IsNodeScanCompleteBulk(names []string) (map[string]bool, error) {
 // UpdateNodeStatus updates the scan status for a node
 func (db *DB) UpdateNodeStatus(name string, status Status, errorMsg string) error {
 	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
 	_, err := db.conn.Exec(`
 		UPDATE nodes SET
 			status = ?,
@@ -457,10 +460,12 @@ func (db *DB) UpdateNodeStatus(name string, status Status, errorMsg string) erro
 			updated_at = CURRENT_TIMESTAMP
 		WHERE name = ?
 	`, status.String(), errorMsg, name)
+	db.writeMu.Unlock()
 	if err != nil {
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
+	db.notifyWrite()
 	return nil
 }
 
@@ -631,6 +636,7 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 
 	log.Info("stored SBOM for node",
 		"node", name, "unique_packages", len(packageGroups), "total_artifacts", len(sbom.Artifacts))
+	db.notifyWrite()
 	return nil
 }
 
@@ -833,6 +839,7 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		"node", name,
 		"unique", totalInserted,
 		"total_matches", len(report.Matches))
+	db.notifyWrite()
 	return nil
 }
 
@@ -1445,8 +1452,17 @@ func (db *DB) GetScannedNodes() ([]nodes.NodeWithStatus, error) {
 	return result, nil
 }
 
-// GetNodeFilterOptions returns distinct values for node filter dropdowns
+// GetNodeFilterOptions returns distinct values for node filter dropdowns,
+// serving from in-memory cache when available. The cache is invalidated on
+// every write by notifyWrite().
 func (db *DB) GetNodeFilterOptions() (*NodeFilterOptions, error) {
+	db.cachesMu.RLock()
+	cached := db.nodeFilterOpts
+	db.cachesMu.RUnlock()
+	if cached != nil {
+		return cached, nil
+	}
+
 	options := &NodeFilterOptions{
 		OSNames:      make([]string, 0),
 		VulnStatuses: make([]string, 0),
@@ -1504,5 +1520,8 @@ func (db *DB) GetNodeFilterOptions() (*NodeFilterOptions, error) {
 	}
 	_ = pkgRows.Close()
 
+	db.cachesMu.Lock()
+	db.nodeFilterOpts = options
+	db.cachesMu.Unlock()
 	return options, nil
 }

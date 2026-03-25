@@ -18,37 +18,27 @@ type ImageQueryProvider interface {
 	ExecuteReadOnlyQuery(query string) (*database.QueryResult, error)
 }
 
-// FilterOptionsHandler creates an HTTP handler for /api/filter-options endpoint
-// Returns distinct values for all filter dropdowns
-func FilterOptionsHandler(provider ImageQueryProvider) http.HandlerFunc {
+// FilterOptionsProvider provides cached image filter options.
+type FilterOptionsProvider interface {
+	GetFilterOptions() (*database.FilterOptions, error)
+}
+
+// FilterOptionsHandler creates an HTTP handler for /api/filter-options endpoint.
+// Returns distinct values for all filter dropdowns, served from an in-memory cache.
+func FilterOptionsHandler(provider FilterOptionsProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		queries := map[string]string{
-			"namespaces":   "SELECT DISTINCT namespace FROM containers WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace",
-			"osNames":      "SELECT DISTINCT os_name FROM images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name",
-			"vulnStatuses": "SELECT DISTINCT fix_status FROM vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status",
-			"packageTypes": "SELECT DISTINCT type FROM packages WHERE type IS NOT NULL AND type != '' ORDER BY type",
+		opts, err := provider.GetFilterOptions()
+		if err != nil {
+			log.Error("error fetching filter options", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 
-		response := make(map[string][]string)
-
-		for key, query := range queries {
-			result, err := provider.ExecuteReadOnlyQuery(query)
-			if err != nil {
-				log.Error("error fetching filter options", "key", key, "error", err)
-				continue
-			}
-
-			values := make([]string, 0, len(result.Rows))
-			for _, row := range result.Rows {
-				// Get the first column value
-				for _, val := range row {
-					if str, ok := val.(string); ok && str != "" {
-						values = append(values, str)
-					}
-					break // Only take first column
-				}
-			}
-			response[key] = values
+		response := map[string][]string{
+			"namespaces":   opts.Namespaces,
+			"osNames":      opts.OSNames,
+			"vulnStatuses": opts.VulnStatuses,
+			"packageTypes": opts.PackageTypes,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

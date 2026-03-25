@@ -226,6 +226,7 @@ func (db *DB) UpdateStatus(digest string, status Status, errorMsg string) error 
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
+	db.notifyWrite()
 	return nil
 }
 
@@ -280,6 +281,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 		// Don't fail the whole operation if parsing fails
 	}
 
+	db.notifyWrite()
 	return nil
 }
 
@@ -496,6 +498,7 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		// Don't fail the whole operation if parsing fails
 	}
 
+	db.notifyWrite()
 	return nil
 }
 
