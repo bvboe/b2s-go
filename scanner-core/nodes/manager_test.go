@@ -9,16 +9,24 @@ import (
 // mockNodeDatabase implements NodeDatabaseInterface for testing
 type mockNodeDatabase struct {
 	mu           sync.Mutex
-	nodes        map[string]bool // tracks which nodes exist
-	addNodeCalls []string        // tracks AddNode calls
-	returnError  error           // error to return from AddNode
+	nodes        map[string]bool   // tracks which nodes exist
+	addNodeCalls []string          // tracks AddNode calls
+	statuses     map[string]string // per-node scan status (defaults to "pending")
+	returnError  error             // error to return from AddNode
 }
 
 func newMockNodeDatabase() *mockNodeDatabase {
 	return &mockNodeDatabase{
 		nodes:        make(map[string]bool),
 		addNodeCalls: make([]string, 0),
+		statuses:     make(map[string]string),
 	}
+}
+
+func (m *mockNodeDatabase) setStatus(name, status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.statuses[name] = status
 }
 
 func (m *mockNodeDatabase) AddNode(n Node) (bool, error) {
@@ -65,9 +73,15 @@ func (m *mockNodeDatabase) GetNodeScanStatus(name string) (string, error) {
 }
 
 func (m *mockNodeDatabase) GetNodeScanStatusBulk(names []string) (map[string]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	result := make(map[string]string)
 	for _, name := range names {
-		result[name] = "pending"
+		if s, ok := m.statuses[name]; ok {
+			result[name] = s
+		} else {
+			result[name] = "pending"
+		}
 	}
 	return result, nil
 }
@@ -264,6 +278,74 @@ func TestAddNode_DatabaseError(t *testing.T) {
 
 // TestSetNodes_DoesNotEnqueueScans verifies that SetNodes does NOT enqueue
 // any scans (CatchUpScans handles this at startup)
+func TestRescueStuckNodes_EnqueuesStuckNodes(t *testing.T) {
+	manager := NewManager()
+	db := newMockNodeDatabase()
+	queue := newMockScanQueue()
+	manager.SetDatabase(db)
+
+	// Add nodes to manager in-memory
+	for _, name := range []string{"node-pending", "node-failed", "node-completed"} {
+		manager.nodes[name] = Node{Name: name}
+		db.nodes[name] = true
+	}
+	db.setStatus("node-pending", "pending")
+	db.setStatus("node-failed", "sbom_failed")
+	db.setStatus("node-completed", "completed")
+
+	manager.SetScanQueue(queue)
+	queue.mu.Lock()
+	queue.enqueuedScans = nil
+	queue.enqueuedForce = nil
+	queue.mu.Unlock()
+
+	manager.RescueStuckNodes()
+
+	force := queue.getEnqueuedForceScans()
+	if len(force) != 2 {
+		t.Fatalf("Expected 2 force scans (pending + failed), got %d: %v", len(force), force)
+	}
+	forceSet := make(map[string]bool)
+	for _, n := range force {
+		forceSet[n] = true
+	}
+	if !forceSet["node-pending"] {
+		t.Error("Expected node-pending to be enqueued")
+	}
+	if !forceSet["node-failed"] {
+		t.Error("Expected node-failed to be enqueued")
+	}
+	if forceSet["node-completed"] {
+		t.Error("node-completed should not be enqueued")
+	}
+}
+
+func TestRescueStuckNodes_SkipsInProgressNodes(t *testing.T) {
+	manager := NewManager()
+	db := newMockNodeDatabase()
+	queue := newMockScanQueue()
+	manager.SetDatabase(db)
+
+	for _, name := range []string{"node-gen-sbom", "node-scan-vulns"} {
+		manager.nodes[name] = Node{Name: name}
+		db.nodes[name] = true
+	}
+	db.setStatus("node-gen-sbom", "generating_sbom")
+	db.setStatus("node-scan-vulns", "scanning_vulnerabilities")
+
+	manager.SetScanQueue(queue)
+	queue.mu.Lock()
+	queue.enqueuedScans = nil
+	queue.enqueuedForce = nil
+	queue.mu.Unlock()
+
+	manager.RescueStuckNodes()
+
+	if got := queue.getEnqueuedForceScans(); len(got) != 0 {
+		t.Errorf("Expected no scans enqueued for in-progress nodes, got %v", got)
+	}
+}
+
 func TestSetNodes_DoesNotEnqueueScans(t *testing.T) {
 	manager := NewManager()
 	db := newMockNodeDatabase()

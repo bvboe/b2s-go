@@ -201,6 +201,45 @@ func (m *Manager) CatchUpScans() {
 	}
 }
 
+// RescueStuckNodes re-enqueues nodes that are stuck in a terminal-less idle state.
+// Unlike CatchUpScans (which is safe at startup because ResetInterruptedScans has
+// already moved in-progress states → pending), this method is safe to call while
+// scans are actively running: it skips generating_sbom and scanning_vulnerabilities
+// so it never triggers a double-scan on a node that is already being processed.
+func (m *Manager) RescueStuckNodes() {
+	m.mu.Lock()
+	if m.db == nil || m.scanQueue == nil || len(m.nodes) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	nodeNames := make([]string, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		nodeNames = append(nodeNames, n.Name)
+	}
+	m.mu.Unlock()
+
+	scanStatuses, err := m.db.GetNodeScanStatusBulk(nodeNames)
+	if err != nil {
+		log.Error("rescue: failed to fetch node scan statuses", slog.Any("error", err))
+		return
+	}
+
+	enqueuedCount := 0
+	for name, status := range scanStatuses {
+		switch status {
+		case "pending", "sbom_failed", "sbom_unavailable", "vuln_scan_failed":
+			m.scanQueue.EnqueueHostForceScan(name)
+			enqueuedCount++
+		// generating_sbom and scanning_vulnerabilities are intentionally skipped:
+		// those nodes are actively being processed and must not be double-enqueued.
+		}
+	}
+
+	if enqueuedCount > 0 {
+		log.Info("rescued stuck nodes", "enqueued", enqueuedCount, "total", len(nodeNames))
+	}
+}
+
 // AddNode adds or updates a node in the manager
 func (m *Manager) AddNode(n Node) {
 	m.mu.Lock()

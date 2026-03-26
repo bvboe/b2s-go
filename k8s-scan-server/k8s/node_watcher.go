@@ -141,6 +141,23 @@ func WatchNodes(ctx context.Context, clientset kubernetes.Interface, manager *no
 	// as well as nodes reset to pending by ResetInterruptedScans at startup.
 	manager.CatchUpScans()
 
+	// Periodically rescue nodes stuck in an idle non-terminal state (e.g. pending
+	// with no scan enqueued). Uses RescueStuckNodes rather than CatchUpScans so
+	// nodes currently being scanned (generating_sbom, scanning_vulnerabilities)
+	// are not double-enqueued. Aligned with the informer resync period.
+	go func() {
+		ticker := time.NewTicker(resyncPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				manager.RescueStuckNodes()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// Block until context is cancelled
 	<-ctx.Done()
 	log.Info("node watcher shutting down")
