@@ -1,5 +1,5 @@
 # Build stage
-FROM cgr.dev/chainguard/go:latest AS builder
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest AS builder
 
 WORKDIR /build
 
@@ -13,10 +13,11 @@ RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
 COPY k8s-update-controller/ .
 
 # Build the binary
+ARG TARGETARCH
 ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     --mount=type=cache,target=/home/nonroot/.cache/go-build,uid=65532,gid=65532 \
-    CGO_ENABLED=0 GOOS=linux go build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-w -s -X main.version=${VERSION}" \
     -o k8s-update-controller \
     .

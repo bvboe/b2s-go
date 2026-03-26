@@ -1,6 +1,7 @@
 # Build stage
-FROM cgr.dev/chainguard/go:latest AS builder
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest AS builder
 
+ARG TARGETARCH
 ARG VERSION=dev
 
 WORKDIR /workspace
@@ -33,7 +34,7 @@ COPY bjorn2scan-agent/updater/ ./updater/
 # Build the binary
 RUN --mount=type=cache,target=/go/pkg/mod,uid=65532,gid=65532 \
     --mount=type=cache,target=/home/nonroot/.cache/go-build,uid=65532,gid=65532 \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION} -w -s" -o bjorn2scan-agent .
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags "-X main.version=${VERSION} -w -s" -o bjorn2scan-agent .
 
 # Runtime stage
 FROM cgr.dev/chainguard/static:latest
