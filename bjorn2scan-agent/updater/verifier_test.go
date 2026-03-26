@@ -3,7 +3,10 @@ package updater
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/sigstore/sigstore-go/pkg/tuf"
 )
 
 func TestNewVerifier(t *testing.T) {
@@ -95,6 +98,24 @@ func TestVerifySignature_MalformedBundle(t *testing.T) {
 	err := v.VerifySignature(blobPath, bundlePath)
 	if err == nil {
 		t.Error("expected error for malformed bundle, got nil")
+	}
+}
+
+// TestTUFClient_DisableLocalCache_NoFilesystemWrite is a regression test for the
+// ubuntu-server auto-update failure: when systemd ran the agent with a read-only
+// filesystem, tuf.New() tried to mkdir $HOME/.sigstore and failed.
+// WithDisableLocalCache() must prevent that mkdir.
+func TestTUFClient_DisableLocalCache_NoFilesystemWrite(t *testing.T) {
+	readOnlyDir := t.TempDir()
+	if err := os.Chmod(readOnlyDir, 0o500); err != nil {
+		t.Skip("cannot set read-only permissions on temp dir")
+	}
+	t.Setenv("HOME", readOnlyDir)
+
+	// tuf.New() is the call that triggers mkdir — no network needed for this.
+	_, err := tuf.New(tuf.DefaultOptions().WithDisableLocalCache())
+	if err != nil && (strings.Contains(err.Error(), "read-only") || strings.Contains(err.Error(), "mkdir")) {
+		t.Errorf("TUF client creation wrote to filesystem (regression): %v", err)
 	}
 }
 
