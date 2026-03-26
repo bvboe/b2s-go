@@ -30,6 +30,7 @@ func (db *DB) ExecuteQuery(query string) (*QueryResult, error) {
 	// Determine if this is a read query (SELECT) or a write query (INSERT/UPDATE/DELETE/etc.)
 	trimmed := strings.TrimSpace(strings.ToUpper(query))
 	isSelect := strings.HasPrefix(trimmed, "SELECT") ||
+		strings.HasPrefix(trimmed, "WITH") || // CTEs
 		strings.HasPrefix(trimmed, "PRAGMA") ||
 		strings.HasPrefix(trimmed, "EXPLAIN")
 

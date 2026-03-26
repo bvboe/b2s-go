@@ -7,105 +7,171 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
-
 )
 
 
-// ScanStatusCountsHandler creates an HTTP handler for /api/summary/scan-status endpoint
-// Returns counts of container images by scan status, excluding statuses with zero count
-func ScanStatusCountsHandler(provider ImageQueryProvider) http.HandlerFunc {
+// deploymentMetricsQuery is the SQL for /api/summary/deployment-metrics.
+//
+// Structure:
+//   vuln_agg  — aggregate total CVE count and exploit count per image from
+//               vulnerabilities; uses idx_vulnerabilities_image for the GROUP BY
+//   ctr_agg   — count containers per image; uses idx_containers_image
+//   img_stats — join images → ctr_agg → vuln_agg, keeping only images that have
+//               at least one running container (INNER JOIN ctr_agg)
+//
+// The outer SELECT makes a single aggregation pass over img_stats.
+// unique_cves uses a correlated subquery over the materialized img_stats CTE;
+// the COUNT(DISTINCT cve_id) WHERE image_id IN (...) is served from the covering
+// index idx_vulnerabilities_image_cve (image_id, cve_id) without touching table rows.
+const deploymentMetricsQuery = `
+WITH
+  vuln_agg AS (
+    SELECT
+      image_id,
+      SUM(count)                   AS total_cves,
+      SUM(known_exploited * count) AS total_exploits
+    FROM vulnerabilities
+    GROUP BY image_id
+  ),
+  ctr_agg AS (
+    SELECT image_id, COUNT(*) AS cnt
+    FROM containers
+    GROUP BY image_id
+  ),
+  img_stats AS (
+    SELECT
+      i.id,
+      i.status,
+      c.cnt,
+      COALESCE(v.total_cves,    0) AS img_cves,
+      COALESCE(v.total_exploits,0) AS img_exploits
+    FROM images i
+    JOIN  ctr_agg  c ON c.image_id = i.id
+    LEFT JOIN vuln_agg v ON v.image_id = i.id
+  )
+SELECT
+  (SELECT COUNT(*) FROM containers)                                                                    AS container_instances,
+  COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0)                                  AS images_scanned,
+  COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_cves    END), 0)                         AS total_cves,
+  (SELECT COUNT(DISTINCT cve_id) FROM vulnerabilities
+   WHERE image_id IN (SELECT id FROM img_stats WHERE status = 'completed'))                           AS unique_cves,
+  COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_exploits END), 0)                        AS total_exploits,
+  COALESCE(SUM(CASE WHEN status NOT IN ('completed','sbom_failed','vuln_scan_failed') THEN 1 ELSE 0 END), 0) AS images_pending,
+  COALESCE(SUM(CASE WHEN status IN ('sbom_failed','vuln_scan_failed') THEN 1 ELSE 0 END), 0)          AS images_failed
+FROM img_stats
+`
+
+// DeploymentMetricsHandler returns a single-row JSON summary of the whole deployment.
+// Endpoint: GET /api/summary/deployment-metrics
+func DeploymentMetricsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Parse query parameters for filters
-		params := r.URL.Query()
-		namespaces := parseMultiSelect(params.Get("namespaces"))
-		vulnStatuses := parseMultiSelect(params.Get("vulnStatuses"))
-		packageTypes := parseMultiSelect(params.Get("packageTypes"))
-		osNames := parseMultiSelect(params.Get("osNames"))
-
-		// Build query
-		query := buildScanStatusQuery(namespaces, vulnStatuses, packageTypes, osNames)
-
-		// Execute query
-		result, err := provider.ExecuteReadOnlyQuery(query)
+		result, err := provider.ExecuteReadOnlyQuery(deploymentMetricsQuery)
 		if err != nil {
-			log.Error("error executing scan status query", "error", err)
+			log.Error("error executing deployment metrics query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		// Parse results
-		type StatusCount struct {
-			Status      string `json:"status"`
-			Description string `json:"description"`
-			SortOrder   int    `json:"sort_order"`
-			Count       int64  `json:"count"`
+		type DeploymentMetrics struct {
+			ContainerInstances int64 `json:"container_instances"`
+			ImagesScanned      int64 `json:"images_scanned"`
+			TotalCVEs          int64 `json:"total_cves"`
+			UniqueCVEs         int64 `json:"unique_cves"`
+			TotalExploits      int64 `json:"total_exploits"`
+			ImagesPending      int64 `json:"images_pending,omitempty"`
+			ImagesFailed       int64 `json:"images_failed,omitempty"`
 		}
 
-		statusCounts := make([]StatusCount, 0, len(result.Rows))
-		for _, row := range result.Rows {
-			count := int64(0)
-			if val, ok := row["count"].(int64); ok {
-				count = val
-			}
-
-			statusCounts = append(statusCounts, StatusCount{
-				Status:      getStringValue(row, "status"),
-				Description: getStringValue(row, "description"),
-				SortOrder:   getIntValue(row, "sort_order"),
-				Count:       count,
-			})
+		metrics := DeploymentMetrics{}
+		if len(result.Rows) > 0 {
+			row := result.Rows[0]
+			metrics.ContainerInstances = getInt64Value(row, "container_instances")
+			metrics.ImagesScanned = getInt64Value(row, "images_scanned")
+			metrics.TotalCVEs = getInt64Value(row, "total_cves")
+			metrics.UniqueCVEs = getInt64Value(row, "unique_cves")
+			metrics.TotalExploits = getInt64Value(row, "total_exploits")
+			metrics.ImagesPending = getInt64Value(row, "images_pending")
+			metrics.ImagesFailed = getInt64Value(row, "images_failed")
 		}
 
-		// Return JSON response
 		w.Header().Set("Content-Type", "application/json")
-		response := map[string]interface{}{
-			"statusCounts": statusCounts,
-		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Error("error encoding scan status response", "error", err)
+		if err := json.NewEncoder(w).Encode(metrics); err != nil {
+			log.Error("error encoding deployment metrics response", "error", err)
 		}
 	}
 }
 
-// buildScanStatusQuery constructs the SQL query for scan status counts
-// Only counts images that have at least one running container
-func buildScanStatusQuery(namespaces, vulnStatuses, packageTypes, osNames []string) string {
-	query := `
+// nodeMetricsSummaryQuery is the SQL for /api/summary/node-metrics.
+//
+// Structure:
+//   completed — IDs of nodes with status 'completed'
+//   vuln_agg  — total CVE count and exploit count across all completed nodes;
+//               uses idx_node_vulnerabilities_node (node_id) for the WHERE filter.
+//               The COUNT(DISTINCT cve_id) subquery is served from the covering
+//               index idx_node_vulnerabilities_node_cve (node_id, cve_id).
+//
+// The query always returns exactly one row because vuln_agg has no GROUP BY.
+const nodeMetricsSummaryQuery = `
+WITH
+  completed AS (
+    SELECT id FROM nodes WHERE status = 'completed'
+  ),
+  vuln_agg AS (
+    SELECT
+      COALESCE(SUM(count),                   0) AS total_cves,
+      COALESCE(SUM(known_exploited * count), 0) AS total_exploits
+    FROM node_vulnerabilities
+    WHERE node_id IN (SELECT id FROM completed)
+  )
 SELECT
-    status.status,
-    status.description,
-    status.sort_order,
-    COUNT(DISTINCT images.id) as count
-FROM images images
-JOIN scan_status status ON images.status = status.status
-JOIN containers instances ON images.id = instances.image_id`
+  (SELECT COUNT(*) FROM nodes)                                                                  AS total_nodes,
+  v.total_cves,
+  (SELECT COUNT(DISTINCT cve_id) FROM node_vulnerabilities
+   WHERE node_id IN (SELECT id FROM completed))                                                AS unique_cves,
+  v.total_exploits,
+  (SELECT COUNT(*) FROM nodes
+   WHERE status NOT IN ('completed','sbom_failed','vuln_scan_failed'))                         AS nodes_pending,
+  (SELECT COUNT(*) FROM nodes
+   WHERE status IN ('sbom_failed','vuln_scan_failed'))                                         AS nodes_failed
+FROM vuln_agg v
+`
 
-	// Build WHERE conditions
-	var conditions []string
+// NodeMetricsSummaryHandler returns a single-row JSON summary of node scan results.
+// Endpoint: GET /api/summary/node-metrics
+func NodeMetricsSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := provider.ExecuteReadOnlyQuery(nodeMetricsSummaryQuery)
+		if err != nil {
+			log.Error("error executing node metrics query", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 
-	// Namespace filter
-	conditions = appendCondition(conditions, buildINClause("instances.namespace", namespaces))
+		type NodeMetrics struct {
+			TotalNodes    int64 `json:"total_nodes"`
+			TotalCVEs     int64 `json:"total_cves"`
+			UniqueCVEs    int64 `json:"unique_cves"`
+			TotalExploits int64 `json:"total_exploits"`
+			NodesPending  int64 `json:"nodes_pending,omitempty"`
+			NodesFailed   int64 `json:"nodes_failed,omitempty"`
+		}
 
-	// OS name filter
-	conditions = appendCondition(conditions, buildINClause("images.os_name", osNames))
+		metrics := NodeMetrics{}
+		if len(result.Rows) > 0 {
+			row := result.Rows[0]
+			metrics.TotalNodes = getInt64Value(row, "total_nodes")
+			metrics.TotalCVEs = getInt64Value(row, "total_cves")
+			metrics.UniqueCVEs = getInt64Value(row, "unique_cves")
+			metrics.TotalExploits = getInt64Value(row, "total_exploits")
+			metrics.NodesPending = getInt64Value(row, "nodes_pending")
+			metrics.NodesFailed = getInt64Value(row, "nodes_failed")
+		}
 
-	// Note: vulnStatuses and packageTypes filters affect vulnerability/package subqueries
-	// For scan status counts, we count images regardless of their vulnerability details
-	// These filters would require complex subqueries, so we omit them for now
-
-	// Add WHERE clause
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(metrics); err != nil {
+			log.Error("error encoding node metrics response", "error", err)
+		}
 	}
-
-	// Group by and having
-	query += `
-GROUP BY status.status, status.description, status.sort_order
-HAVING count > 0
-ORDER BY status.sort_order`
-
-	return query
 }
 
 // NamespaceSummaryHandler creates an HTTP handler for /api/summary/by-namespace endpoint
@@ -589,6 +655,13 @@ WHERE status.status = 'completed'
 }
 
 // Helper functions
+
+func getInt64Value(row map[string]interface{}, key string) int64 {
+	if val, ok := row[key].(int64); ok {
+		return val
+	}
+	return 0
+}
 
 func getStringValue(row map[string]interface{}, key string) string {
 	if val, ok := row[key].(string); ok {

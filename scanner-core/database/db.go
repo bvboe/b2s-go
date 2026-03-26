@@ -61,7 +61,9 @@ func (db *DB) GetConnection() *sql.DB {
 	return db.conn
 }
 
-// isCorruptionError checks if an error indicates database corruption
+// isCorruptionError checks if an error indicates database corruption or an
+// unrecoverable I/O error on open (e.g. SQLITE_IOERR_SHMSIZE when a stale
+// -shm file is left on the volume after a pod replacement).
 func isCorruptionError(err error) bool {
 	if err == nil {
 		return false
@@ -69,7 +71,8 @@ func isCorruptionError(err error) bool {
 	errMsg := strings.ToLower(err.Error())
 	return strings.Contains(errMsg, "malformed") ||
 		strings.Contains(errMsg, "corrupt") ||
-		strings.Contains(errMsg, "database disk image is malformed")
+		strings.Contains(errMsg, "database disk image is malformed") ||
+		strings.Contains(errMsg, "disk i/o error")
 }
 
 // exitOnCorruption exits the process when a corruption error is detected during a

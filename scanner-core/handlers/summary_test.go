@@ -11,113 +11,254 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
-func TestScanStatusCountsHandler(t *testing.T) {
+func TestDeploymentMetricsHandler(t *testing.T) {
 	tests := []struct {
-		name           string
-		queryParams    string
-		mockFunc       func(query string) (*database.QueryResult, error)
-		expectedStatus int
-		checkResponse  func(t *testing.T, body string)
+		name          string
+		mockResult    *database.QueryResult
+		expectedCode  int
+		check         func(t *testing.T, body string)
 	}{
 		{
-			name:        "returns status counts",
-			queryParams: "",
-			mockFunc: func(query string) (*database.QueryResult, error) {
-				return &database.QueryResult{
-					Columns: []string{"status", "description", "sort_order", "count"},
-					Rows: []map[string]interface{}{
-						{
-							"status":      "completed",
-							"description": "Scan completed",
-							"sort_order":  int64(1),
-							"count":       int64(25),
-						},
-						{
-							"status":      "pending",
-							"description": "Scan pending",
-							"sort_order":  int64(2),
-							"count":       int64(5),
-						},
+			name: "returns all metrics",
+			mockResult: &database.QueryResult{
+				Columns: []string{
+					"container_instances", "images_scanned", "total_cves",
+					"unique_cves", "total_exploits", "images_pending", "images_failed",
+				},
+				Rows: []map[string]interface{}{
+					{
+						"container_instances": int64(150),
+						"images_scanned":      int64(45),
+						"total_cves":          int64(23450),
+						"unique_cves":         int64(312),
+						"total_exploits":      int64(89),
+						"images_pending":      int64(3),
+						"images_failed":       int64(1),
 					},
-				}, nil
+				},
 			},
-			expectedStatus: http.StatusOK,
-			checkResponse: func(t *testing.T, body string) {
-				var response map[string]interface{}
-				if err := json.Unmarshal([]byte(body), &response); err != nil {
+			expectedCode: http.StatusOK,
+			check: func(t *testing.T, body string) {
+				var m struct {
+					ContainerInstances int64 `json:"container_instances"`
+					ImagesScanned      int64 `json:"images_scanned"`
+					TotalCVEs          int64 `json:"total_cves"`
+					UniqueCVEs         int64 `json:"unique_cves"`
+					TotalExploits      int64 `json:"total_exploits"`
+					ImagesPending      int64 `json:"images_pending"`
+					ImagesFailed       int64 `json:"images_failed"`
+				}
+				if err := json.Unmarshal([]byte(body), &m); err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
-				statusCounts := response["statusCounts"].([]interface{})
-				if len(statusCounts) != 2 {
-					t.Errorf("Expected 2 status counts, got %d", len(statusCounts))
+				if m.ContainerInstances != 150 {
+					t.Errorf("container_instances: want 150, got %d", m.ContainerInstances)
 				}
-				firstStatus := statusCounts[0].(map[string]interface{})
-				if firstStatus["status"] != "completed" {
-					t.Errorf("Expected first status to be 'completed', got %v", firstStatus["status"])
+				if m.ImagesScanned != 45 {
+					t.Errorf("images_scanned: want 45, got %d", m.ImagesScanned)
 				}
-				if firstStatus["count"].(float64) != 25 {
-					t.Errorf("Expected count 25, got %v", firstStatus["count"])
+				if m.TotalCVEs != 23450 {
+					t.Errorf("total_cves: want 23450, got %d", m.TotalCVEs)
+				}
+				if m.UniqueCVEs != 312 {
+					t.Errorf("unique_cves: want 312, got %d", m.UniqueCVEs)
+				}
+				if m.TotalExploits != 89 {
+					t.Errorf("total_exploits: want 89, got %d", m.TotalExploits)
+				}
+				if m.ImagesPending != 3 {
+					t.Errorf("images_pending: want 3, got %d", m.ImagesPending)
+				}
+				if m.ImagesFailed != 1 {
+					t.Errorf("images_failed: want 1, got %d", m.ImagesFailed)
 				}
 			},
 		},
 		{
-			name:        "with namespace filter",
-			queryParams: "namespaces=default,kube-system",
-			mockFunc: func(query string) (*database.QueryResult, error) {
-				if !strings.Contains(query, "instances.namespace IN ('default','kube-system')") {
-					t.Error("Expected namespace filter in query")
-				}
-				if !strings.Contains(query, "JOIN containers instances") {
-					t.Error("Expected JOIN for containers")
-				}
-				return &database.QueryResult{
-					Columns: []string{"status", "description", "sort_order", "count"},
-					Rows: []map[string]interface{}{
-						{
-							"status":      "completed",
-							"description": "Scan completed",
-							"sort_order":  int64(1),
-							"count":       int64(10),
-						},
+			name: "omits pending and failed when zero",
+			mockResult: &database.QueryResult{
+				Columns: []string{
+					"container_instances", "images_scanned", "total_cves",
+					"unique_cves", "total_exploits", "images_pending", "images_failed",
+				},
+				Rows: []map[string]interface{}{
+					{
+						"container_instances": int64(50),
+						"images_scanned":      int64(10),
+						"total_cves":          int64(500),
+						"unique_cves":         int64(80),
+						"total_exploits":      int64(5),
+						"images_pending":      int64(0),
+						"images_failed":       int64(0),
 					},
-				}, nil
+				},
 			},
-			expectedStatus: http.StatusOK,
+			expectedCode: http.StatusOK,
+			check: func(t *testing.T, body string) {
+				// omitempty means zero values are absent from JSON
+				if strings.Contains(body, "images_pending") {
+					t.Error("images_pending should be omitted when zero")
+				}
+				if strings.Contains(body, "images_failed") {
+					t.Error("images_failed should be omitted when zero")
+				}
+			},
 		},
 		{
-			name:        "with OS name filter",
-			queryParams: "osNames=alpine:3.18",
-			mockFunc: func(query string) (*database.QueryResult, error) {
-				if !strings.Contains(query, "images.os_name IN ('alpine:3.18')") {
-					t.Error("Expected OS name filter in query")
-				}
-				return &database.QueryResult{
-					Columns: []string{"status", "description", "sort_order", "count"},
-					Rows:    []map[string]interface{}{},
-				}, nil
+			name: "returns zeros when no data",
+			mockResult: &database.QueryResult{
+				Columns: []string{},
+				Rows:    []map[string]interface{}{},
 			},
-			expectedStatus: http.StatusOK,
+			expectedCode: http.StatusOK,
+			check: func(t *testing.T, body string) {
+				var m map[string]interface{}
+				if err := json.Unmarshal([]byte(body), &m); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+				if m["container_instances"].(float64) != 0 {
+					t.Errorf("Expected container_instances=0 for empty result")
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := &mockQueryProvider{
-				queryFunc: tt.mockFunc,
+				queryFunc: func(_ string) (*database.QueryResult, error) {
+					return tt.mockResult, nil
+				},
 			}
-
-			handler := ScanStatusCountsHandler(provider)
-			req := httptest.NewRequest(http.MethodGet, "/api/summary/scan-status?"+tt.queryParams, nil)
+			handler := DeploymentMetricsHandler(provider)
+			req := httptest.NewRequest(http.MethodGet, "/api/summary/deployment-metrics", nil)
 			rec := httptest.NewRecorder()
-
 			handler.ServeHTTP(rec, req)
-
-			if rec.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rec.Code)
+			if rec.Code != tt.expectedCode {
+				t.Errorf("Expected status %d, got %d", tt.expectedCode, rec.Code)
 			}
+			if tt.check != nil {
+				tt.check(t, rec.Body.String())
+			}
+		})
+	}
+}
 
-			if tt.checkResponse != nil {
-				tt.checkResponse(t, rec.Body.String())
+func TestNodeMetricsSummaryHandler(t *testing.T) {
+	tests := []struct {
+		name         string
+		mockResult   *database.QueryResult
+		expectedCode int
+		check        func(t *testing.T, body string)
+	}{
+		{
+			name: "returns all metrics",
+			mockResult: &database.QueryResult{
+				Columns: []string{"total_nodes", "total_cves", "unique_cves", "total_exploits", "nodes_pending", "nodes_failed"},
+				Rows: []map[string]interface{}{
+					{
+						"total_nodes":    int64(8),
+						"total_cves":     int64(4200),
+						"unique_cves":    int64(180),
+						"total_exploits": int64(12),
+						"nodes_pending":  int64(2),
+						"nodes_failed":   int64(1),
+					},
+				},
+			},
+			expectedCode: http.StatusOK,
+			check: func(t *testing.T, body string) {
+				var m struct {
+					TotalNodes    int64 `json:"total_nodes"`
+					TotalCVEs     int64 `json:"total_cves"`
+					UniqueCVEs    int64 `json:"unique_cves"`
+					TotalExploits int64 `json:"total_exploits"`
+					NodesPending  int64 `json:"nodes_pending"`
+					NodesFailed   int64 `json:"nodes_failed"`
+				}
+				if err := json.Unmarshal([]byte(body), &m); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+				if m.TotalNodes != 8 {
+					t.Errorf("total_nodes: want 8, got %d", m.TotalNodes)
+				}
+				if m.TotalCVEs != 4200 {
+					t.Errorf("total_cves: want 4200, got %d", m.TotalCVEs)
+				}
+				if m.UniqueCVEs != 180 {
+					t.Errorf("unique_cves: want 180, got %d", m.UniqueCVEs)
+				}
+				if m.TotalExploits != 12 {
+					t.Errorf("total_exploits: want 12, got %d", m.TotalExploits)
+				}
+				if m.NodesPending != 2 {
+					t.Errorf("nodes_pending: want 2, got %d", m.NodesPending)
+				}
+				if m.NodesFailed != 1 {
+					t.Errorf("nodes_failed: want 1, got %d", m.NodesFailed)
+				}
+			},
+		},
+		{
+			name: "omits pending and failed when zero",
+			mockResult: &database.QueryResult{
+				Columns: []string{"total_nodes", "total_cves", "unique_cves", "total_exploits", "nodes_pending", "nodes_failed"},
+				Rows: []map[string]interface{}{
+					{
+						"total_nodes":    int64(5),
+						"total_cves":     int64(100),
+						"unique_cves":    int64(30),
+						"total_exploits": int64(2),
+						"nodes_pending":  int64(0),
+						"nodes_failed":   int64(0),
+					},
+				},
+			},
+			expectedCode: http.StatusOK,
+			check: func(t *testing.T, body string) {
+				if strings.Contains(body, "nodes_pending") {
+					t.Error("nodes_pending should be omitted when zero")
+				}
+				if strings.Contains(body, "nodes_failed") {
+					t.Error("nodes_failed should be omitted when zero")
+				}
+			},
+		},
+		{
+			name: "returns zeros when no data",
+			mockResult: &database.QueryResult{
+				Columns: []string{},
+				Rows:    []map[string]interface{}{},
+			},
+			expectedCode: http.StatusOK,
+			check: func(t *testing.T, body string) {
+				var m map[string]interface{}
+				if err := json.Unmarshal([]byte(body), &m); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+				if m["total_nodes"].(float64) != 0 {
+					t.Errorf("Expected total_nodes=0 for empty result")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &mockQueryProvider{
+				queryFunc: func(_ string) (*database.QueryResult, error) {
+					return tt.mockResult, nil
+				},
+			}
+			handler := NodeMetricsSummaryHandler(provider)
+			req := httptest.NewRequest(http.MethodGet, "/api/summary/node-metrics", nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.expectedCode {
+				t.Errorf("Expected status %d, got %d", tt.expectedCode, rec.Code)
+			}
+			if tt.check != nil {
+				tt.check(t, rec.Body.String())
 			}
 		})
 	}
@@ -496,61 +637,6 @@ func TestDistributionSummaryHandler(t *testing.T) {
 	}
 }
 
-func TestBuildScanStatusQuery(t *testing.T) {
-	tests := []struct {
-		name            string
-		namespaces      []string
-		osNames         []string
-		expectedInQuery []string
-		notInQuery      []string
-	}{
-		{
-			name: "basic query without filters",
-			expectedInQuery: []string{
-				"SELECT",
-				"status.status",
-				"COUNT(DISTINCT images.id)",
-				"JOIN containers instances",
-				"GROUP BY status.status",
-				"HAVING count > 0",
-				"ORDER BY status.sort_order",
-			},
-		},
-		{
-			name:       "with namespace filter",
-			namespaces: []string{"default"},
-			expectedInQuery: []string{
-				"JOIN containers instances",
-				"instances.namespace IN ('default')",
-			},
-		},
-		{
-			name:    "with OS name filter",
-			osNames: []string{"alpine:3.18"},
-			expectedInQuery: []string{
-				"images.os_name IN ('alpine:3.18')",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			query := buildScanStatusQuery(tt.namespaces, nil, nil, tt.osNames)
-
-			for _, expected := range tt.expectedInQuery {
-				if !strings.Contains(query, expected) {
-					t.Errorf("Expected query to contain '%s'\nQuery: %s", expected, query)
-				}
-			}
-
-			for _, notExpected := range tt.notInQuery {
-				if strings.Contains(query, notExpected) {
-					t.Errorf("Expected query NOT to contain '%s'\nQuery: %s", notExpected, query)
-				}
-			}
-		})
-	}
-}
 
 func TestBuildNamespaceSummaryQuery(t *testing.T) {
 	tests := []struct {

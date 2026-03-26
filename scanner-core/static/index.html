@@ -22,20 +22,18 @@
             <td width="100%" valign="top">
                 <h1><div id="clusterName">bjorn2scan</div></h1>
 
-                <!-- Scan Status Widgets -->
+                <!-- Summary Widgets -->
                 <div style="display: flex; gap: 40px; flex-wrap: wrap;">
-                    <div id="containerScanStatus">
-                        <h3>Container Scan Status</h3>
-                        <table id="containerScanStatusTable" class="listingTable">
-                            <thead></thead>
+                    <div id="deploymentMetrics">
+                        <h3>Image Summary</h3>
+                        <table id="deploymentMetricsTable" class="listingTable">
                             <tbody></tbody>
                         </table>
                     </div>
 
                     <div id="nodeScanStatus">
-                        <h3>Node Scan Status</h3>
+                        <h3>Node Summary</h3>
                         <table id="nodeScanStatusTable" class="listingTable">
-                            <thead></thead>
                             <tbody></tbody>
                         </table>
                     </div>
@@ -190,7 +188,7 @@
 
                 // Load all widgets
                 await Promise.all([
-                    loadScanStatusWidget(),
+                    loadDeploymentMetrics(),
                     loadNodeScanStatusWidget(),
                     loadNamespaceTable(),
                     loadDistributionTable(),
@@ -201,45 +199,40 @@
             }
         }
 
-        // Load scan status widget
-        async function loadScanStatusWidget() {
-            const tableBody = document.querySelector('#containerScanStatusTable tbody');
+        // Load deployment metrics widget
+        async function loadDeploymentMetrics() {
+            const tableBody = document.querySelector('#deploymentMetricsTable tbody');
 
             try {
-                const params = buildQueryParams();
-                const response = await fetch(`/api/summary/scan-status${params}`);
-                if (!response.ok) throw new Error('Failed to load scan status');
+                const response = await fetch('/api/summary/deployment-metrics');
+                if (!response.ok) throw new Error('Failed to load deployment metrics');
 
                 const data = await response.json();
                 tableBody.innerHTML = '';
 
-                const statusCounts = data.statusCounts || [];
-                statusCounts.forEach(status => {
-                    if (status.count > 0) {
-                        const row = document.createElement('tr');
-                        const statusCell = document.createElement('td');
-                        statusCell.innerHTML = '<b>' + escapeHtml(status.description) + '</b>';
-                        row.appendChild(statusCell);
+                const rows = [
+                    ['Container Instances', data.container_instances],
+                    ['Images Scanned',      data.images_scanned],
+                    ['CVEs',               data.total_cves],
+                    ['Unique CVEs',        data.unique_cves],
+                    ['Exploits',           data.total_exploits],
+                ];
+                if (data.images_pending) rows.push(['Images Pending', data.images_pending]);
+                if (data.images_failed)  rows.push(['Failed Scans',   data.images_failed]);
 
-                        const countCell = document.createElement('td');
-                        countCell.innerHTML = formatNumber(status.count);
-                        countCell.style.textAlign = 'right';
-                        row.appendChild(countCell);
-
-                        tableBody.appendChild(row);
-                    }
-                });
-
-                if (statusCounts.length === 0 || statusCounts.every(s => s.count === 0)) {
+                rows.forEach(([label, value]) => {
                     const row = document.createElement('tr');
-                    const cell = document.createElement('td');
-                    cell.innerHTML = 'No scan data available';
-                    cell.colSpan = 2;
-                    row.appendChild(cell);
+                    const labelCell = document.createElement('td');
+                    labelCell.innerHTML = '<b>' + escapeHtml(label) + '</b>';
+                    row.appendChild(labelCell);
+                    const valueCell = document.createElement('td');
+                    valueCell.innerHTML = formatNumber(value || 0);
+                    valueCell.style.textAlign = 'right';
+                    row.appendChild(valueCell);
                     tableBody.appendChild(row);
-                }
+                });
             } catch (error) {
-                console.error('Error loading scan status:', error);
+                console.error('Error loading deployment metrics:', error);
                 tableBody.innerHTML = '';
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
@@ -251,73 +244,46 @@
             }
         }
 
-        // Load node scan status widget
+        // Load node metrics widget
         async function loadNodeScanStatusWidget() {
             const tableBody = document.querySelector('#nodeScanStatusTable tbody');
 
             try {
-                const response = await fetch('/api/nodes');
+                const response = await fetch('/api/summary/node-metrics');
                 if (!response.ok) {
-                    // If 404 or other error, hide the widget (host scanning may be disabled)
                     if (response.status === 404) {
                         document.getElementById('nodeScanStatus').style.display = 'none';
                         document.getElementById('nodeDistroSummary').style.display = 'none';
                         return;
                     }
-                    throw new Error('Failed to load node status');
+                    throw new Error('Failed to load node metrics');
                 }
 
-                const nodes = await response.json() || [];
+                const data = await response.json();
                 tableBody.innerHTML = '';
 
-                // Count nodes by status
-                const statusCounts = {};
-                nodes.forEach(node => {
-                    const status = node.status || 'unknown';
-                    statusCounts[status] = (statusCounts[status] || 0) + 1;
-                });
+                const rows = [
+                    ['Nodes',       data.total_nodes],
+                    ['CVEs',        data.total_cves],
+                    ['Unique CVEs', data.unique_cves],
+                    ['Exploits',    data.total_exploits],
+                ];
+                if (data.nodes_pending) rows.push(['Nodes Pending Scan', data.nodes_pending]);
+                if (data.nodes_failed)  rows.push(['Failed Scans',       data.nodes_failed]);
 
-                const statusDescriptions = {
-                    'completed': 'Scanned',
-                    'scanning_vulnerabilities': 'Scanning Vulnerabilities',
-                    'generating_sbom': 'Generating SBOM',
-                    'scanning': 'Scanning',
-                    'pending': 'Pending',
-                    'sbom_failed': 'SBOM Failed',
-                    'vuln_scan_failed': 'Vuln Scan Failed',
-                    'error': 'Error',
-                    'unknown': 'Unknown'
-                };
-
-                // Display status counts
-                const statusOrder = ['completed', 'scanning_vulnerabilities', 'generating_sbom', 'scanning', 'pending', 'sbom_failed', 'vuln_scan_failed', 'error', 'unknown'];
-                statusOrder.forEach(status => {
-                    const count = statusCounts[status] || 0;
-                    if (count > 0) {
-                        const row = document.createElement('tr');
-                        const statusCell = document.createElement('td');
-                        statusCell.innerHTML = '<b>' + escapeHtml(statusDescriptions[status] || status) + '</b>';
-                        row.appendChild(statusCell);
-
-                        const countCell = document.createElement('td');
-                        countCell.innerHTML = formatNumber(count);
-                        countCell.style.textAlign = 'right';
-                        row.appendChild(countCell);
-
-                        tableBody.appendChild(row);
-                    }
-                });
-
-                if (nodes.length === 0) {
+                rows.forEach(([label, value]) => {
                     const row = document.createElement('tr');
-                    const cell = document.createElement('td');
-                    cell.innerHTML = 'No nodes detected';
-                    cell.colSpan = 2;
-                    row.appendChild(cell);
+                    const labelCell = document.createElement('td');
+                    labelCell.innerHTML = '<b>' + escapeHtml(label) + '</b>';
+                    row.appendChild(labelCell);
+                    const valueCell = document.createElement('td');
+                    valueCell.innerHTML = formatNumber(value || 0);
+                    valueCell.style.textAlign = 'right';
+                    row.appendChild(valueCell);
                     tableBody.appendChild(row);
-                }
+                });
             } catch (error) {
-                console.error('Error loading node scan status:', error);
+                console.error('Error loading node metrics:', error);
                 tableBody.innerHTML = '';
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
@@ -729,7 +695,7 @@
                     indexCurrentTimestamp = newTimestamp;
                     // Reload all tables
                     await Promise.all([
-                        loadScanStatusWidget(),
+                        loadDeploymentMetrics(),
                         loadNodeScanStatusWidget(),
                         loadNamespaceTable(),
                         loadDistributionTable(),

@@ -200,6 +200,16 @@ var migrations = []migration{
 		name:    "metric_staleness_expires_at",
 		up:      migrateToV37,
 	},
+	{
+		version: 38,
+		name:    "add_vulnerabilities_image_cve_index",
+		up:      migrateToV38,
+	},
+	{
+		version: 39,
+		name:    "add_node_vulnerabilities_node_cve_index",
+		up:      migrateToV39,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -2491,5 +2501,35 @@ func migrateToV36(conn *sql.DB) error {
 	}
 
 	log.Info("migration v36: successfully created metric_staleness table")
+	return nil
+}
+
+// migrateToV38 adds a covering index on vulnerabilities(image_id, cve_id).
+// This index is used by the deployment metrics query to execute
+// COUNT(DISTINCT cve_id) WHERE image_id IN (...) entirely from the index
+// without touching main table rows, making the frequent dashboard query fast.
+func migrateToV38(conn *sql.DB) error {
+	log.Info("migration v38: adding covering index idx_vulnerabilities_image_cve")
+	_, err := conn.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_vulnerabilities_image_cve
+			ON vulnerabilities (image_id, cve_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_vulnerabilities_image_cve: %w", err)
+	}
+	log.Info("migration v38: idx_vulnerabilities_image_cve created")
+	return nil
+}
+
+func migrateToV39(conn *sql.DB) error {
+	log.Info("migration v39: adding covering index idx_node_vulnerabilities_node_cve")
+	_, err := conn.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_node_cve
+			ON node_vulnerabilities (node_id, cve_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_node_vulnerabilities_node_cve: %w", err)
+	}
+	log.Info("migration v39: idx_node_vulnerabilities_node_cve created")
 	return nil
 }

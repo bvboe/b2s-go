@@ -358,7 +358,8 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 		if filterProvider, ok := provider.(FilterOptionsProvider); ok {
 			mux.HandleFunc("/api/filter-options", FilterOptionsHandler(filterProvider))
 		}
-		mux.HandleFunc("/api/summary/scan-status", ScanStatusCountsHandler(queryProvider))
+		mux.HandleFunc("/api/summary/deployment-metrics", DeploymentMetricsHandler(queryProvider))
+		mux.HandleFunc("/api/summary/node-metrics", NodeMetricsSummaryHandler(queryProvider))
 		mux.HandleFunc("/api/summary/by-namespace", NamespaceSummaryHandler(queryProvider))
 		mux.HandleFunc("/api/summary/by-distribution", DistributionSummaryHandler(queryProvider))
 	} else {
