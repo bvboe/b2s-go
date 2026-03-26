@@ -301,11 +301,18 @@ func HealthCheck(db *DB) error {
 // block concurrent SELECT queries, including the health check). PASSIVE was used
 // previously but cannot make progress while readers are active (e.g. streaming
 // /metrics scrapes or OTEL export reads), causing the WAL to grow unboundedly.
+//
+// The interval is 30 minutes. SQLite's built-in wal_autocheckpoint already handles
+// routine maintenance (PASSIVE every ~1000 pages); this monitor is a safety valve for
+// the case where long-running readers prevent auto-checkpoint from making progress.
+// A 5-minute interval was too aggressive: it competed for the 2-connection pool during
+// active scans, causing the health check's SELECT 1 to time out.
+//
 // This is separate from HealthCheck so slow NFS I/O does not cause false-positive
 // liveness probe failures. The goroutine exits when ctx is cancelled.
 func StartWALMonitor(ctx context.Context, db *DB) {
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
