@@ -293,11 +293,11 @@ func HealthCheck(db *DB) error {
 }
 
 // StartWALMonitor runs a background goroutine that periodically checkpoints the WAL
-// using RESTART mode. RESTART waits for active readers to finish, then checkpoints
-// all frames and resets the write position to the start of the WAL file, keeping
-// it small. PASSIVE was used previously but cannot make progress while readers are
-// active (e.g. streaming /metrics scrapes or OTEL export reads), causing the WAL
-// to grow to hundreds of MB over time.
+// using FULL mode. FULL checkpoints all available frames without blocking for the
+// WAL write-position reset (unlike RESTART which holds an exclusive lock and can
+// block concurrent SELECT queries, including the health check). PASSIVE was used
+// previously but cannot make progress while readers are active (e.g. streaming
+// /metrics scrapes or OTEL export reads), causing the WAL to grow unboundedly.
 // This is separate from HealthCheck so slow NFS I/O does not cause false-positive
 // liveness probe failures. The goroutine exits when ctx is cancelled.
 func StartWALMonitor(ctx context.Context, db *DB) {
@@ -314,7 +314,7 @@ func StartWALMonitor(ctx context.Context, db *DB) {
 				}
 				checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				var busy, walLog, checkpointed int
-				err := db.conn.QueryRowContext(checkCtx, "PRAGMA wal_checkpoint(RESTART)").Scan(&busy, &walLog, &checkpointed)
+				err := db.conn.QueryRowContext(checkCtx, "PRAGMA wal_checkpoint(FULL)").Scan(&busy, &walLog, &checkpointed)
 				cancel()
 				if err != nil {
 					log.Warn("WAL monitor: checkpoint query failed", slog.Any("error", err))

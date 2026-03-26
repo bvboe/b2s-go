@@ -212,56 +212,10 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		}
 	}
 
-	// 2. Check if database file exists and if update is available
+	// 2. Check if database file exists
 	dbExisted := false
 	if _, err := os.Stat(dbPath); err == nil {
 		dbExisted = true
-		desc, err := v6.ReadDescription(dbPath)
-		if err != nil {
-			log.Warn("failed to read database description", "error", err)
-		} else {
-			log.Debug("current database file",
-				"built", desc.Built.Format(time.RFC3339),
-				"schema", desc.SchemaVersion.String())
-
-			// Check if a newer archive is available
-			client, err := distribution.NewClient(du.distCfg)
-			if err != nil {
-				log.Warn("failed to create distribution client", "error", err)
-			} else {
-				archive, err := client.IsUpdateAvailable(desc)
-				if err != nil {
-					log.Warn("failed to check for updates", "error", err)
-				} else if archive != nil {
-					// Use persistent timestamp for comparison if available, as v6.ReadDescription
-					// may return stale cached values that don't match the actual database
-					compareTimestamp := desc.Built.Time
-					if !lastKnownTimestamp.IsZero() {
-						compareTimestamp = lastKnownTimestamp
-						log.Debug("using persistent timestamp for comparison",
-							"timestamp", compareTimestamp.Format(time.RFC3339))
-					}
-
-					if archive.Built.After(compareTimestamp) {
-						// Newer database available - delete existing to force re-download
-						log.Info("update available",
-							"archive_built", archive.Built.Format(time.RFC3339),
-							"current", compareTimestamp.Format(time.RFC3339))
-						log.Info("removing existing database to force update")
-						schemaDir := filepath.Join(grypeDir, "6")
-						if err := os.RemoveAll(schemaDir); err != nil {
-							log.Warn("failed to remove schema directory", "error", err)
-						}
-					} else {
-						log.Debug("archive available but not newer",
-							"archive", archive.Built.Format(time.RFC3339),
-							"current", compareTimestamp.Format(time.RFC3339))
-					}
-				} else {
-					log.Debug("no update available")
-				}
-			}
-		}
 	} else {
 		log.Info("no existing database found, will download")
 	}
