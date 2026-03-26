@@ -7,6 +7,7 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/root"
+	"github.com/sigstore/sigstore-go/pkg/tuf"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 )
 
@@ -42,7 +43,9 @@ func (v *Verifier) VerifySignature(blobPath, bundlePath string) error {
 
 	// Fetch the Sigstore public-good trust root from TUF (tuf.sigstore.dev).
 	// Network access is required here; the agent is downloading an update anyway.
-	trustedRoot, err := root.FetchTrustedRoot()
+	// DisableLocalCache avoids writing to $HOME/.sigstore, which may not be writable
+	// when the agent runs as a systemd service with a read-only filesystem.
+	trustedRoot, err := root.FetchTrustedRootWithOptions(tuf.DefaultOptions().WithDisableLocalCache())
 	if err != nil {
 		return fmt.Errorf("failed to fetch trusted root: %w", err)
 	}
