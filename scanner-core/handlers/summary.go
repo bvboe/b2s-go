@@ -206,17 +206,17 @@ func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string 
     WHERE nv.node_id IN (SELECT id FROM completed)%s
   )
 SELECT
-  (SELECT COUNT(*) FROM nodes)                                                  AS total_nodes,
+  (SELECT COUNT(*) FROM nodes WHERE 1=1%s)                                     AS total_nodes,
   v.total_cves,
   (SELECT COUNT(DISTINCT nv2.cve_id) FROM node_vulnerabilities nv2%s
    WHERE nv2.node_id IN (SELECT id FROM completed)%s)                          AS unique_cves,
   v.total_exploits,
   (SELECT COUNT(*) FROM nodes
-   WHERE status NOT IN ('completed','sbom_failed','vuln_scan_failed'))         AS nodes_pending,
+   WHERE status NOT IN ('completed','sbom_failed','vuln_scan_failed')%s)       AS nodes_pending,
   (SELECT COUNT(*) FROM nodes
-   WHERE status IN ('sbom_failed','vuln_scan_failed'))                         AS nodes_failed
+   WHERE status IN ('sbom_failed','vuln_scan_failed')%s)                       AS nodes_failed
 FROM vuln_agg v
-`, osFilter, pkgJoin, nvExtraWhere, pkgJoin2, uvExtraWhere)
+`, osFilter, pkgJoin, nvExtraWhere, osFilter, pkgJoin2, uvExtraWhere, osFilter, osFilter)
 }
 
 // NodeMetricsSummaryHandler returns a single-row JSON summary of node scan results.
