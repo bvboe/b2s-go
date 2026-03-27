@@ -213,6 +213,11 @@ func WatchPods(ctx context.Context, clientset kubernetes.Interface, manager *con
 
 	log.Info("pod informer cache synced and ready")
 
+	// Reconcile the DB with the informer's authoritative view of running containers.
+	// Removes stale rows from pods that terminated while the scan-server was down
+	// (those pods' delete events were missed while the watcher was not running).
+	manager.ReconcileDB()
+
 	// Run catch-up now that all containers are in the manager. Handles images whose
 	// AddContainer events raced with SetScanQueue, and images reset to pending by
 	// ResetInterruptedScans at startup.

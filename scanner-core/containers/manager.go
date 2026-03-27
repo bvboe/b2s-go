@@ -416,6 +416,34 @@ func (m *Manager) CatchUpScans() {
 	}
 }
 
+// ReconcileDB synchronizes the database container table with the current in-memory state.
+// Call this after the K8s informer cache has fully synced to remove rows for pods
+// that terminated while the scan-server was down (missed delete events).
+func (m *Manager) ReconcileDB() {
+	m.mu.RLock()
+	current := make([]Container, 0, len(m.containers))
+	for _, c := range m.containers {
+		current = append(current, c)
+	}
+	m.mu.RUnlock()
+
+	if m.db == nil {
+		return
+	}
+
+	stats, err := m.db.SetContainers(current)
+	if err != nil {
+		log.Error("failed to reconcile container database", slog.Any("error", err))
+		return
+	}
+	if stats != nil && (stats.ContainersAdded > 0 || stats.ContainersRemoved > 0) {
+		log.Info("startup reconciliation complete",
+			"added", stats.ContainersAdded,
+			"removed", stats.ContainersRemoved,
+			"new_images", stats.ImagesAdded)
+	}
+}
+
 // checkAndEnqueueScan checks if an image needs scanning and enqueues it with appropriate flags
 // This method handles retrying failed or incomplete scans
 func (m *Manager) checkAndEnqueueScan(c Container) {
