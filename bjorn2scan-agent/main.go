@@ -326,19 +326,6 @@ func main() {
 	// Initialize database readiness state for tracking Grype DB initialization
 	dbReadinessState := handlers.NewDatabaseReadinessState(grypeCfg)
 
-	// Start async Grype database initialization - does not block HTTP server startup
-	go func() {
-		logging.For(logging.ComponentVulnDB).Info("starting background vulnerability database initialization")
-		dbStatus, err := grype.InitializeDatabase(grypeCfg)
-		if err != nil {
-			logging.For(logging.ComponentVulnDB).Warn("failed to initialize vulnerability database", "error", err)
-			logging.For(logging.ComponentVulnDB).Warn("scans will wait for manual database setup")
-		} else {
-			logging.For(logging.ComponentVulnDB).Info("vulnerability database ready", "schema", dbStatus.SchemaVersion, "built", dbStatus.Built)
-		}
-		dbReadinessState.SetReady(dbStatus)
-	}()
-
 	// Create database updater for grype DB status and rescan job
 	// Pass the database as TimestampStore for persistent tracking of grype DB changes
 	dbUpdater, err := vulndb.NewDatabaseUpdaterWithConfig(grypeCfg.DBRootDir, vulndb.DatabaseUpdaterConfig{

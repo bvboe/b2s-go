@@ -396,21 +396,6 @@ func main() {
 	// Initialize database readiness state
 	dbReadinessState := corehandlers.NewDatabaseReadinessState(grypeCfg)
 
-	// Start async database initialization
-	// This prevents the 2+ minute initial download from blocking server startup
-	go func() {
-		logging.For(logging.ComponentK8s).Info("starting background vulnerability database initialization")
-		dbStatus, err := grype.InitializeDatabase(grypeCfg)
-		if err != nil {
-			logging.For(logging.ComponentK8s).Warn("failed to initialize vulnerability database", "error", err)
-			logging.For(logging.ComponentK8s).Warn("scans will wait for manual database setup")
-			dbReadinessState.SetReady(dbStatus)
-		} else {
-			logging.For(logging.ComponentK8s).Info("vulnerability database ready", "schema", dbStatus.SchemaVersion, "built", dbStatus.Built)
-			dbReadinessState.SetReady(dbStatus)
-		}
-	}()
-
 	// Create scan queue for automatic SBOM generation and vulnerability scanning
 	// Using default queue config (unbounded queue with single worker)
 	queueConfig := scanning.QueueConfig{
