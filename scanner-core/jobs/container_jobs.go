@@ -46,14 +46,23 @@ func (j *RefreshImagesJob) Run(ctx context.Context) error {
 	return nil
 }
 
-// CleanupOrphanedImagesJob deletes container images that have no associated container instances
-// This also removes related packages and vulnerabilities to keep the database clean
+// ContainerLister provides the current set of active container IDs.
+// Implemented by the container Manager in k8s-scan-server.
+type ContainerLister interface {
+	GetActiveContainerIDs() []containers.ContainerID
+}
+
+// CleanupOrphanedImagesJob deletes container images that have no associated container instances.
+// If a ContainerLister is configured, it first removes stale container entries (containers in
+// the DB whose pods no longer exist), then removes images that have become orphaned as a result.
 type CleanupOrphanedImagesJob struct {
-	db DatabaseCleanup
+	db     DatabaseCleanup
+	lister ContainerLister // optional; nil means skip stale-container cleanup
 }
 
 // DatabaseCleanup defines the interface for database cleanup operations
 type DatabaseCleanup interface {
+	CleanupStaleContainers(activeIDs []containers.ContainerID) (int, error)
 	CleanupOrphanedImages() (*database.CleanupStats, error)
 }
 
@@ -67,6 +76,11 @@ func NewCleanupOrphanedImagesJob(db DatabaseCleanup) *CleanupOrphanedImagesJob {
 	}
 }
 
+// SetContainerLister configures the job to remove stale containers before orphaned images.
+func (j *CleanupOrphanedImagesJob) SetContainerLister(lister ContainerLister) {
+	j.lister = lister
+}
+
 func (j *CleanupOrphanedImagesJob) Name() string {
 	return "cleanup-orphaned-images"
 }
@@ -74,18 +88,43 @@ func (j *CleanupOrphanedImagesJob) Name() string {
 func (j *CleanupOrphanedImagesJob) Run(ctx context.Context) error {
 	log.Info("starting cleanup of orphaned container images")
 
-	stats, err := j.db.CleanupOrphanedImages()
-	if err != nil {
-		return fmt.Errorf("cleanup failed: %w", err)
+	var totalStats database.CleanupStats
+
+	// Step 1: remove stale containers (pods that no longer exist in K8s)
+	if j.lister != nil {
+		activeIDs := j.lister.GetActiveContainerIDs()
+		removed, err := j.db.CleanupStaleContainers(activeIDs)
+		if err != nil {
+			return fmt.Errorf("stale container cleanup failed: %w", err)
+		}
+		totalStats.ContainersRemoved = removed
+		if removed > 0 {
+			log.Info("removed stale containers", "count", removed)
+		}
 	}
 
-	if stats != nil && stats.ImagesRemoved > 0 {
+	// Step 2: remove images with no containers (and their packages/vulnerabilities)
+	stats, err := j.db.CleanupOrphanedImages()
+	if err != nil {
+		return fmt.Errorf("orphaned image cleanup failed: %w", err)
+	}
+
+	if stats != nil {
+		totalStats.ImagesRemoved = stats.ImagesRemoved
+		totalStats.PackagesRemoved = stats.PackagesRemoved
+		totalStats.VulnerabilitiesRemoved = stats.VulnerabilitiesRemoved
+		totalStats.PackageDetailsRemoved = stats.PackageDetailsRemoved
+		totalStats.VulnerabilityDetailsRemoved = stats.VulnerabilityDetailsRemoved
+	}
+
+	if totalStats.ContainersRemoved > 0 || totalStats.ImagesRemoved > 0 {
 		log.Info("cleanup completed",
-			"images_removed", stats.ImagesRemoved,
-			"packages_removed", stats.PackagesRemoved,
-			"vulnerabilities_removed", stats.VulnerabilitiesRemoved)
+			"containers_removed", totalStats.ContainersRemoved,
+			"images_removed", totalStats.ImagesRemoved,
+			"packages_removed", totalStats.PackagesRemoved,
+			"vulnerabilities_removed", totalStats.VulnerabilitiesRemoved)
 	} else {
-		log.Info("cleanup completed: no orphaned images found")
+		log.Info("cleanup completed: nothing to remove")
 	}
 
 	return nil

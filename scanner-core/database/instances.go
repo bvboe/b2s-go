@@ -279,11 +279,80 @@ func (db *DB) GetAllContainers() (interface{}, error) {
 
 // CleanupStats holds statistics about a cleanup operation
 type CleanupStats struct {
-	ImagesRemoved              int // Number of container images deleted
-	PackagesRemoved            int // Number of package entries deleted
-	VulnerabilitiesRemoved     int // Number of vulnerability entries deleted
-	PackageDetailsRemoved      int // Number of package_details entries deleted
+	ContainersRemoved           int // Number of stale container entries deleted
+	ImagesRemoved               int // Number of container images deleted
+	PackagesRemoved             int // Number of package entries deleted
+	VulnerabilitiesRemoved      int // Number of vulnerability entries deleted
+	PackageDetailsRemoved       int // Number of package_details entries deleted
 	VulnerabilityDetailsRemoved int // Number of vulnerability_details entries deleted
+}
+
+// CleanupStaleContainers removes container entries whose (namespace, pod, name) triplet
+// is not present in the provided activeIDs set. Returns the number of containers removed.
+func (db *DB) CleanupStaleContainers(activeIDs []containers.ContainerID) (int, error) {
+	// Build a lookup set
+	activeSet := make(map[containers.ContainerID]struct{}, len(activeIDs))
+	for _, id := range activeIDs {
+		activeSet[id] = struct{}{}
+	}
+
+	// Find stale containers (read-only query, no lock needed)
+	rows, err := db.conn.Query("SELECT namespace, pod, name FROM containers")
+	if err != nil {
+		return 0, fmt.Errorf("failed to query containers: %w", err)
+	}
+
+	var stale []containers.ContainerID
+	for rows.Next() {
+		var id containers.ContainerID
+		if err := rows.Scan(&id.Namespace, &id.Pod, &id.Name); err != nil {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error("failed to close rows", "error", closeErr)
+			}
+			return 0, fmt.Errorf("failed to scan container: %w", err)
+		}
+		if _, active := activeSet[id]; !active {
+			stale = append(stale, id)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("failed to close rows: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed to iterate containers: %w", err)
+	}
+
+	if len(stale) == 0 {
+		return 0, nil
+	}
+
+	db.writeMu.Lock()
+	defer db.writeMu.Unlock()
+	tx, err := db.conn.Begin()
+	if err != nil {
+		exitOnCorruption(err)
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, id := range stale {
+		_, err := tx.Exec(
+			"DELETE FROM containers WHERE namespace = ? AND pod = ? AND name = ?",
+			id.Namespace, id.Pod, id.Name)
+		if err != nil {
+			exitOnCorruption(err)
+			return 0, fmt.Errorf("failed to delete stale container %s/%s/%s: %w", id.Namespace, id.Pod, id.Name, err)
+		}
+		log.Info("removed stale container", "namespace", id.Namespace, "pod", id.Pod, "name", id.Name)
+	}
+
+	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	db.notifyWrite()
+	return len(stale), nil
 }
 
 // CleanupOrphanedImages removes images that have no associated containers

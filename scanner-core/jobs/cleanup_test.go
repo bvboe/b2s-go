@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/bvboe/b2s-go/scanner-core/containers"
 	"github.com/bvboe/b2s-go/scanner-core/database"
 )
 
@@ -14,6 +15,10 @@ type mockDatabaseCleanup struct {
 	shouldFail  bool
 	cleanupFunc func() (*database.CleanupStats, error)
 	stats       *database.CleanupStats
+}
+
+func (m *mockDatabaseCleanup) CleanupStaleContainers(_ []containers.ContainerID) (int, error) {
+	return 0, nil
 }
 
 func (m *mockDatabaseCleanup) CleanupOrphanedImages() (*database.CleanupStats, error) {

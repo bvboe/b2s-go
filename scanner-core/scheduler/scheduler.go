@@ -62,11 +62,15 @@ func (s *Scheduler) AddJob(job Job, schedule Schedule, config JobConfig) error {
 		return nil
 	}
 
+	nextRun := schedule.Next(time.Now())
+	if config.RunImmediately {
+		nextRun = time.Now()
+	}
 	s.jobs[name] = &scheduledJob{
 		job:      job,
 		schedule: schedule,
 		config:   config,
-		nextRun:  schedule.Next(time.Now()),
+		nextRun:  nextRun,
 	}
 
 	log.Info("registered job",

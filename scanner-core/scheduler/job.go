@@ -58,6 +58,7 @@ func (s *IntervalSchedule) Next(after time.Time) time.Time {
 
 // JobConfig holds configuration for a scheduled job
 type JobConfig struct {
-	Enabled bool
-	Timeout time.Duration // Maximum execution time (0 = no timeout)
+	Enabled        bool
+	Timeout        time.Duration // Maximum execution time (0 = no timeout)
+	RunImmediately bool          // If true, run once at startup before the first scheduled interval
 }

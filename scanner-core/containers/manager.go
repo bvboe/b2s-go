@@ -326,6 +326,17 @@ func (m *Manager) GetContainerCount() int {
 	return len(m.containers)
 }
 
+// GetActiveContainerIDs returns the IDs of all containers currently known to the manager
+func (m *Manager) GetActiveContainerIDs() []ContainerID {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]ContainerID, 0, len(m.containers))
+	for _, c := range m.containers {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
 // GetContainer retrieves a specific container
 func (m *Manager) GetContainer(namespace, pod, name string) (Container, bool) {
 	m.mu.RLock()

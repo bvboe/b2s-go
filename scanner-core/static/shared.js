@@ -437,10 +437,39 @@ async function loadDataTable() {
     }
 }
 
+// Load the filtered image summary bar (if present on this page)
+async function loadImageSummary() {
+    const div = document.getElementById('imageSummary');
+    if (!div) return;
+
+    try {
+        const response = await fetch('/api/summary/deployment-metrics' + getCurrentFilterQueryString());
+        if (!response.ok) return;
+        const m = await response.json();
+
+        const stats = [
+            ['Images', formatNumber(m.images_scanned || 0)],
+            ['Containers', formatNumber(m.container_instances || 0)],
+            ['CVEs', formatNumber(m.total_cves || 0)],
+            ['Unique CVEs', formatNumber(m.unique_cves || 0)],
+            ['Exploits', formatNumber(m.total_exploits || 0)],
+        ];
+        if (m.images_pending) stats.push(['Pending', formatNumber(m.images_pending)]);
+        if (m.images_failed)  stats.push(['Failed',  formatNumber(m.images_failed)]);
+
+        div.innerHTML = stats
+            .map(([label, value]) => `<span><b>${escapeHtml(label)}:</b> ${value}</span>`)
+            .join('');
+    } catch (e) {
+        console.error('Error loading image summary:', e);
+    }
+}
+
 // Handle filter changes
 function onFilterChange() {
     currentPage = 1;
     loadDataTable();
+    loadImageSummary();
     updateCSVLink();
     renderSidebarNav(); // Update navigation links with current filters
 }
@@ -712,6 +741,7 @@ async function checkForUpdates() {
             console.log("Data updated, reloading...");
             currentTimestamp = newTimestamp;
             loadDataTable();
+            loadImageSummary();
         }
     } catch (error) {
         console.error("Error checking for updates:", error);
@@ -732,6 +762,7 @@ async function initPage() {
     renderSidebarNav();
 
     loadDataTable();
+    loadImageSummary();
     updateCSVLink();
     updateSortIndicators();
 

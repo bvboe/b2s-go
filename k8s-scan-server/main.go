@@ -464,8 +464,9 @@ func main() {
 					rescanJob,
 					scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
 					scheduler.JobConfig{
-						Enabled: true,
-						Timeout: cfg.JobsRescanDatabaseTimeout,
+						Enabled:        true,
+						Timeout:        cfg.JobsRescanDatabaseTimeout,
+						RunImmediately: true,
 					},
 				); err != nil {
 					logging.For(logging.ComponentK8s).Error("failed to add rescan database job", "error", err)
@@ -478,6 +479,7 @@ func main() {
 		// Add cleanup orphaned images job
 		if cfg.JobsCleanupEnabled {
 			cleanupJob := jobs.NewCleanupOrphanedImagesJob(db)
+			cleanupJob.SetContainerLister(manager)
 			if err := sched.AddJob(
 				cleanupJob,
 				scheduler.NewIntervalSchedule(cfg.JobsCleanupInterval),

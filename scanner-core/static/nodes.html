@@ -56,6 +56,8 @@
                     </tbody>
                 </table>
 
+                <div id="imageSummary" style="display: flex; gap: 20px; flex-wrap: wrap; margin: 8px 0; padding: 4px 0;"></div>
+
                 <div style="text-align: right; text-decoration: underline;">
                     <b><a href="" id="csvlink">Export to CSV</a></b>
                 </div>
@@ -308,6 +310,38 @@
                 cell.style.color = 'red';
                 tableBody.appendChild(row);
                 renderPagination();
+            }
+        }
+
+        // Override loadImageSummary to fetch node-specific metrics with node filters
+        async function loadImageSummary() {
+            const div = document.getElementById('imageSummary');
+            if (!div) return;
+            try {
+                const params = new URLSearchParams();
+                const osNames = getSelectedValues('osNameFilter');
+                if (osNames.length) params.append('osNames', osNames.join(','));
+                const vulnStatuses = getSelectedValues('vulnStatusFilter');
+                if (vulnStatuses.length) params.append('vulnStatuses', vulnStatuses.join(','));
+                const packageTypes = getSelectedValues('packageTypeFilter');
+                if (packageTypes.length) params.append('packageTypes', packageTypes.join(','));
+                const qs = params.toString();
+                const response = await fetch('/api/summary/node-metrics' + (qs ? '?' + qs : ''));
+                if (!response.ok) return;
+                const m = await response.json();
+                const stats = [
+                    ['Nodes', formatNumber(m.total_nodes || 0)],
+                    ['CVEs', formatNumber(m.total_cves || 0)],
+                    ['Unique CVEs', formatNumber(m.unique_cves || 0)],
+                    ['Exploits', formatNumber(m.total_exploits || 0)],
+                ];
+                if (m.nodes_pending) stats.push(['Pending', formatNumber(m.nodes_pending)]);
+                if (m.nodes_failed)  stats.push(['Failed',  formatNumber(m.nodes_failed)]);
+                div.innerHTML = stats
+                    .map(([label, value]) => `<span><b>${escapeHtml(label)}:</b> ${value}</span>`)
+                    .join('');
+            } catch (e) {
+                console.error('Error loading node summary:', e);
             }
         }
 

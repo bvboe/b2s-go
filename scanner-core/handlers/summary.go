@@ -7,35 +7,72 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 
-// deploymentMetricsQuery is the SQL for /api/summary/deployment-metrics.
+// buildDeploymentMetricsQuery constructs the SQL for /api/summary/deployment-metrics.
 //
 // Structure:
 //   vuln_agg  — aggregate total CVE count and exploit count per image from
 //               vulnerabilities; uses idx_vulnerabilities_image for the GROUP BY
-//   ctr_agg   — count containers per image; uses idx_containers_image
+//   ctr_agg   — count containers per image (optionally filtered by namespace);
+//               uses idx_containers_image
 //   img_stats — join images → ctr_agg → vuln_agg, keeping only images that have
-//               at least one running container (INNER JOIN ctr_agg)
+//               at least one running container (INNER JOIN ctr_agg); optionally
+//               filtered by os_name
 //
 // The outer SELECT makes a single aggregation pass over img_stats.
 // unique_cves uses a correlated subquery over the materialized img_stats CTE;
 // the COUNT(DISTINCT cve_id) WHERE image_id IN (...) is served from the covering
 // index idx_vulnerabilities_image_cve (image_id, cve_id) without touching table rows.
-const deploymentMetricsQuery = `
-WITH
+//
+// When all filter slices are empty the generated SQL is equivalent to the
+// original unfiltered query.
+func buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames []string) string {
+	vulnFilter := buildVulnerabilityFilter(vulnStatuses, packageTypes)
+
+	nsFilter := ""
+	if c := buildINClause("namespace", namespaces); c != "" {
+		nsFilter = "WHERE " + c
+	}
+
+	imgStatsWhere := ""
+	if c := buildINClause("i.os_name", osNames); c != "" {
+		imgStatsWhere = "WHERE " + c
+	}
+
+	containerInstancesExpr := "SELECT COUNT(*) FROM containers"
+	if nsFilter != "" {
+		containerInstancesExpr += " " + nsFilter
+	}
+
+	// unique_cves subquery applies the same vuln filters plus the image_id set
+	var uniqueCVEsConds []string
+	if c := buildINClause("fix_status", vulnStatuses); c != "" {
+		uniqueCVEsConds = append(uniqueCVEsConds, c)
+	}
+	if c := buildINClause("package_type", packageTypes); c != "" {
+		uniqueCVEsConds = append(uniqueCVEsConds, c)
+	}
+	uniqueCVEsConds = append(uniqueCVEsConds,
+		"image_id IN (SELECT id FROM img_stats WHERE status = 'completed')")
+	uniqueCVEsWhere := "WHERE " + strings.Join(uniqueCVEsConds, "\n   AND ")
+
+	return fmt.Sprintf(`WITH
   vuln_agg AS (
     SELECT
       image_id,
       SUM(count)                   AS total_cves,
       SUM(known_exploited * count) AS total_exploits
     FROM vulnerabilities
+    %s
     GROUP BY image_id
   ),
   ctr_agg AS (
     SELECT image_id, COUNT(*) AS cnt
     FROM containers
+    %s
     GROUP BY image_id
   ),
   img_stats AS (
@@ -48,24 +85,34 @@ WITH
     FROM images i
     JOIN  ctr_agg  c ON c.image_id = i.id
     LEFT JOIN vuln_agg v ON v.image_id = i.id
+    %s
   )
 SELECT
-  (SELECT COUNT(*) FROM containers)                                                                    AS container_instances,
-  COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0)                                  AS images_scanned,
-  COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_cves    END), 0)                         AS total_cves,
+  (%s)                                                                                               AS container_instances,
+  COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0)                                AS images_scanned,
+  COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_cves    END), 0)                       AS total_cves,
   (SELECT COUNT(DISTINCT cve_id) FROM vulnerabilities
-   WHERE image_id IN (SELECT id FROM img_stats WHERE status = 'completed'))                           AS unique_cves,
-  COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_exploits END), 0)                        AS total_exploits,
+   %s)                                                                                              AS unique_cves,
+  COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_exploits END), 0)                      AS total_exploits,
   COALESCE(SUM(CASE WHEN status NOT IN ('completed','sbom_failed','vuln_scan_failed') THEN 1 ELSE 0 END), 0) AS images_pending,
-  COALESCE(SUM(CASE WHEN status IN ('sbom_failed','vuln_scan_failed') THEN 1 ELSE 0 END), 0)          AS images_failed
+  COALESCE(SUM(CASE WHEN status IN ('sbom_failed','vuln_scan_failed') THEN 1 ELSE 0 END), 0)        AS images_failed
 FROM img_stats
-`
+`, vulnFilter, nsFilter, imgStatsWhere, containerInstancesExpr, uniqueCVEsWhere)
+}
 
-// DeploymentMetricsHandler returns a single-row JSON summary of the whole deployment.
+// DeploymentMetricsHandler returns a single-row JSON summary of the deployment,
+// optionally filtered by the same query parameters accepted by /api/images.
 // Endpoint: GET /api/summary/deployment-metrics
 func DeploymentMetricsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		result, err := provider.ExecuteReadOnlyQuery(deploymentMetricsQuery)
+		params := r.URL.Query()
+		namespaces := parseMultiSelect(params.Get("namespaces"))
+		vulnStatuses := parseMultiSelect(params.Get("vulnStatuses"))
+		packageTypes := parseMultiSelect(params.Get("packageTypes"))
+		osNames := parseMultiSelect(params.Get("osNames"))
+
+		query := buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames)
+		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
 			log.Error("error executing deployment metrics query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -101,46 +148,89 @@ func DeploymentMetricsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	}
 }
 
-// nodeMetricsSummaryQuery is the SQL for /api/summary/node-metrics.
+// buildNodeMetricsQuery constructs the SQL for /api/summary/node-metrics.
 //
 // Structure:
-//   completed — IDs of nodes with status 'completed'
-//   vuln_agg  — total CVE count and exploit count across all completed nodes;
-//               uses idx_node_vulnerabilities_node (node_id) for the WHERE filter.
-//               The COUNT(DISTINCT cve_id) subquery is served from the covering
-//               index idx_node_vulnerabilities_node_cve (node_id, cve_id).
+//   completed — IDs of nodes with status 'completed', optionally filtered by os_release
+//   vuln_agg  — total CVE count and exploit count; optionally filtered by fix_status
+//               and/or package type (requires JOIN to node_packages)
 //
-// The query always returns exactly one row because vuln_agg has no GROUP BY.
-const nodeMetricsSummaryQuery = `
-WITH
+// When all filter slices are empty the generated SQL is equivalent to the
+// original unfiltered query.
+func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string {
+	// completed CTE: filter by os_release
+	osFilter := ""
+	if c := buildINClause("os_release", osNames); c != "" {
+		osFilter = " AND " + c
+	}
+
+	// vuln_agg / unique_cves filters: fix_status and package type
+	var nvConds []string
+	if c := buildINClause("nv.fix_status", vulnStatuses); c != "" {
+		nvConds = append(nvConds, c)
+	}
+	pkgJoin := ""
+	if c := buildINClause("np.type", packageTypes); c != "" {
+		pkgJoin = "\n    JOIN node_packages np ON nv.package_id = np.id"
+		nvConds = append(nvConds, c)
+	}
+	nvExtraWhere := ""
+	if len(nvConds) > 0 {
+		nvExtraWhere = "\n    AND " + strings.Join(nvConds, "\n    AND ")
+	}
+
+	// Same conditions for the unique_cves correlated subquery (aliased nv2/np2)
+	var uv2Conds []string
+	if c := buildINClause("nv2.fix_status", vulnStatuses); c != "" {
+		uv2Conds = append(uv2Conds, c)
+	}
+	pkgJoin2 := ""
+	if c := buildINClause("np2.type", packageTypes); c != "" {
+		pkgJoin2 = "\n   JOIN node_packages np2 ON nv2.package_id = np2.id"
+		uv2Conds = append(uv2Conds, c)
+	}
+	uvExtraWhere := ""
+	if len(uv2Conds) > 0 {
+		uvExtraWhere = "\n   AND " + strings.Join(uv2Conds, "\n   AND ")
+	}
+
+	return fmt.Sprintf(`WITH
   completed AS (
-    SELECT id FROM nodes WHERE status = 'completed'
+    SELECT id FROM nodes WHERE status = 'completed'%s
   ),
   vuln_agg AS (
     SELECT
-      COALESCE(SUM(count),                   0) AS total_cves,
-      COALESCE(SUM(known_exploited * count), 0) AS total_exploits
-    FROM node_vulnerabilities
-    WHERE node_id IN (SELECT id FROM completed)
+      COALESCE(SUM(nv.count),                      0) AS total_cves,
+      COALESCE(SUM(nv.known_exploited * nv.count), 0) AS total_exploits
+    FROM node_vulnerabilities nv%s
+    WHERE nv.node_id IN (SELECT id FROM completed)%s
   )
 SELECT
-  (SELECT COUNT(*) FROM nodes)                                                                  AS total_nodes,
+  (SELECT COUNT(*) FROM nodes)                                                  AS total_nodes,
   v.total_cves,
-  (SELECT COUNT(DISTINCT cve_id) FROM node_vulnerabilities
-   WHERE node_id IN (SELECT id FROM completed))                                                AS unique_cves,
+  (SELECT COUNT(DISTINCT nv2.cve_id) FROM node_vulnerabilities nv2%s
+   WHERE nv2.node_id IN (SELECT id FROM completed)%s)                          AS unique_cves,
   v.total_exploits,
   (SELECT COUNT(*) FROM nodes
-   WHERE status NOT IN ('completed','sbom_failed','vuln_scan_failed'))                         AS nodes_pending,
+   WHERE status NOT IN ('completed','sbom_failed','vuln_scan_failed'))         AS nodes_pending,
   (SELECT COUNT(*) FROM nodes
-   WHERE status IN ('sbom_failed','vuln_scan_failed'))                                         AS nodes_failed
+   WHERE status IN ('sbom_failed','vuln_scan_failed'))                         AS nodes_failed
 FROM vuln_agg v
-`
+`, osFilter, pkgJoin, nvExtraWhere, pkgJoin2, uvExtraWhere)
+}
 
 // NodeMetricsSummaryHandler returns a single-row JSON summary of node scan results.
 // Endpoint: GET /api/summary/node-metrics
+// Accepts optional filter params: osNames, vulnStatuses, packageTypes
 func NodeMetricsSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		result, err := provider.ExecuteReadOnlyQuery(nodeMetricsSummaryQuery)
+		params := r.URL.Query()
+		osNames := parseMultiSelect(params.Get("osNames"))
+		vulnStatuses := parseMultiSelect(params.Get("vulnStatuses"))
+		packageTypes := parseMultiSelect(params.Get("packageTypes"))
+
+		query := buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes)
+		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
 			log.Error("error executing node metrics query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)

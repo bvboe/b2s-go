@@ -541,8 +541,9 @@ func main() {
 				rescanJob,
 				scheduler.NewIntervalSchedule(cfg.JobsRescanDatabaseInterval),
 				scheduler.JobConfig{
-					Enabled: true,
-					Timeout: cfg.JobsRescanDatabaseTimeout,
+					Enabled:        true,
+					Timeout:        cfg.JobsRescanDatabaseTimeout,
+					RunImmediately: true,
 				},
 			); err != nil {
 				logging.For(logging.ComponentJobs).Error("failed to add rescan database job", "error", err)
