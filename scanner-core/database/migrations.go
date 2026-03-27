@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentSchemaVersion = 36
+const currentSchemaVersion = 40
 
 type migration struct {
 	version int
@@ -209,6 +209,11 @@ var migrations = []migration{
 		version: 39,
 		name:    "add_node_vulnerabilities_node_cve_index",
 		up:      migrateToV39,
+	},
+	{
+		version: 40,
+		name:    "add_vuln_filter_indexes",
+		up:      migrateToV40,
 	},
 }
 
@@ -2531,5 +2536,19 @@ func migrateToV39(conn *sql.DB) error {
 		return fmt.Errorf("failed to create idx_node_vulnerabilities_node_cve: %w", err)
 	}
 	log.Info("migration v39: idx_node_vulnerabilities_node_cve created")
+	return nil
+}
+
+func migrateToV40(conn *sql.DB) error {
+	log.Info("migration v40: adding filter indexes on vulnerabilities and images")
+	_, err := conn.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_vulnerabilities_fix_status  ON vulnerabilities(fix_status);
+		CREATE INDEX IF NOT EXISTS idx_vulnerabilities_package_type ON vulnerabilities(package_type);
+		CREATE INDEX IF NOT EXISTS idx_images_os_name              ON images(os_name)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create filter indexes: %w", err)
+	}
+	log.Info("migration v40: filter indexes created")
 	return nil
 }
