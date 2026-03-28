@@ -879,6 +879,8 @@ func (db *DB) SaveGrypeDBTimestamp(t time.Time) error {
 
 // GetImagesNeedingRescan returns completed images that were scanned with an older
 // grype vulnerability database, or have never been scanned with a tracked version.
+// Only returns images that have at least one running container — orphaned images
+// (no containers) are skipped since there is nothing to rescan them against.
 // This enables intelligent rescanning when the vulnerability database is updated.
 func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]ContainerImage, error) {
 	if currentGrypeDBBuilt.IsZero() {
@@ -888,13 +890,14 @@ func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]Container
 	currentTimestamp := currentGrypeDBBuilt.UTC().Format(time.RFC3339)
 
 	rows, err := db.conn.Query(`
-		SELECT id, digest, created_at, updated_at
-		FROM images
-		WHERE status = ?
-		  AND sbom IS NOT NULL
-		  AND sbom != ''
-		  AND (grype_db_built IS NULL OR grype_db_built < ?)
-		ORDER BY created_at DESC
+		SELECT DISTINCT i.id, i.digest, i.created_at, i.updated_at
+		FROM images i
+		INNER JOIN containers c ON c.image_id = i.id
+		WHERE i.status = ?
+		  AND i.sbom IS NOT NULL
+		  AND i.sbom != ''
+		  AND (i.grype_db_built IS NULL OR i.grype_db_built < ?)
+		ORDER BY i.created_at DESC
 	`, StatusCompleted.String(), currentTimestamp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query images needing rescan: %w", err)
