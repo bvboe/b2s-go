@@ -180,11 +180,13 @@ scanServer:
     mountPath: /var/lib/bjorn2scan
 
   # Grype vulnerability database storage
-  # By default the Grype DB is stored on the main data PVC alongside the SQLite database.
-  # If you use NFS-backed storage, set separateVolume: true and choose a non-NFS storage
-  # class for grypeStorage — Grype's in-place DB updates can fail on NFS ("silly rename").
+  # The Grype DB is stored on an emptyDir (local container disk) by default.
+  # This avoids failures caused by NFS "silly rename" behavior when Grype replaces
+  # the database file in-place on NFS-backed PVCs. The DB is re-downloaded on each
+  # pod restart (~2 min) which is acceptable given daily update cadence.
+  # Set separateVolume: false to store on the main data PVC instead.
   grypeStorage:
-    separateVolume: false
+    separateVolume: true
     mountPath: /var/cache/grype
 
 # Pod Scanner (DaemonSet)
