@@ -215,6 +215,11 @@ var migrations = []migration{
 		name:    "add_vuln_filter_indexes",
 		up:      migrateToV40,
 	},
+	{
+		version: 41,
+		name:    "node_vuln_package_type_index",
+		up:      migrateToV41,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -2550,5 +2555,20 @@ func migrateToV40(conn *sql.DB) error {
 		return fmt.Errorf("failed to create filter indexes: %w", err)
 	}
 	log.Info("migration v40: filter indexes created")
+	return nil
+}
+
+// migrateToV41 drops idx_node_vulnerabilities_package.
+// The package_id FK column is being removed as part of the denormalization to
+// inline package_name/version/type. The replacement index
+// idx_node_vulnerabilities_package_type will be created in the migration that
+// adds the package_type column.
+func migrateToV41(conn *sql.DB) error {
+	log.Info("migration v41: dropping stale package_id index from node_vulnerabilities")
+	_, err := conn.Exec(`DROP INDEX IF EXISTS idx_node_vulnerabilities_package`)
+	if err != nil {
+		return fmt.Errorf("failed to drop idx_node_vulnerabilities_package: %w", err)
+	}
+	log.Info("migration v41: idx_node_vulnerabilities_package dropped")
 	return nil
 }
