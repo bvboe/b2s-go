@@ -141,20 +141,6 @@ func New(dbPath string) (*DB, error) {
 		}
 	}
 
-	// Run a quick integrity check to catch corruption that doesn't fail Ping().
-	// A corrupt SQLite file can still accept connections but fail on reads/writes.
-	// quick_check is much faster than integrity_check and catches the common cases.
-	var quickCheckResult string
-	if err := conn.QueryRow("PRAGMA quick_check").Scan(&quickCheckResult); err != nil || quickCheckResult != "ok" {
-		_ = conn.Close()
-		log.Error("database failed integrity check on startup, deleting and starting fresh",
-			"result", quickCheckResult, slog.Any("error", err))
-		if err := deleteDatabase(dbPath); err != nil {
-			return nil, fmt.Errorf("failed to delete corrupted database: %w", err)
-		}
-		return New(dbPath)
-	}
-
 	// Configure connection pool for SQLite.
 	// 2 connections: one for long-running streaming reads, one for concurrent writes
 	// (e.g. staleness upserts during /metrics streaming). WAL mode supports this.
@@ -195,6 +181,26 @@ func New(dbPath string) (*DB, error) {
 		log.Warn("startup WAL checkpoint failed", slog.Any("error", err))
 	} else if walLog > 0 {
 		log.Info("startup WAL checkpoint complete", "wal_frames", walLog, "checkpointed", walCheckpointed, "busy", walBusy == 1)
+	}
+
+	// Run quick_check only when the WAL had unmerged frames at startup, which indicates
+	// an unclean shutdown (OOM kill, SIGKILL). On a clean shutdown Close() checkpoints
+	// and truncates the WAL, so walLog == 0 means the previous run exited gracefully and
+	// corruption is extremely unlikely. Skipping quick_check on clean restarts avoids a
+	// multi-minute scan of large databases on slow storage (e.g. NFS).
+	if walLog > 0 {
+		log.Info("unclean shutdown detected (WAL had frames), running integrity check")
+		var quickCheckResult string
+		if err := conn.QueryRow("PRAGMA quick_check").Scan(&quickCheckResult); err != nil || quickCheckResult != "ok" {
+			_ = conn.Close()
+			log.Error("database failed integrity check after unclean shutdown, deleting and starting fresh",
+				"result", quickCheckResult, slog.Any("error", err))
+			if err := deleteDatabase(dbPath); err != nil {
+				return nil, fmt.Errorf("failed to delete corrupted database: %w", err)
+			}
+			return New(dbPath)
+		}
+		log.Info("integrity check passed")
 	}
 
 	// Run migrations to ensure schema is up to date

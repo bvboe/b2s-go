@@ -35,6 +35,10 @@ scanner-core never calls Syft directly.
 
 ## Design principles
 
+### Relationship to other components
+Only k8s-scan-server and bjorn2scan-agent depends on scanner-core. No other components. It 
+would be considered a major architectural decision to change that.
+
 ### Singleton deployment
 
 scanner-core is designed to run as a single replica only. There is no distributed
@@ -47,6 +51,7 @@ and the SQLite database usable as the sole source of truth.
 The system must handle clusters of 1 node to 100+ nodes and 10 to 1000+ images
 without configuration changes. This means:
 - All queries must use indexes; no full table scans in hot paths
+- No n+1 like query patters
 - Metrics must stream from the database rather than load into memory — a large
   cluster can produce hundreds of thousands of vulnerability metric data points
 - Write throughput matters less than read latency

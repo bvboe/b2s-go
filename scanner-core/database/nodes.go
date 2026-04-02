@@ -140,11 +140,25 @@ func (db *DB) RemoveNode(name string) error {
 		return fmt.Errorf("failed to get node ID: %w", err)
 	}
 
+	// Delete node vulnerability details before vulnerabilities (details reference vulnerability IDs)
+	_, err = tx.Exec(`DELETE FROM node_vulnerability_details WHERE node_vulnerability_id IN (SELECT id FROM node_vulnerabilities WHERE node_id = ?)`, nodeID)
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to delete node vulnerability details: %w", err)
+	}
+
 	// Delete node vulnerabilities
 	_, err = tx.Exec(`DELETE FROM node_vulnerabilities WHERE node_id = ?`, nodeID)
 	if err != nil {
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete node vulnerabilities: %w", err)
+	}
+
+	// Delete node package details before packages (details reference package IDs)
+	_, err = tx.Exec(`DELETE FROM node_package_details WHERE node_package_id IN (SELECT id FROM node_packages WHERE node_id = ?)`, nodeID)
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to delete node package details: %w", err)
 	}
 
 	// Delete node packages
@@ -551,6 +565,13 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		return fmt.Errorf("failed to store raw SBOM: %w", err)
 	}
 
+	// Delete details for existing packages before deleting the packages themselves
+	// (details reference package IDs; new scan inserts with new IDs, so old details become orphaned)
+	if _, err = tx.Exec(`DELETE FROM node_package_details WHERE node_package_id IN (SELECT id FROM node_packages WHERE node_id = ?)`, nodeID); err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to delete existing package details: %w", err)
+	}
+
 	// Delete existing packages for this node
 	if _, err = tx.Exec(`DELETE FROM node_packages WHERE node_id = ?`, nodeID); err != nil {
 		exitOnCorruption(err)
@@ -768,6 +789,13 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	if _, err = tx.Exec(`UPDATE nodes SET vulnerabilities = ? WHERE id = ?`, string(vulnJSON), nodeID); err != nil {
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to store raw vulnerabilities: %w", err)
+	}
+
+	// Delete details for existing vulnerabilities before deleting the vulnerabilities themselves
+	// (details reference vulnerability IDs; new scan inserts with new IDs, so old details become orphaned)
+	if _, err = tx.Exec(`DELETE FROM node_vulnerability_details WHERE node_vulnerability_id IN (SELECT id FROM node_vulnerabilities WHERE node_id = ?)`, nodeID); err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to delete existing vulnerability details: %w", err)
 	}
 
 	// Delete existing vulnerabilities

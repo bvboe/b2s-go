@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentSchemaVersion = 40
+const currentSchemaVersion = 46
 
 type migration struct {
 	version int
@@ -239,6 +239,11 @@ var migrations = []migration{
 		version: 45,
 		name:    "rename_image_indexes",
 		up:      migrateToV45,
+	},
+	{
+		version: 46,
+		name:    "cleanup_orphaned_node_details",
+		up:      migrateToV46,
 	},
 }
 
@@ -2757,5 +2762,37 @@ func migrateToV45(conn *sql.DB) error {
 		return fmt.Errorf("failed to rename image indexes: %w", err)
 	}
 	log.Info("migration v45: image indexes renamed")
+	return nil
+}
+
+// migrateToV46 deletes orphaned node_vulnerability_details and node_package_details rows.
+// The bug: StoreNodeVulnerabilities/StoreNodeSBOM deleted old node_vulnerabilities/node_packages
+// rows and inserted new ones with fresh auto-increment IDs, but never deleted the old detail
+// rows that referenced the now-deleted parent IDs. On active clusters this accumulated hundreds
+// of thousands of orphaned rows (e.g. 728K vuln details on kubeadm = ~3.6GB of dead data).
+func migrateToV46(conn *sql.DB) error {
+	log.Info("migration v46: deleting orphaned node detail rows")
+
+	res, err := conn.Exec(`
+		DELETE FROM node_vulnerability_details
+		WHERE node_vulnerability_id NOT IN (SELECT id FROM node_vulnerabilities)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to delete orphaned node_vulnerability_details: %w", err)
+	}
+	vulnRows, _ := res.RowsAffected()
+
+	res, err = conn.Exec(`
+		DELETE FROM node_package_details
+		WHERE node_package_id NOT IN (SELECT id FROM node_packages)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to delete orphaned node_package_details: %w", err)
+	}
+	pkgRows, _ := res.RowsAffected()
+
+	log.Info("migration v46: orphaned node detail rows deleted",
+		"node_vulnerability_details", vulnRows,
+		"node_package_details", pkgRows)
 	return nil
 }
