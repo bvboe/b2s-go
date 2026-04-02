@@ -281,7 +281,7 @@ func TestParseSBOMData_MultiplePackageInstances(t *testing.T) {
 	var count int
 	err = db.conn.QueryRow(`
 		SELECT number_of_instances
-		FROM packages
+		FROM image_packages
 		WHERE image_id = ? AND name = ? AND version = ? AND type = ?`,
 		imageID, "openssl", "1.1.1", "deb").Scan(&count)
 	if err != nil {
@@ -296,8 +296,8 @@ func TestParseSBOMData_MultiplePackageInstances(t *testing.T) {
 	var detailsJSON string
 	err = db.conn.QueryRow(`
 		SELECT pd.details
-		FROM package_details pd
-		JOIN packages p ON p.id = pd.package_id
+		FROM image_package_details pd
+		JOIN image_packages p ON p.id = pd.package_id
 		WHERE p.image_id = ? AND p.name = ?`,
 		imageID, "openssl").Scan(&detailsJSON)
 	if err != nil {
@@ -417,7 +417,7 @@ func TestParseVulnerabilityData_MultipleMatches(t *testing.T) {
 	var count int
 	err = db.conn.QueryRow(`
 		SELECT count
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE image_id = ? AND cve_id = ? AND package_name = ?`,
 		imageID, "CVE-2024-1234", "curl").Scan(&count)
 	if err != nil {
@@ -432,8 +432,8 @@ func TestParseVulnerabilityData_MultipleMatches(t *testing.T) {
 	var detailsJSON string
 	err = db.conn.QueryRow(`
 		SELECT vd.details
-		FROM vulnerability_details vd
-		JOIN vulnerabilities v ON v.id = vd.vulnerability_id
+		FROM image_vulnerability_details vd
+		JOIN image_vulnerabilities v ON v.id = vd.vulnerability_id
 		WHERE v.image_id = ? AND v.cve_id = ?`,
 		imageID, "CVE-2024-1234").Scan(&detailsJSON)
 	if err != nil {
@@ -582,7 +582,7 @@ func TestParseVulnerabilityData_KnownExploits(t *testing.T) {
 	var knownExploited, epssScore, epssPercentile float64
 	err = db.conn.QueryRow(`
 		SELECT known_exploited, epss_score, epss_percentile
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE image_id = ? AND cve_id = ?`,
 		imageID, "CVE-2024-9999").Scan(&knownExploited, &epssScore, &epssPercentile)
 	if err != nil {

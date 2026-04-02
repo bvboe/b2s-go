@@ -163,7 +163,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
   JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
       SELECT image_id, COUNT(*) as package_count
-      FROM packages
+      FROM image_packages
       %s
       GROUP BY image_id
   ) pkg_counts ON images.id = pkg_counts.image_id
@@ -178,7 +178,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
           SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
           SUM(risk * count) as total_risk,
           SUM(known_exploited * count) as exploit_count
-      FROM vulnerabilities
+      FROM image_vulnerabilities
       %s
       GROUP BY image_id
   ) vuln_counts ON images.id = vuln_counts.image_id
@@ -364,7 +364,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
   JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
       SELECT image_id, COUNT(*) as package_count
-      FROM packages
+      FROM image_packages
       %s
       GROUP BY image_id
   ) pkg_counts ON images.id = pkg_counts.image_id
@@ -379,7 +379,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
           SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
           SUM(risk * count) as total_risk,
           SUM(known_exploited * count) as exploit_count
-      FROM vulnerabilities
+      FROM image_vulnerabilities
       %s
       GROUP BY image_id
   ) vuln_counts ON images.id = vuln_counts.image_id
@@ -745,7 +745,7 @@ func buildImageVulnerabilitiesQuery(digest string, severities, fixStatuses, pack
 
 	// Base query
 	baseQuery := fmt.Sprintf(`
-FROM vulnerabilities v
+FROM image_vulnerabilities v
 JOIN images images ON v.image_id = images.id
 WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
@@ -992,7 +992,7 @@ func buildImagePackagesQuery(digest string, packageTypes []string, sortBy, sortO
 
 	// Base query
 	baseQuery := fmt.Sprintf(`
-FROM packages p
+FROM image_packages p
 JOIN images images ON p.image_id = images.id
 WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
@@ -1100,10 +1100,10 @@ func VulnerabilityDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		log.Debug("fetching vulnerability details", "vulnerability_id", vulnID)
 
-		// Query vulnerability_details table
+		// Query image_vulnerability_details table
 		query := fmt.Sprintf(`
 			SELECT vd.details
-			FROM vulnerability_details vd
+			FROM image_vulnerability_details vd
 			WHERE vd.vulnerability_id = %d`, vulnID)
 
 		log.Debug("executing vulnerability query", "query", query)
@@ -1167,10 +1167,10 @@ func PackageDetailsHandler(provider ImageQueryProvider) http.HandlerFunc {
 
 		log.Debug("fetching package details", "package_id", pkgID)
 
-		// Query package_details table
+		// Query image_package_details table
 		query := fmt.Sprintf(`
 			SELECT pd.details
-			FROM package_details pd
+			FROM image_package_details pd
 			WHERE pd.package_id = %d`, pkgID)
 
 		log.Debug("executing package query", "query", query)

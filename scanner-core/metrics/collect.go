@@ -177,7 +177,7 @@ func collectMetrics(
 				}
 			}
 			if config.NodeVulnerabilityRiskEnabled {
-				if err := record("bjorn2scan_node_vulnerability_risk", labels, v.Score*float64(v.Count)); err != nil {
+				if err := record("bjorn2scan_node_vulnerability_risk", labels, v.Risk*float64(v.Count)); err != nil {
 					return err
 				}
 			}

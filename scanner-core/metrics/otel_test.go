@@ -192,8 +192,8 @@ func TestRecordMetrics_DeploymentMetricSent(t *testing.T) {
 func TestRecordMetrics_NodeVulnsGoThroughAccumulator(t *testing.T) {
 	provider := newMockStreamingProvider()
 	provider.nodeVulns = []database.NodeVulnerabilityForMetrics{
-		{NodeName: "node-1", CVEID: "CVE-2024-001", Severity: "Critical", Score: 9.8, Count: 1},
-		{NodeName: "node-1", CVEID: "CVE-2024-002", Severity: "High", Score: 7.5, Count: 1},
+		{NodeName: "node-1", CVEID: "CVE-2024-001", Severity: "Critical", Risk: 9.8, Count: 1},
+		{NodeName: "node-1", CVEID: "CVE-2024-002", Severity: "High", Risk: 7.5, Count: 1},
 	}
 	config := UnifiedConfig{
 		NodeVulnerabilitiesEnabled:   true,

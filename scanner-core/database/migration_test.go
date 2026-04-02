@@ -23,7 +23,8 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	}()
 
 	// Verify migration v7 was applied by checking if new columns exist
-	rows, err := db.conn.Query(`PRAGMA table_info(vulnerabilities)`)
+	// (table was renamed to image_vulnerabilities in v43)
+	rows, err := db.conn.Query(`PRAGMA table_info(image_vulnerabilities)`)
 	if err != nil {
 		t.Fatalf("Failed to query table info: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	requiredColumns := []string{"risk", "epss_score", "epss_percentile", "known_exploited"}
 	for _, col := range requiredColumns {
 		if !columnNames[col] {
-			t.Errorf("Column %s not found in vulnerabilities table", col)
+			t.Errorf("Column %s not found in image_vulnerabilities table", col)
 		}
 	}
 
@@ -95,7 +96,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 			SUM(CASE WHEN risk > 0 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN epss_score > 0 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN known_exploited > 0 THEN 1 ELSE 0 END)
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE image_id = ?
 	`, imageID).Scan(&count, &hasRisk, &hasEPSS, &hasKnownExploited)
 	if err != nil {
@@ -126,7 +127,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 
 	err = db.conn.QueryRow(`
 		SELECT risk, epss_score, epss_percentile, known_exploited, severity
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE cve_id = 'CVE-2020-15999' AND image_id = ?
 		LIMIT 1
 	`, imageID).Scan(&risk, &epssScore, &epssPercentile, &knownExploited, &severity)
@@ -153,7 +154,7 @@ func TestMigrationV7WithBadNginxData(t *testing.T) {
 	var noExploitExploited int
 	err = db.conn.QueryRow(`
 		SELECT cve_id, known_exploited
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE image_id = ? AND known_exploited = 0
 		LIMIT 1
 	`, imageID).Scan(&noExploitCVE, &noExploitExploited)

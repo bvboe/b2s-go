@@ -220,6 +220,26 @@ var migrations = []migration{
 		name:    "node_vuln_package_type_index",
 		up:      migrateToV41,
 	},
+	{
+		version: 42,
+		name:    "node_vulns_denormalize",
+		up:      migrateToV42,
+	},
+	{
+		version: 43,
+		name:    "rename_image_tables",
+		up:      migrateToV43,
+	},
+	{
+		version: 44,
+		name:    "image_packages_language_purl",
+		up:      migrateToV44,
+	},
+	{
+		version: 45,
+		name:    "rename_image_indexes",
+		up:      migrateToV45,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -2561,8 +2581,7 @@ func migrateToV40(conn *sql.DB) error {
 // migrateToV41 drops idx_node_vulnerabilities_package.
 // The package_id FK column is being removed as part of the denormalization to
 // inline package_name/version/type. The replacement index
-// idx_node_vulnerabilities_package_type will be created in the migration that
-// adds the package_type column.
+// idx_node_vulnerabilities_package_type will be created in v42.
 func migrateToV41(conn *sql.DB) error {
 	log.Info("migration v41: dropping stale package_id index from node_vulnerabilities")
 	_, err := conn.Exec(`DROP INDEX IF EXISTS idx_node_vulnerabilities_package`)
@@ -2570,5 +2589,173 @@ func migrateToV41(conn *sql.DB) error {
 		return fmt.Errorf("failed to drop idx_node_vulnerabilities_package: %w", err)
 	}
 	log.Info("migration v41: idx_node_vulnerabilities_package dropped")
+	return nil
+}
+
+// migrateToV42 denormalizes node_vulnerabilities: replaces the package_id FK with
+// inline package_name/version/type columns (matching the image-side vulnerabilities
+// table). Also renames score→risk, adds epss_score/epss_percentile, drops the
+// details column (data already moved to node_vulnerability_details in v34), and
+// updates the unique constraint.
+//
+// Existing rows are migrated by joining against node_packages to populate the
+// inline fields. Rows whose package_id no longer exists in node_packages get
+// empty string values and remain queryable.
+func migrateToV42(conn *sql.DB) error {
+	log.Info("migration v42: denormalizing node_vulnerabilities (inline package fields)")
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.Exec(`
+		CREATE TABLE node_vulnerabilities_new (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id         INTEGER NOT NULL REFERENCES nodes(id),
+			cve_id          TEXT NOT NULL,
+			package_name    TEXT NOT NULL DEFAULT '',
+			package_version TEXT NOT NULL DEFAULT '',
+			package_type    TEXT NOT NULL DEFAULT '',
+			severity        TEXT NOT NULL,
+			risk            REAL DEFAULT 0.0,
+			epss_score      REAL DEFAULT 0.0,
+			epss_percentile REAL DEFAULT 0.0,
+			fix_status      TEXT,
+			fix_version     TEXT,
+			known_exploited INTEGER DEFAULT 0,
+			count           INTEGER DEFAULT 1,
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(node_id, cve_id, package_name, package_version)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node_vulnerabilities_new: %w", err)
+	}
+
+	// Migrate existing rows, joining node_packages to populate inline fields.
+	// LEFT JOIN so rows with a missing package_id survive with empty strings.
+	_, err = tx.Exec(`
+		INSERT INTO node_vulnerabilities_new
+			(id, node_id, cve_id, package_name, package_version, package_type,
+			 severity, risk, fix_status, fix_version, known_exploited, count, created_at)
+		SELECT
+			nv.id,
+			nv.node_id,
+			nv.cve_id,
+			COALESCE(np.name,    '') AS package_name,
+			COALESCE(np.version, '') AS package_version,
+			COALESCE(np.type,    '') AS package_type,
+			nv.severity,
+			COALESCE(nv.score, 0.0) AS risk,
+			COALESCE(nv.fix_status, ''),
+			COALESCE(nv.fix_version, ''),
+			COALESCE(nv.known_exploited, 0),
+			COALESCE(nv.count, 1),
+			nv.created_at
+		FROM node_vulnerabilities nv
+		LEFT JOIN node_packages np ON nv.package_id = np.id
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate node_vulnerabilities data: %w", err)
+	}
+
+	if _, err = tx.Exec(`DROP TABLE node_vulnerabilities`); err != nil {
+		return fmt.Errorf("failed to drop old node_vulnerabilities: %w", err)
+	}
+	if _, err = tx.Exec(`ALTER TABLE node_vulnerabilities_new RENAME TO node_vulnerabilities`); err != nil {
+		return fmt.Errorf("failed to rename node_vulnerabilities_new: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		CREATE INDEX idx_node_vulnerabilities_node         ON node_vulnerabilities(node_id);
+		CREATE INDEX idx_node_vulnerabilities_cve          ON node_vulnerabilities(cve_id);
+		CREATE INDEX idx_node_vulnerabilities_severity     ON node_vulnerabilities(severity);
+		CREATE INDEX idx_node_vulnerabilities_node_severity ON node_vulnerabilities(node_id, severity);
+		CREATE INDEX idx_node_vulnerabilities_fix_status   ON node_vulnerabilities(fix_status);
+		CREATE INDEX idx_node_vulnerabilities_node_cve     ON node_vulnerabilities(node_id, cve_id);
+		CREATE INDEX idx_node_vulnerabilities_package_type ON node_vulnerabilities(package_type)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to recreate node_vulnerabilities indexes: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit v42 migration: %w", err)
+	}
+	log.Info("migration v42: node_vulnerabilities denormalized")
+	return nil
+}
+
+// migrateToV43 renames the image-side tables to use the image_ prefix, making
+// the schema symmetric with the node_ prefixed node scanning tables.
+func migrateToV43(conn *sql.DB) error {
+	log.Info("migration v43: renaming image-side tables to image_ prefix")
+	_, err := conn.Exec(`
+		ALTER TABLE vulnerabilities       RENAME TO image_vulnerabilities;
+		ALTER TABLE vulnerability_details RENAME TO image_vulnerability_details;
+		ALTER TABLE packages              RENAME TO image_packages;
+		ALTER TABLE package_details       RENAME TO image_package_details
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to rename image tables: %w", err)
+	}
+	log.Info("migration v43: image-side tables renamed")
+	return nil
+}
+
+// migrateToV44 adds language and purl columns to image_packages, matching the
+// fields already present in node_packages.
+func migrateToV44(conn *sql.DB) error {
+	log.Info("migration v44: adding language and purl columns to image_packages")
+	_, err := conn.Exec(`
+		ALTER TABLE image_packages ADD COLUMN language TEXT;
+		ALTER TABLE image_packages ADD COLUMN purl     TEXT
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add language/purl to image_packages: %w", err)
+	}
+	log.Info("migration v44: language and purl columns added to image_packages")
+	return nil
+}
+
+// migrateToV45 renames the stale index names left over from the v43 table renames.
+// ALTER TABLE RENAME preserves index names, so image_vulnerabilities still has indexes
+// named idx_vulnerabilities_* and image_packages has idx_packages_*. SQLite has no
+// RENAME INDEX, so we drop and recreate each one.
+func migrateToV45(conn *sql.DB) error {
+	log.Info("migration v45: renaming stale indexes on image_vulnerabilities, image_packages, image_vulnerability_details, image_package_details")
+	_, err := conn.Exec(`
+		DROP INDEX IF EXISTS idx_vulnerabilities_image;
+		DROP INDEX IF EXISTS idx_vulnerabilities_severity;
+		DROP INDEX IF EXISTS idx_vulnerabilities_cve;
+		DROP INDEX IF EXISTS idx_vulnerabilities_image_severity;
+		DROP INDEX IF EXISTS idx_vulnerabilities_image_cve;
+		DROP INDEX IF EXISTS idx_vulnerabilities_fix_status;
+		DROP INDEX IF EXISTS idx_vulnerabilities_package_type;
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_image         ON image_vulnerabilities(image_id);
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_severity      ON image_vulnerabilities(severity);
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_cve           ON image_vulnerabilities(cve_id);
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_image_severity ON image_vulnerabilities(image_id, severity);
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_image_cve     ON image_vulnerabilities(image_id, cve_id);
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_fix_status    ON image_vulnerabilities(fix_status);
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_package_type  ON image_vulnerabilities(package_type);
+
+		DROP INDEX IF EXISTS idx_packages_image;
+		DROP INDEX IF EXISTS idx_packages_type;
+		CREATE INDEX IF NOT EXISTS idx_image_packages_image ON image_packages(image_id);
+		CREATE INDEX IF NOT EXISTS idx_image_packages_type  ON image_packages(type);
+
+		DROP INDEX IF EXISTS idx_vulnerability_details_vuln;
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerability_details_vuln ON image_vulnerability_details(vulnerability_id);
+
+		DROP INDEX IF EXISTS idx_package_details_pkg;
+		CREATE INDEX IF NOT EXISTS idx_image_package_details_pkg ON image_package_details(package_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to rename image indexes: %w", err)
+	}
+	log.Info("migration v45: image indexes renamed")
 	return nil
 }

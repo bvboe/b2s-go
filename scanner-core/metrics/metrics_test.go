@@ -233,7 +233,7 @@ func TestStreamMetrics_NodeMetrics(t *testing.T) {
 		{Node: nodes.Node{Name: "node-1", Hostname: "node-1.local", OSRelease: "Ubuntu 22.04", KernelVersion: "5.15.0", Architecture: "amd64"}},
 	}
 	provider.nodeVulns = []database.NodeVulnerabilityForMetrics{
-		{NodeName: "node-1", CVEID: "CVE-2024-5678", Severity: "High", Score: 7.5, KnownExploited: 1, Count: 2},
+		{NodeName: "node-1", CVEID: "CVE-2024-5678", Severity: "High", Risk: 7.5, KnownExploited: 1, Count: 2},
 	}
 	config := UnifiedConfig{
 		NodeScannedEnabled:                true,

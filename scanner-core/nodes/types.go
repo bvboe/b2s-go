@@ -67,20 +67,23 @@ type NodePackage struct {
 
 // NodeVulnerability represents a vulnerability found on a node
 type NodeVulnerability struct {
-	ID        int64  `json:"id"`
-	NodeID    int64  `json:"node_id"`
-	PackageID int64  `json:"package_id"`
-	CVEID     string `json:"cve_id"`
-	Severity  string `json:"severity"`
-	// Score is the CVSS score (displayed as Risk in UI)
-	Score float64 `json:"score,omitempty"`
+	ID       int64  `json:"id"`
+	NodeID   int64  `json:"node_id"`
+	CVEID    string `json:"cve_id"`
+	Severity string `json:"severity"`
+	// Risk is grype's composite risk value for this vulnerability
+	Risk float64 `json:"risk,omitempty"`
+	// EPSSScore is the Exploit Prediction Scoring System probability
+	EPSSScore float64 `json:"epss_score,omitempty"`
+	// EPSSPercentile is the EPSS percentile ranking
+	EPSSPercentile float64 `json:"epss_percentile,omitempty"`
 	// FixStatus indicates if a fix is available (fixed, not-fixed, unknown)
 	FixStatus string `json:"fix_status,omitempty"`
 	// FixVersion is the version that fixes this vulnerability
 	FixVersion string `json:"fix_version,omitempty"`
 	// KnownExploited is the count of known exploits from CISA KEV catalog
 	KnownExploited int `json:"known_exploited"`
-	// Package information (joined from node_packages)
+	// Package information stored inline (denormalized)
 	PackageName    string `json:"package_name"`
 	PackageVersion string `json:"package_version"`
 	PackageType    string `json:"package_type"`

@@ -68,7 +68,7 @@ func TestNewMetricsHandler_ReturnsMetrics(t *testing.T) {
 			Architecture:   "amd64",
 			CVEID:          "CVE-2024-1234",
 			Severity:       "Critical",
-			Score:          9.8,
+			Risk:          9.8,
 			FixStatus:      "fixed",
 			FixVersion:     "1.0.1",
 			KnownExploited: 1,

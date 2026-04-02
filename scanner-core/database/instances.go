@@ -283,8 +283,8 @@ type CleanupStats struct {
 	ImagesRemoved               int // Number of container images deleted
 	PackagesRemoved             int // Number of package entries deleted
 	VulnerabilitiesRemoved      int // Number of vulnerability entries deleted
-	PackageDetailsRemoved       int // Number of package_details entries deleted
-	VulnerabilityDetailsRemoved int // Number of vulnerability_details entries deleted
+	PackageDetailsRemoved       int // Number of image_package_details entries deleted
+	VulnerabilityDetailsRemoved int // Number of image_vulnerability_details entries deleted
 }
 
 // CleanupStaleContainers removes container entries whose (namespace, pod, name) triplet
@@ -394,7 +394,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 
 	err = tx.QueryRow(`
 		SELECT COUNT(*)
-		FROM packages p
+		FROM image_packages p
 		WHERE p.image_id IN (
 			SELECT img.id
 			FROM images img
@@ -411,7 +411,7 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 
 	err = tx.QueryRow(`
 		SELECT COUNT(*)
-		FROM vulnerabilities v
+		FROM image_vulnerabilities v
 		WHERE v.image_id IN (
 			SELECT img.id
 			FROM images img
@@ -426,14 +426,14 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		return nil, fmt.Errorf("failed to count orphaned vulnerabilities: %w", err)
 	}
 
-	// Delete vulnerability_details for orphaned images (must be done before vulnerabilities)
+	// Delete image_vulnerability_details for orphaned images (must be done before vulnerabilities)
 	var vulnerabilityDetailsCount int
 	err = tx.QueryRow(`
 		SELECT COUNT(*)
-		FROM vulnerability_details vd
+		FROM image_vulnerability_details vd
 		WHERE vd.vulnerability_id IN (
 			SELECT v.id
-			FROM vulnerabilities v
+			FROM image_vulnerabilities v
 			WHERE v.image_id IN (
 				SELECT img.id
 				FROM images img
@@ -446,14 +446,14 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`).Scan(&vulnerabilityDetailsCount)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count orphaned vulnerability_details: %w", err)
+		return nil, fmt.Errorf("failed to count orphaned image_vulnerability_details: %w", err)
 	}
 
 	_, err = tx.Exec(`
-		DELETE FROM vulnerability_details
+		DELETE FROM image_vulnerability_details
 		WHERE vulnerability_id IN (
 			SELECT v.id
-			FROM vulnerabilities v
+			FROM image_vulnerabilities v
 			WHERE v.image_id IN (
 				SELECT img.id
 				FROM images img
@@ -467,12 +467,12 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	`)
 	if err != nil {
 		exitOnCorruption(err)
-		return nil, fmt.Errorf("failed to delete vulnerability_details: %w", err)
+		return nil, fmt.Errorf("failed to delete image_vulnerability_details: %w", err)
 	}
 
 	// Delete vulnerabilities for orphaned images
 	_, err = tx.Exec(`
-		DELETE FROM vulnerabilities
+		DELETE FROM image_vulnerabilities
 		WHERE image_id IN (
 			SELECT img.id
 			FROM images img
@@ -488,14 +488,14 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		return nil, fmt.Errorf("failed to delete vulnerabilities: %w", err)
 	}
 
-	// Delete package_details for orphaned images (must be done before packages)
+	// Delete image_package_details for orphaned images (must be done before packages)
 	var packageDetailsCount int
 	err = tx.QueryRow(`
 		SELECT COUNT(*)
-		FROM package_details pd
+		FROM image_package_details pd
 		WHERE pd.package_id IN (
 			SELECT p.id
-			FROM packages p
+			FROM image_packages p
 			WHERE p.image_id IN (
 				SELECT img.id
 				FROM images img
@@ -508,14 +508,14 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		)
 	`).Scan(&packageDetailsCount)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count orphaned package_details: %w", err)
+		return nil, fmt.Errorf("failed to count orphaned image_package_details: %w", err)
 	}
 
 	_, err = tx.Exec(`
-		DELETE FROM package_details
+		DELETE FROM image_package_details
 		WHERE package_id IN (
 			SELECT p.id
-			FROM packages p
+			FROM image_packages p
 			WHERE p.image_id IN (
 				SELECT img.id
 				FROM images img
@@ -529,12 +529,12 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	`)
 	if err != nil {
 		exitOnCorruption(err)
-		return nil, fmt.Errorf("failed to delete package_details: %w", err)
+		return nil, fmt.Errorf("failed to delete image_package_details: %w", err)
 	}
 
 	// Delete packages for orphaned images
 	_, err = tx.Exec(`
-		DELETE FROM packages
+		DELETE FROM image_packages
 		WHERE image_id IN (
 			SELECT img.id
 			FROM images img
@@ -581,9 +581,9 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 	log.Info("cleanup complete",
 		"images_removed", stats.ImagesRemoved,
 		"packages_removed", stats.PackagesRemoved,
-		"package_details_removed", stats.PackageDetailsRemoved,
+		"image_package_details_removed", stats.PackageDetailsRemoved,
 		"vulnerabilities_removed", stats.VulnerabilitiesRemoved,
-		"vulnerability_details_removed", stats.VulnerabilityDetailsRemoved)
+		"image_vulnerability_details_removed", stats.VulnerabilityDetailsRemoved)
 
 	return stats, nil
 }

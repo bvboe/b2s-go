@@ -210,7 +210,7 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO packages (image_id, name, version, type, number_of_instances)
+		INSERT OR REPLACE INTO image_packages (image_id, name, version, type, number_of_instances)
 		VALUES (?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -225,7 +225,7 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 
 	// Prepare statement for package details
 	detailsStmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO package_details (package_id, details)
+		INSERT OR REPLACE INTO image_package_details (package_id, details)
 		VALUES (?, ?)
 	`)
 	if err != nil {
@@ -348,7 +348,7 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO vulnerabilities
+		INSERT OR REPLACE INTO image_vulnerabilities
 		(image_id, cve_id, package_name, package_version, package_type,
 		 severity, fix_status, fixed_version, count,
 		 risk, epss_score, epss_percentile, known_exploited)
@@ -366,7 +366,7 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 
 	// Prepare statement for vulnerability details
 	detailsStmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO vulnerability_details (vulnerability_id, details)
+		INSERT OR REPLACE INTO image_vulnerability_details (vulnerability_id, details)
 		VALUES (?, ?)
 	`)
 	if err != nil {

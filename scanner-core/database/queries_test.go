@@ -232,7 +232,7 @@ func TestGetContainerVulnerabilities(t *testing.T) {
 
 	// Insert vulnerabilities directly (simulating what StoreVulnerabilities would do)
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, imageID, "CVE-2022-1234", "busybox", "1.35.0", "apk", "Critical", "fixed", "1.35.1", 1)
 	if err != nil {
@@ -240,7 +240,7 @@ func TestGetContainerVulnerabilities(t *testing.T) {
 	}
 
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, imageID, "CVE-2023-5678", "openssl", "1.1.1", "deb", "High", "not-fixed", "", 2)
 	if err != nil {
@@ -406,7 +406,7 @@ func TestGetContainerVulnerabilities_OnlyCompletedScans(t *testing.T) {
 	}
 
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, completedImageID, "CVE-2024-COMPLETED", "pkg1", "1.0", "apk", "High", "fixed", "1.1", 1)
 	if err != nil {
@@ -444,7 +444,7 @@ func TestGetContainerVulnerabilities_OnlyCompletedScans(t *testing.T) {
 	}
 
 	_, err = db.conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, failedImageID, "CVE-2024-FAILED", "pkg2", "2.0", "apk", "Critical", "fixed", "2.1", 1)
 	if err != nil {
@@ -600,7 +600,7 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 	//   exploit_count = 3 + 0 + 1 = 4
 
 	_, err = conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
 		VALUES (?, 'CVE-2024-0001', 'pkg-a', '1.0.0', 'apk', 'Critical', 'fixed', '1.0.1', 3, 10.0, 1)
 	`, imageID)
 	if err != nil {
@@ -608,7 +608,7 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 	}
 
 	_, err = conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
 		VALUES (?, 'CVE-2024-0002', 'pkg-b', '2.0.0', 'deb', 'High', 'not-fixed', '', 2, 5.0, 0)
 	`, imageID)
 	if err != nil {
@@ -616,7 +616,7 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 	}
 
 	_, err = conn.Exec(`
-		INSERT INTO vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
+		INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, known_exploited)
 		VALUES (?, 'CVE-2024-0003', 'pkg-c', '3.0.0', 'rpm', 'Medium', 'fixed', '3.0.1', 1, 7.5, 1)
 	`, imageID)
 	if err != nil {
@@ -632,7 +632,7 @@ func TestRiskAndExploitCalculationWithCount(t *testing.T) {
 			SUM(CASE WHEN LOWER(severity) = 'critical' THEN count ELSE 0 END) as critical_count,
 			SUM(CASE WHEN LOWER(severity) = 'high' THEN count ELSE 0 END) as high_count,
 			SUM(CASE WHEN LOWER(severity) = 'medium' THEN count ELSE 0 END) as medium_count
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE image_id = ?
 	`
 

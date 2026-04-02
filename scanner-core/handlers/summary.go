@@ -65,7 +65,7 @@ func buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames
       image_id,
       SUM(count)                   AS total_cves,
       SUM(known_exploited * count) AS total_exploits
-    FROM vulnerabilities
+    FROM image_vulnerabilities
     %s
     GROUP BY image_id
   ),
@@ -91,7 +91,7 @@ SELECT
   (%s)                                                                                               AS container_instances,
   COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0)                                AS images_scanned,
   COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_cves    END), 0)                       AS total_cves,
-  (SELECT COUNT(DISTINCT cve_id) FROM vulnerabilities
+  (SELECT COUNT(DISTINCT cve_id) FROM image_vulnerabilities
    %s)                                                                                              AS unique_cves,
   COALESCE(SUM(CASE WHEN status = 'completed' THEN cnt * img_exploits END), 0)                      AS total_exploits,
   COALESCE(SUM(CASE WHEN status NOT IN ('completed','sbom_failed','vuln_scan_failed') THEN 1 ELSE 0 END), 0) AS images_pending,
@@ -418,7 +418,7 @@ JOIN images images ON instances.image_id = images.id
 JOIN scan_status status ON images.status = status.status
 LEFT JOIN (
     SELECT image_id, COUNT(*) as package_count
-    FROM packages
+    FROM image_packages
     %s
     GROUP BY image_id
 ) pkg_counts ON images.id = pkg_counts.image_id
@@ -433,7 +433,7 @@ LEFT JOIN (
         SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
         SUM(risk * count) as total_risk,
         SUM(known_exploited * count) as exploit_count
-    FROM vulnerabilities
+    FROM image_vulnerabilities
     %s
     GROUP BY image_id
 ) vuln_counts ON images.id = vuln_counts.image_id
@@ -657,7 +657,7 @@ JOIN images images ON instances.image_id = images.id
 JOIN scan_status status ON images.status = status.status
 LEFT JOIN (
     SELECT image_id, COUNT(*) as package_count
-    FROM packages
+    FROM image_packages
     %s
     GROUP BY image_id
 ) pkg_counts ON images.id = pkg_counts.image_id
@@ -672,7 +672,7 @@ LEFT JOIN (
         SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
         SUM(risk * count) as total_risk,
         SUM(known_exploited * count) as exploit_count
-    FROM vulnerabilities
+    FROM image_vulnerabilities
     %s
     GROUP BY image_id
 ) vuln_counts ON images.id = vuln_counts.image_id

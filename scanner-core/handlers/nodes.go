@@ -171,7 +171,7 @@ func NodeDetailHandler(db *database.DB) http.HandlerFunc {
 					_ = writer.Write([]string{
 						v.CVEID,
 						v.Severity,
-						fmt.Sprintf("%.1f", v.Score),
+						fmt.Sprintf("%.1f", v.Risk),
 						v.PackageName,
 						v.PackageVersion,
 						v.PackageType,

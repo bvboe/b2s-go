@@ -71,7 +71,7 @@ type ImageDetails struct {
 func (db *DB) GetPackagesByImage(digest string) (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT p.id, p.image_id, p.name, p.version, p.type, p.number_of_instances, p.created_at
-		FROM packages p
+		FROM image_packages p
 		JOIN images img ON p.image_id = img.id
 		WHERE img.digest = ?
 		ORDER BY p.name, p.version
@@ -104,7 +104,7 @@ func (db *DB) GetVulnerabilitiesByImage(digest string) (interface{}, error) {
 	rows, err := db.conn.Query(`
 		SELECT v.id, v.image_id, v.cve_id, v.package_name, v.package_version, v.package_type,
 		       v.severity, v.fix_status, v.fixed_version, v.count, v.created_at
-		FROM vulnerabilities v
+		FROM image_vulnerabilities v
 		JOIN images img ON v.image_id = img.id
 		WHERE img.digest = ?
 		ORDER BY
@@ -149,7 +149,7 @@ func (db *DB) GetImageSummary(digest string) (interface{}, error) {
 	err := db.conn.QueryRow(`
 		SELECT
 			img.id,
-			(SELECT COUNT(*) FROM packages WHERE image_id = img.id) as package_count,
+			(SELECT COUNT(*) FROM image_packages WHERE image_id = img.id) as package_count,
 			img.os_name,
 			img.os_version,
 			img.updated_at
@@ -180,7 +180,7 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 		SELECT
 			img.id, img.digest, img.status,
 			img.created_at, img.updated_at, img.sbom_scanned_at,
-			(SELECT COUNT(*) FROM packages WHERE image_id = img.id),
+			(SELECT COUNT(*) FROM image_packages WHERE image_id = img.id),
 			COALESCE(img.os_name, ''),
 			COALESCE(img.os_version, '')
 		FROM images img
@@ -211,7 +211,7 @@ func (db *DB) GetImageDetails(digest string) (interface{}, error) {
 		SELECT
 			LOWER(severity),
 			SUM(count) as total
-		FROM vulnerabilities
+		FROM image_vulnerabilities
 		WHERE image_id = ?
 		GROUP BY LOWER(severity)
 	`, details.ID)
@@ -265,8 +265,8 @@ func (db *DB) GetAllImageDetails() (interface{}, error) {
 			COALESCE(SUM(CASE WHEN LOWER(v.severity) IN ('low', 'negligible') THEN v.count ELSE 0 END), 0),
 			COALESCE(SUM(v.count), 0) as vuln_count
 		FROM images img
-		LEFT JOIN packages p ON p.image_id = img.id
-		LEFT JOIN vulnerabilities v ON v.image_id = img.id
+		LEFT JOIN image_packages p ON p.image_id = img.id
+		LEFT JOIN image_vulnerabilities v ON v.image_id = img.id
 		GROUP BY img.id
 		ORDER BY img.created_at DESC
 	`)
@@ -355,8 +355,8 @@ func (db *DB) GetFilterOptions() (*FilterOptions, error) {
 	queries := []querySpec{
 		{"SELECT DISTINCT namespace FROM containers WHERE namespace IS NOT NULL AND namespace != '' ORDER BY namespace", &opts.Namespaces},
 		{"SELECT DISTINCT os_name FROM images WHERE os_name IS NOT NULL AND os_name != '' ORDER BY os_name", &opts.OSNames},
-		{"SELECT DISTINCT fix_status FROM vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status", &opts.VulnStatuses},
-		{"SELECT DISTINCT type FROM packages WHERE type IS NOT NULL AND type != '' ORDER BY type", &opts.PackageTypes},
+		{"SELECT DISTINCT fix_status FROM image_vulnerabilities WHERE fix_status IS NOT NULL AND fix_status != '' ORDER BY fix_status", &opts.VulnStatuses},
+		{"SELECT DISTINCT type FROM image_packages WHERE type IS NOT NULL AND type != '' ORDER BY type", &opts.PackageTypes},
 	}
 
 	for _, q := range queries {
@@ -595,7 +595,7 @@ func (db *DB) StreamContainerVulnerabilities(callback func(ContainerVulnerabilit
 			v.risk
 		FROM containers c
 		JOIN images img ON c.image_id = img.id
-		JOIN vulnerabilities v ON img.id = v.image_id
+		JOIN image_vulnerabilities v ON img.id = v.image_id
 		WHERE img.status = 'completed'
 		ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
 	`)

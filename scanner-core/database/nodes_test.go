@@ -542,19 +542,20 @@ func TestStoreNodeVulnerabilities_BatchedInserts(t *testing.T) {
 	}
 }
 
-// TestStoreNodeVulnerabilities_SkipsMissingPackages tests that vulns for missing packages are skipped
-func TestStoreNodeVulnerabilities_SkipsMissingPackages(t *testing.T) {
+// TestStoreNodeVulnerabilities_InlinePackageFields tests that vulns are stored with
+// inline package_name/version/type regardless of whether the package exists in
+// node_packages. No vulnerability should be silently dropped.
+func TestStoreNodeVulnerabilities_InlinePackageFields(t *testing.T) {
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
 	node := nodes.Node{Name: "test-node-1"}
 	_, _ = db.AddNode(node)
 
-	// Store SBOM with only one package
 	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
 	_ = db.StoreNodeSBOM("test-node-1", []byte(sbom))
 
-	// Vulnerability report with a package that doesn't exist in SBOM
+	// Vulnerability report includes a package not in the SBOM — both must be stored.
 	vulnReport := `{"matches": [
 		{
 			"vulnerability": {"id": "CVE-2021-1234", "severity": "High"},
@@ -572,8 +573,18 @@ func TestStoreNodeVulnerabilities_SkipsMissingPackages(t *testing.T) {
 	}
 
 	vulns, _ := db.GetNodeVulnerabilities("test-node-1")
-	if len(vulns) != 1 {
-		t.Errorf("Expected 1 vulnerability (skipping missing package), got %d", len(vulns))
+	if len(vulns) != 2 {
+		t.Errorf("Expected 2 vulnerabilities (inline storage, none dropped), got %d", len(vulns))
+	}
+	// Verify the "nonexistent" package vuln was stored inline
+	found := false
+	for _, v := range vulns {
+		if v.PackageName == "nonexistent" && v.CVEID == "CVE-2021-5678" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected CVE-2021-5678 for package 'nonexistent' to be stored inline")
 	}
 }
 
@@ -1148,8 +1159,8 @@ func TestGetNodeVulnerabilitiesForMetrics(t *testing.T) {
 	if criticalVuln.Severity != "Critical" {
 		t.Errorf("Severity = %s, want Critical", criticalVuln.Severity)
 	}
-	if criticalVuln.Score != 9.8 {
-		t.Errorf("Score = %f, want 9.8", criticalVuln.Score)
+	if criticalVuln.Risk != 9.8 {
+		t.Errorf("Risk = %f, want 9.8", criticalVuln.Risk)
 	}
 	if criticalVuln.FixStatus != "fixed" {
 		t.Errorf("FixStatus = %s, want fixed", criticalVuln.FixStatus)

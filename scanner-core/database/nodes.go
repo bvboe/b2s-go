@@ -650,24 +650,10 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		return fmt.Errorf("failed to get node ID: %w", err)
 	}
 
-	// Step 2: Build package lookup map outside the write lock (read-only query)
-	packageMap := make(map[string]int64)
-	rows, err := db.conn.Query(`SELECT id, name, version, type FROM node_packages WHERE node_id = ?`, nodeID)
-	if err != nil {
-		return fmt.Errorf("failed to query packages: %w", err)
-	}
-	for rows.Next() {
-		var id int64
-		var pkgName, version, pkgType string
-		if err := rows.Scan(&id, &pkgName, &version, &pkgType); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("failed to scan package: %w", err)
-		}
-		packageMap[pkgName+"|"+version+"|"+pkgType] = id
-	}
-	_ = rows.Close()
-
-	// Step 3: Parse JSON and build vuln groups outside the write lock (CPU-bound)
+	// Step 2: Parse JSON and build vuln groups outside the write lock (CPU-bound).
+	// Vulnerabilities are stored denormalized: package_name/version/type are written
+	// inline on each row, so no packageMap lookup is needed and no match is ever
+	// silently dropped due to a missing FK.
 	var report struct {
 		Matches []json.RawMessage `json:"matches"`
 	}
@@ -677,9 +663,13 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 
 	type parsedMatch struct {
 		Vulnerability struct {
-			ID             string  `json:"id"`
-			Severity       string  `json:"severity"`
-			Risk           float64 `json:"risk"`
+			ID   string `json:"id"`
+			Severity string  `json:"severity"`
+			Risk     float64 `json:"risk"`
+			EPSS     []struct {
+				Score      float64 `json:"epss"`
+				Percentile float64 `json:"percentile"`
+			} `json:"epss"`
 			KnownExploited []struct {
 				CVE string `json:"cve"`
 			} `json:"knownExploited"`
@@ -696,12 +686,16 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	}
 
 	type vulnKey struct {
-		PackageID int64
-		CVEID     string
+		PackageName    string
+		PackageVersion string
+		PackageType    string
+		CVEID          string
 	}
 	type vulnData struct {
 		Severity       string
 		Risk           float64
+		EPSSScore      float64
+		EPSSPercentile float64
 		FixStatus      string
 		FixVersion     string
 		KnownExploited int
@@ -716,17 +710,27 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 			continue
 		}
 
-		pkgKey := pm.Artifact.Name + "|" + pm.Artifact.Version + "|" + pm.Artifact.Type
-		packageID, found := packageMap[pkgKey]
-		if !found {
-			continue
+		key := vulnKey{
+			PackageName:    pm.Artifact.Name,
+			PackageVersion: pm.Artifact.Version,
+			PackageType:    pm.Artifact.Type,
+			CVEID:          pm.Vulnerability.ID,
 		}
 
-		key := vulnKey{PackageID: packageID, CVEID: pm.Vulnerability.ID}
+		epssScore, epssPercentile := 0.0, 0.0
+		if len(pm.Vulnerability.EPSS) > 0 {
+			epssScore = pm.Vulnerability.EPSS[0].Score
+			epssPercentile = pm.Vulnerability.EPSS[0].Percentile
+		}
+
 		if existing, ok := vulnGroups[key]; ok {
 			existing.Instances = append(existing.Instances, matchRaw)
 			if pm.Vulnerability.Risk > existing.Risk {
 				existing.Risk = pm.Vulnerability.Risk
+			}
+			if epssScore > existing.EPSSScore {
+				existing.EPSSScore = epssScore
+				existing.EPSSPercentile = epssPercentile
 			}
 			if ke := len(pm.Vulnerability.KnownExploited); ke > existing.KnownExploited {
 				existing.KnownExploited = ke
@@ -739,6 +743,8 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 			vulnGroups[key] = &vulnData{
 				Severity:       pm.Vulnerability.Severity,
 				Risk:           pm.Vulnerability.Risk,
+				EPSSScore:      epssScore,
+				EPSSPercentile: epssPercentile,
 				FixStatus:      pm.Vulnerability.Fix.State,
 				FixVersion:     fixVersion,
 				KnownExploited: len(pm.Vulnerability.KnownExploited),
@@ -747,7 +753,7 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		}
 	}
 
-	// Step 4: All writes in a single transaction under the write lock.
+	// Step 3: All writes in a single transaction under the write lock.
 	db.writeMu.Lock()
 	defer db.writeMu.Unlock()
 
@@ -771,8 +777,10 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	}
 
 	vulnStmt, err := tx.Prepare(`
-		INSERT INTO node_vulnerabilities (node_id, package_id, cve_id, severity, score, fix_status, fix_version, known_exploited, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO node_vulnerabilities
+			(node_id, cve_id, package_name, package_version, package_type,
+			 severity, risk, epss_score, epss_percentile, fix_status, fix_version, known_exploited, count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		exitOnCorruption(err)
@@ -792,7 +800,11 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 
 	totalInserted := 0
 	for key, data := range vulnGroups {
-		result, err := vulnStmt.Exec(nodeID, key.PackageID, key.CVEID, data.Severity, data.Risk, data.FixStatus, data.FixVersion, data.KnownExploited, len(data.Instances))
+		result, err := vulnStmt.Exec(
+			nodeID, key.CVEID, key.PackageName, key.PackageVersion, key.PackageType,
+			data.Severity, data.Risk, data.EPSSScore, data.EPSSPercentile,
+			data.FixStatus, data.FixVersion, data.KnownExploited, len(data.Instances),
+		)
 		if err != nil {
 			log.Warn("failed to insert vulnerability", "cve_id", key.CVEID, "error", err)
 			continue
@@ -913,12 +925,15 @@ func (db *DB) GetNodePackages(name string) ([]nodes.NodePackage, error) {
 // GetNodeVulnerabilities retrieves all vulnerabilities for a node with package info
 func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, error) {
 	rows, err := db.conn.Query(`
-		SELECT nv.id, nv.node_id, nv.package_id, nv.cve_id, nv.severity, nv.score,
+		SELECT nv.id, nv.node_id, nv.cve_id, nv.severity,
+			COALESCE(nv.risk, 0) as risk,
+			COALESCE(nv.epss_score, 0) as epss_score,
+			COALESCE(nv.epss_percentile, 0) as epss_percentile,
 			nv.fix_status, nv.fix_version, nv.known_exploited, nv.created_at,
-			np.name, np.version, np.type, COALESCE(nv.count, 1) as count
+			nv.package_name, nv.package_version, nv.package_type,
+			COALESCE(nv.count, 1) as count
 		FROM node_vulnerabilities nv
 		JOIN nodes n ON nv.node_id = n.id
-		JOIN node_packages np ON nv.package_id = np.id
 		WHERE n.name = ?
 		ORDER BY
 			CASE nv.severity
@@ -939,16 +954,15 @@ func (db *DB) GetNodeVulnerabilities(name string) ([]nodes.NodeVulnerability, er
 	vulns := []nodes.NodeVulnerability{} // Initialize to empty slice, not nil (JSON: [] not null)
 	for rows.Next() {
 		var vuln nodes.NodeVulnerability
-		var score sql.NullFloat64
 		var fixStatus, fixVersion sql.NullString
-		err := rows.Scan(&vuln.ID, &vuln.NodeID, &vuln.PackageID, &vuln.CVEID, &vuln.Severity, &score,
+		err := rows.Scan(
+			&vuln.ID, &vuln.NodeID, &vuln.CVEID, &vuln.Severity,
+			&vuln.Risk, &vuln.EPSSScore, &vuln.EPSSPercentile,
 			&fixStatus, &fixVersion, &vuln.KnownExploited, &vuln.CreatedAt,
-			&vuln.PackageName, &vuln.PackageVersion, &vuln.PackageType, &vuln.Count)
+			&vuln.PackageName, &vuln.PackageVersion, &vuln.PackageType, &vuln.Count,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan vulnerability row: %w", err)
-		}
-		if score.Valid {
-			vuln.Score = score.Float64
 		}
 		if fixStatus.Valid {
 			vuln.FixStatus = fixStatus.String
@@ -1034,7 +1048,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 				placeholders[i] = "?"
 				vulnFilterArgs = append(vulnFilterArgs, pkgType)
 			}
-			conditions = append(conditions, "np.type IN ("+strings.Join(placeholders, ",")+")")
+			conditions = append(conditions, "nv.package_type IN ("+strings.Join(placeholders, ",")+")")
 		}
 
 		if len(conditions) > 0 {
@@ -1058,51 +1072,9 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 	var query string
 	var args []interface{}
 
-	if len(filters.PackageTypes) > 0 {
-		// Need to join with node_packages to filter by package type
-		query = `
-		SELECT
-			n.name,
-			COALESCE(n.os_release, '') as os_release,
-			COALESCE(n.status, 'unknown') as status,
-			(SELECT COUNT(*) FROM node_packages WHERE node_id = n.id) as package_count,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.severity = 'Critical'` + vulnFilter + `) as critical,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.severity = 'High'` + vulnFilter + `) as high,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.severity = 'Medium'` + vulnFilter + `) as medium,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.severity = 'Low'` + vulnFilter + `) as low,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.severity = 'Negligible'` + vulnFilter + `) as negligible,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id` + vulnFilter + `) as total,
-			(SELECT COALESCE(SUM(nv.score * COALESCE(nv.count, 1)), 0) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id` + vulnFilter + `) as total_risk,
-			(SELECT COUNT(*) FROM node_vulnerabilities nv
-				JOIN node_packages np ON nv.package_id = np.id
-				WHERE nv.node_id = n.id AND nv.known_exploited > 0` + vulnFilter + `) as exploit_count
-		FROM nodes n` + nodeFilter + `
-		ORDER BY n.name`
-
-		// Add args for each subquery (7 severity counts + total + total_risk + exploit_count = 10 subqueries)
-		for i := 0; i < 10; i++ {
-			args = append(args, vulnFilterArgs...)
-		}
-		args = append(args, nodeFilterArgs...)
-	} else if len(filters.VulnStatuses) > 0 {
-		// Only filtering by vuln status, no package join needed
+	if len(filters.VulnStatuses) > 0 || len(filters.PackageTypes) > 0 {
+		// package_type is now inline on node_vulnerabilities, so no JOIN is needed
+		// regardless of whether we're filtering by package type or vuln status.
 		query = `
 		SELECT
 			n.name,
@@ -1116,7 +1088,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible'` + vulnFilter + `) as negligible,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total,
-			(SELECT COALESCE(SUM(nv.score * COALESCE(nv.count, 1)), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total_risk,
+			(SELECT COALESCE(SUM(nv.risk * COALESCE(nv.count, 1)), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total_risk,
 			(SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.known_exploited > 0` + vulnFilter + `) as exploit_count
 		FROM nodes n` + nodeFilter + `
 		ORDER BY n.name`
@@ -1141,7 +1113,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Negligible') as negligible,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')) as unknown,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id) as total,
-			(SELECT COALESCE(SUM(score * COALESCE(count, 1)), 0) FROM node_vulnerabilities WHERE node_id = n.id) as total_risk,
+			(SELECT COALESCE(SUM(risk * COALESCE(count, 1)), 0) FROM node_vulnerabilities WHERE node_id = n.id) as total_risk,
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = n.id AND known_exploited > 0) as exploit_count
 		FROM nodes n` + nodeFilter + `
 		ORDER BY n.name`
@@ -1209,7 +1181,7 @@ func (db *DB) GetNodeDistributionSummary() ([]nodes.NodeDistributionSummary, err
 			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low')), 0) as avg_low,
 			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible')), 0) as avg_negligible,
 			COALESCE(AVG((SELECT COUNT(*) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible'))), 0) as avg_unknown,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.score * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_risk,
+			COALESCE(AVG((SELECT COALESCE(SUM(nv.risk * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_risk,
 			COALESCE(AVG((SELECT COALESCE(SUM(nv.known_exploited * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_exploits,
 			COALESCE(AVG((SELECT COUNT(*) FROM node_packages np WHERE np.node_id = n.id)), 0) as avg_packages
 		FROM nodes n
@@ -1306,7 +1278,7 @@ type NodeVulnerabilityForMetrics struct {
 	VulnID         int64
 	CVEID          string
 	Severity       string
-	Score          float64
+	Risk           float64
 	FixStatus      string
 	FixVersion     string
 	KnownExploited int
@@ -1317,9 +1289,8 @@ type NodeVulnerabilityForMetrics struct {
 	Count          int
 }
 
-// GetNodeVulnerabilitiesForMetrics retrieves all node vulnerabilities with full context for metrics export
-// Returns a denormalized view joining nodes, node_packages, and node_vulnerabilities
-// Uses existing indexes: idx_nodes_status, idx_node_vulnerabilities_node, idx_node_vulnerabilities_package
+// GetNodeVulnerabilitiesForMetrics retrieves all node vulnerabilities with full context for metrics export.
+// Uses existing indexes: idx_nodes_status, idx_node_vulnerabilities_node.
 func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics, error) {
 	rows, err := db.conn.Query(`
 		SELECT
@@ -1331,17 +1302,16 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 			nv.id as vuln_id,
 			nv.cve_id,
 			COALESCE(nv.severity, 'Unknown') as severity,
-			COALESCE(nv.score, 0) as score,
+			COALESCE(nv.risk, 0) as risk,
 			COALESCE(nv.fix_status, 'unknown') as fix_status,
 			COALESCE(nv.fix_version, '') as fix_version,
 			COALESCE(nv.known_exploited, 0) as known_exploited,
-			np.name as package_name,
-			np.version as package_version,
-			COALESCE(np.type, '') as package_type,
+			nv.package_name,
+			nv.package_version,
+			COALESCE(nv.package_type, '') as package_type,
 			COALESCE(nv.count, 1) as count
 		FROM node_vulnerabilities nv
 		JOIN nodes n ON nv.node_id = n.id
-		JOIN node_packages np ON nv.package_id = np.id
 		WHERE n.status = 'completed'
 	`)
 	if err != nil {
@@ -1356,7 +1326,7 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 		var v NodeVulnerabilityForMetrics
 		err := rows.Scan(
 			&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
-			&v.VulnID, &v.CVEID, &v.Severity, &v.Score, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
+			&v.VulnID, &v.CVEID, &v.Severity, &v.Risk, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
 			&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
 		)
 		if err != nil {
@@ -1382,17 +1352,16 @@ func (db *DB) StreamNodeVulnerabilitiesForMetrics(callback func(v NodeVulnerabil
 			nv.id as vuln_id,
 			nv.cve_id,
 			COALESCE(nv.severity, 'Unknown') as severity,
-			COALESCE(nv.score, 0) as score,
+			COALESCE(nv.risk, 0) as risk,
 			COALESCE(nv.fix_status, 'unknown') as fix_status,
 			COALESCE(nv.fix_version, '') as fix_version,
 			COALESCE(nv.known_exploited, 0) as known_exploited,
-			np.name as package_name,
-			np.version as package_version,
-			COALESCE(np.type, '') as package_type,
+			nv.package_name,
+			nv.package_version,
+			COALESCE(nv.package_type, '') as package_type,
 			COALESCE(nv.count, 1) as count
 		FROM node_vulnerabilities nv
 		JOIN nodes n ON nv.node_id = n.id
-		JOIN node_packages np ON nv.package_id = np.id
 		WHERE n.status = 'completed'
 	`)
 	if err != nil {
@@ -1404,7 +1373,7 @@ func (db *DB) StreamNodeVulnerabilitiesForMetrics(callback func(v NodeVulnerabil
 		var v NodeVulnerabilityForMetrics
 		err := rows.Scan(
 			&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
-			&v.VulnID, &v.CVEID, &v.Severity, &v.Score, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
+			&v.VulnID, &v.CVEID, &v.Severity, &v.Risk, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
 			&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
 		)
 		if err != nil {
