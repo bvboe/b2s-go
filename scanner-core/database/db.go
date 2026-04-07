@@ -142,10 +142,11 @@ func New(dbPath string) (*DB, error) {
 	}
 
 	// Configure connection pool for SQLite.
-	// 2 connections: one for long-running streaming reads, one for concurrent writes
-	// (e.g. staleness upserts during /metrics streaming). WAL mode supports this.
-	conn.SetMaxOpenConns(2)
-	conn.SetMaxIdleConns(2)
+	// 5 connections: writes are serialized by writeMu so extra connections only add
+	// read parallelism, which WAL mode handles correctly. This ensures the health
+	// check and WAL monitor always have a free slot even during concurrent reads + writes.
+	conn.SetMaxOpenConns(5)
+	conn.SetMaxIdleConns(5)
 
 	// Configure SQLite for better concurrency
 	_, err = conn.Exec(`
