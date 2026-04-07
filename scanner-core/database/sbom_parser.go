@@ -200,8 +200,8 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 	}
 
 	// Insert packages into database
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("store_image_packages")
+	defer done()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		exitOnCorruption(err)
@@ -338,8 +338,8 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 	}
 
 	// Insert vulnerabilities into database
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("store_image_vulnerabilities")
+	defer done()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		exitOnCorruption(err)

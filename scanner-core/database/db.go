@@ -233,8 +233,8 @@ func New(dbPath string) (*DB, error) {
 // back to pending. This happens when the server crashes or is OOM-killed mid-scan.
 // Should be called once at startup, before the scan queue and watchers are started.
 func (db *DB) ResetInterruptedScans() error {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("reset_interrupted_scans")
+	defer done()
 
 	res, err := db.conn.Exec(`
 		UPDATE nodes SET status = 'pending', status_error = ''

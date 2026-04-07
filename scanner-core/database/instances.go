@@ -39,8 +39,8 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	}
 
 	// Start a transaction to ensure atomic operation across both tables
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("add_container")
+	defer done()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		exitOnCorruption(err)
@@ -127,8 +127,8 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 
 // RemoveContainer removes a container from the database
 func (db *DB) RemoveContainer(id containers.ContainerID) error {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("remove_container")
+	defer done()
 	result, err := db.conn.Exec(`
 		DELETE FROM containers
 		WHERE namespace = ? AND pod = ? AND name = ?
@@ -172,8 +172,8 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 	}
 
 	// Start a transaction to ensure atomic replacement
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("set_containers")
+	defer done()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		exitOnCorruption(err)
@@ -326,8 +326,8 @@ func (db *DB) CleanupStaleContainers(activeIDs []containers.ContainerID) (int, e
 		return 0, nil
 	}
 
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("cleanup_stale_containers")
+	defer done()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		exitOnCorruption(err)
@@ -358,8 +358,8 @@ func (db *DB) CleanupStaleContainers(activeIDs []containers.ContainerID) (int, e
 // CleanupOrphanedImages removes images that have no associated containers
 // This also cascades to delete related packages and vulnerabilities
 func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("cleanup_orphaned_images")
+	defer done()
 	// Start a transaction
 	tx, err := db.conn.Begin()
 	if err != nil {

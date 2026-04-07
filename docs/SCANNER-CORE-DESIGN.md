@@ -130,11 +130,11 @@ are writing scan results.
 The database is a single file (`containers.db`) stored at the path configured
 via `DB_PATH`. The WAL and SHM sidecar files live alongside it.
 
-Two connections are kept open (`SetMaxOpenConns(2)`) — one for long-running
-streaming reads (the `/metrics` endpoint), one for concurrent short writes
-(staleness tracking during metric export). All write transactions are serialized
-by an application-level `sync.Mutex` so SQLite's single-writer constraint is
-never violated.
+Five connections are kept open (`SetMaxOpenConns(5)`). All write transactions
+are serialized by an application-level `sync.Mutex` so SQLite's single-writer
+constraint is never violated — extra connections only add read parallelism,
+which WAL mode handles correctly. This ensures the health check and WAL monitor
+always have a free slot even during concurrent streaming reads and writes.
 
 Key pragmas:
 ```sql
@@ -146,10 +146,11 @@ PRAGMA synchronous = NORMAL;     -- durable without fsync on every write
 ### Startup
 
 On startup, the database goes through:
-1. `PRAGMA quick_check` — detects corruption early
-2. `PRAGMA wal_checkpoint(TRUNCATE)` — merges any leftover WAL from a previous
-   crash; on slow NFS this can take several minutes (the startupProbe allows
-   up to 10 minutes)
+1. `PRAGMA wal_checkpoint(TRUNCATE)` — merges any leftover WAL from a previous
+   crash into the main database file
+2. `PRAGMA quick_check` — runs only if the WAL had unmerged frames (indicating
+   an unclean shutdown such as an OOM kill). Skipped on clean restarts to avoid
+   a multi-minute scan of large databases on slow NFS storage.
 3. Schema migration — applies any pending migrations
 4. Reset interrupted scans — images and nodes left in transient states
    (`generating_sbom`, `scanning_vulnerabilities`) are reset to `pending`
@@ -208,7 +209,78 @@ One goroutine processes jobs one at a time. This is intentional: grype cannot
 run concurrently, and serializing at the queue level eliminates an entire class
 of resource contention.
 
-### Job types
+That means that the majority of all write-intensive operations happens asynchronously.
+
+### System Events
+
+There are a number of events that are either scheduled or happen at certain points in the
+lifecycle of the application that are important for the lifecycle of the application.
+
+#### Scanner-core startup
+The following steps happens synchronously and need to be completed in order for the application to be considered up and running.
+* Initialize Grype Scanner (not including the GrypeDB)
+* Database initialization (as described earlier in this document)
+
+In addition to that, the following jobs are triggered asynchronously in this particular order.
+* Trigger Update Grype DB job
+* Trigger Re-Synchronize Images job
+* Trigger Re-Synchronize Nodes job
+
+#### New Container Instance
+TBD
+
+#### Remove Container Instance
+
+#### New Node Instance
+
+#### Remove Node Instance
+
+#### Grype DB Update
+
+#### Resynchronize image and node information
+
+#### Purge old scan data
+
+
+### Asynchronous Jobs
+
+It's important to not that all jobs are idempotent. That means that any job can be executed one or more times, and the end-result will be the same.
+
+#### Update Grype DB - Priority: High
+This job's purpose is both to ensure that the Grype Database is up-to-date, and to detect whenever it changes.
+If the database changes, or is initialized for the first time, then a rescan of all images and nodes is triggered.
+
+The flow is something as follows:
+* Run something similar to a "grype db update"
+  * If no update is triggered, do nothing.
+  * If the database is updated, either because it's loaded for the first time or there's new feed available, 
+    trigger a rescan all images job and rescan all nodes job.
+
+#### Re-Synchronize Images - Priority: High
+It's purpose is to ensure that the image and container information in the database accurately reflects what's actually running.
+
+The high-level flow is as follows:
+* Load all running container information, either from K8s or wherever the agent gets it, this will require some kind of a call-back to k8s-scan-server and bjorn2scan-agent
+* Compare this information with what's already in the database
+* For every container not in the database, trigger a New Container Instance job
+* For every container in the database that's no longer running, trigger Remove Container Instance job
+
+#### Re-Synchronize Nodes - Priority: High
+It's purpose is to ensure that the node information in the database accurately reflects what's actually running.
+
+The high-level flow is as follows:
+* Load all running node information, either from K8s or wherever the agent gets it, this will require some kind of a call-back to k8s-scan-server and bjorn2scan-agent
+* Compare this information with what's already in the database
+* For every node not in the database, trigger a New Node Instance job
+* For every node in the database that's no longer running, trigger Remove Node Instance job
+
+#### Trigger the 
+
+
+
+#### Scan Image
+
+#### Scan Job
 
 | Job | Trigger | SBOM | Grype |
 |-----|---------|------|-------|
@@ -220,10 +292,9 @@ of resource contention.
 
 ### Queue depth
 
-The queue has a configurable maximum depth. When full, the behavior is one of:
-- **Drop** — silently discard the new job (default)
-- **Drop oldest** — remove the oldest queued job to make room
-- **Block** — the caller waits until space is available
+The queue is unbounded (`MaxDepth: 0`). Both k8s-scan-server and bjorn2scan-agent
+use this default. A bounded mode exists in the code (`QueueFullDrop`,
+`QueueFullDropOldest`, `QueueFullBlock`) but is not used in production.
 
 ### Image scan pipeline
 

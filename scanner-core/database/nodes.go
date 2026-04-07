@@ -42,7 +42,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 
 	if err == nil {
 		// Node already exists, update it
-		db.writeMu.Lock()
+		done := db.beginWrite("add_node")
 		_, err = db.conn.Exec(`
 			UPDATE nodes SET
 				hostname = ?,
@@ -55,7 +55,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 			WHERE name = ?
 		`, n.Hostname, n.OSRelease, n.KernelVersion, n.Architecture,
 			n.ContainerRuntime, n.KubeletVersion, n.Name)
-		db.writeMu.Unlock()
+		done()
 		if err != nil {
 			exitOnCorruption(err)
 			return false, fmt.Errorf("failed to update node: %w", err)
@@ -69,12 +69,12 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 	}
 
 	// Node doesn't exist, create it
-	db.writeMu.Lock()
+	done := db.beginWrite("add_node")
 	result, err := db.conn.Exec(`
 		INSERT INTO nodes (name, hostname, os_release, kernel_version, architecture, container_runtime, kubelet_version, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
 	`, n.Name, n.Hostname, n.OSRelease, n.KernelVersion, n.Architecture, n.ContainerRuntime, n.KubeletVersion)
-	db.writeMu.Unlock()
+	done()
 
 	if err != nil {
 		exitOnCorruption(err)
@@ -89,7 +89,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 
 // UpdateNode updates an existing node in the database
 func (db *DB) UpdateNode(n nodes.Node) error {
-	db.writeMu.Lock()
+	done := db.beginWrite("update_node")
 	result, err := db.conn.Exec(`
 		UPDATE nodes SET
 			hostname = ?,
@@ -102,7 +102,7 @@ func (db *DB) UpdateNode(n nodes.Node) error {
 		WHERE name = ?
 	`, n.Hostname, n.OSRelease, n.KernelVersion, n.Architecture,
 		n.ContainerRuntime, n.KubeletVersion, n.Name)
-	db.writeMu.Unlock()
+	done()
 	if err != nil {
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node: %w", err)
@@ -121,8 +121,8 @@ func (db *DB) UpdateNode(n nodes.Node) error {
 
 // RemoveNode removes a node and all its associated data from the database
 func (db *DB) RemoveNode(name string) error {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("remove_node")
+	defer done()
 	tx, err := db.conn.Begin()
 	if err != nil {
 		exitOnCorruption(err)
@@ -466,7 +466,7 @@ func (db *DB) IsNodeScanCompleteBulk(names []string) (map[string]bool, error) {
 
 // UpdateNodeStatus updates the scan status for a node
 func (db *DB) UpdateNodeStatus(name string, status Status, errorMsg string) error {
-	db.writeMu.Lock()
+	done := db.beginWrite("update_node_status")
 	_, err := db.conn.Exec(`
 		UPDATE nodes SET
 			status = ?,
@@ -474,7 +474,7 @@ func (db *DB) UpdateNodeStatus(name string, status Status, errorMsg string) erro
 			updated_at = CURRENT_TIMESTAMP
 		WHERE name = ?
 	`, status.String(), errorMsg, name)
-	db.writeMu.Unlock()
+	done()
 	if err != nil {
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
@@ -549,8 +549,8 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 
 	// Step 3: Write everything in a single transaction under the write lock.
 	// Lock hold time is now <2s (pure DB writes) instead of 5-10s (DB + JSON parse).
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("store_node_sbom")
+	defer done()
 
 	tx, err := db.conn.Begin()
 	if err != nil {
@@ -775,8 +775,8 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 	}
 
 	// Step 3: All writes in a single transaction under the write lock.
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("store_node_vulnerabilities")
+	defer done()
 
 	tx, err := db.conn.Begin()
 	if err != nil {
@@ -1370,49 +1370,51 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 // calling the callback for each row. This avoids loading all data into memory, which is
 // critical for large datasets (e.g., 174,000+ vulnerabilities across multiple nodes).
 func (db *DB) StreamNodeVulnerabilitiesForMetrics(callback func(v NodeVulnerabilityForMetrics) error) error {
-	rows, err := db.conn.Query(`
-		SELECT
-			n.name,
-			COALESCE(n.hostname, '') as hostname,
-			COALESCE(n.os_release, '') as os_release,
-			COALESCE(n.kernel_version, '') as kernel_version,
-			COALESCE(n.architecture, '') as architecture,
-			nv.id as vuln_id,
-			nv.cve_id,
-			COALESCE(nv.severity, 'Unknown') as severity,
-			COALESCE(nv.risk, 0) as risk,
-			COALESCE(nv.fix_status, 'unknown') as fix_status,
-			COALESCE(nv.fix_version, '') as fix_version,
-			COALESCE(nv.known_exploited, 0) as known_exploited,
-			nv.package_name,
-			nv.package_version,
-			COALESCE(nv.package_type, '') as package_type,
-			COALESCE(nv.count, 1) as count
-		FROM node_vulnerabilities nv
-		JOIN nodes n ON nv.node_id = n.id
-		WHERE n.status = 'completed'
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to query node vulnerabilities for metrics: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var v NodeVulnerabilityForMetrics
-		err := rows.Scan(
-			&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
-			&v.VulnID, &v.CVEID, &v.Severity, &v.Risk, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
-			&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
-		)
+	return trackRead("stream_node_vulnerabilities", func() error {
+		rows, err := db.conn.Query(`
+			SELECT
+				n.name,
+				COALESCE(n.hostname, '') as hostname,
+				COALESCE(n.os_release, '') as os_release,
+				COALESCE(n.kernel_version, '') as kernel_version,
+				COALESCE(n.architecture, '') as architecture,
+				nv.id as vuln_id,
+				nv.cve_id,
+				COALESCE(nv.severity, 'Unknown') as severity,
+				COALESCE(nv.risk, 0) as risk,
+				COALESCE(nv.fix_status, 'unknown') as fix_status,
+				COALESCE(nv.fix_version, '') as fix_version,
+				COALESCE(nv.known_exploited, 0) as known_exploited,
+				nv.package_name,
+				nv.package_version,
+				COALESCE(nv.package_type, '') as package_type,
+				COALESCE(nv.count, 1) as count
+			FROM node_vulnerabilities nv
+			JOIN nodes n ON nv.node_id = n.id
+			WHERE n.status = 'completed'
+		`)
 		if err != nil {
-			return fmt.Errorf("failed to scan node vulnerability row: %w", err)
+			return fmt.Errorf("failed to query node vulnerabilities for metrics: %w", err)
 		}
-		if err := callback(v); err != nil {
-			return err
-		}
-	}
+		defer func() { _ = rows.Close() }()
 
-	return rows.Err()
+		for rows.Next() {
+			var v NodeVulnerabilityForMetrics
+			err := rows.Scan(
+				&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
+				&v.VulnID, &v.CVEID, &v.Severity, &v.Risk, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
+				&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to scan node vulnerability row: %w", err)
+			}
+			if err := callback(v); err != nil {
+				return err
+			}
+		}
+
+		return rows.Err()
+	})
 }
 
 // GetScannedNodes retrieves all completed nodes for the bjorn2scan_node_scanned metric

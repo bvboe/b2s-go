@@ -46,6 +46,7 @@ func NewMetricsHandler(
 		if err != nil {
 			log.Error("error streaming metrics", "error", err)
 		}
+		log.Info("metrics stream complete", "duration_ms", time.Since(cycleStart).Milliseconds())
 
 		// Apply staleness diff and delete expired entries after the HTTP response is flushed,
 		// so slow PVC writes don't block the client.

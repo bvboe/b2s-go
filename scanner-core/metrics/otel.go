@@ -161,6 +161,8 @@ func (e *OTELExporter) recordMetrics() {
 		}
 		e.staleness.DeleteExpired(cycleStart)
 	}()
+
+	log.Info("OTEL export complete", "duration_ms", time.Since(cycleStart).Milliseconds())
 }
 
 // Shutdown gracefully shuts down the OTEL exporter

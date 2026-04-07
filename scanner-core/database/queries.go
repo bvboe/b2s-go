@@ -500,8 +500,8 @@ func (db *DB) LoadMetricStaleness(key string) (string, error) {
 // SaveMetricStaleness saves the metric staleness data to the database
 // Uses INSERT OR REPLACE to handle both insert and update cases
 func (db *DB) SaveMetricStaleness(key string, data string) error {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("upsert_staleness")
+	defer done()
 	_, err := db.conn.Exec(`
 		INSERT OR REPLACE INTO app_state (key, data, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -526,116 +526,120 @@ type StalenessRow struct {
 // StreamScannedContainers calls callback for each completed container scan row.
 // This is the streaming variant of GetScannedContainers, used for memory-efficient metrics generation.
 func (db *DB) StreamScannedContainers(callback func(ScannedContainer) error) error {
-	rows, err := db.conn.Query(`
-		SELECT
-			c.namespace,
-			c.pod,
-			c.name,
-			c.node_name,
-			c.reference,
-			img.digest,
-			COALESCE(img.os_name, '') as os_name,
-			COALESCE(img.architecture, '') as architecture
-		FROM containers c
-		JOIN images img ON c.image_id = img.id
-		WHERE img.status = 'completed'
-		ORDER BY c.namespace, c.pod, c.name
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to query scanned containers: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			log.Warn("failed to close rows", "error", err)
+	return trackRead("stream_scanned_containers", func() error {
+		rows, err := db.conn.Query(`
+			SELECT
+				c.namespace,
+				c.pod,
+				c.name,
+				c.node_name,
+				c.reference,
+				img.digest,
+				COALESCE(img.os_name, '') as os_name,
+				COALESCE(img.architecture, '') as architecture
+			FROM containers c
+			JOIN images img ON c.image_id = img.id
+			WHERE img.status = 'completed'
+			ORDER BY c.namespace, c.pod, c.name
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to query scanned containers: %w", err)
 		}
-	}()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				log.Warn("failed to close rows", "error", err)
+			}
+		}()
 
-	for rows.Next() {
-		var sc ScannedContainer
-		if err := rows.Scan(
-			&sc.Namespace,
-			&sc.Pod,
-			&sc.Name,
-			&sc.NodeName,
-			&sc.Reference,
-			&sc.Digest,
-			&sc.OSName,
-			&sc.Architecture,
-		); err != nil {
-			return fmt.Errorf("failed to scan container row: %w", err)
+		for rows.Next() {
+			var sc ScannedContainer
+			if err := rows.Scan(
+				&sc.Namespace,
+				&sc.Pod,
+				&sc.Name,
+				&sc.NodeName,
+				&sc.Reference,
+				&sc.Digest,
+				&sc.OSName,
+				&sc.Architecture,
+			); err != nil {
+				return fmt.Errorf("failed to scan container row: %w", err)
+			}
+			if err := callback(sc); err != nil {
+				return err
+			}
 		}
-		if err := callback(sc); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+		return rows.Err()
+	})
 }
 
 // StreamContainerVulnerabilities calls callback for each vulnerability in a running container.
 // This is the streaming variant of GetContainerVulnerabilities, used for memory-efficient metrics generation.
 func (db *DB) StreamContainerVulnerabilities(callback func(ContainerVulnerability) error) error {
-	rows, err := db.conn.Query(`
-		SELECT
-			v.id,
-			c.namespace,
-			c.pod,
-			c.name,
-			c.node_name,
-			c.reference,
-			img.digest,
-			COALESCE(img.os_name, '') as os_name,
-			v.cve_id,
-			COALESCE(v.package_name, '') as package_name,
-			COALESCE(v.package_version, '') as package_version,
-			COALESCE(v.severity, '') as severity,
-			COALESCE(v.fix_status, '') as fix_status,
-			COALESCE(v.fixed_version, '') as fixed_version,
-			v.count,
-			v.known_exploited,
-			v.risk
-		FROM containers c
-		JOIN images img ON c.image_id = img.id
-		JOIN image_vulnerabilities v ON img.id = v.image_id
-		WHERE img.status = 'completed'
-		ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to query container vulnerabilities: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			log.Warn("failed to close rows", "error", err)
+	return trackRead("stream_container_vulnerabilities", func() error {
+		rows, err := db.conn.Query(`
+			SELECT
+				v.id,
+				c.namespace,
+				c.pod,
+				c.name,
+				c.node_name,
+				c.reference,
+				img.digest,
+				COALESCE(img.os_name, '') as os_name,
+				v.cve_id,
+				COALESCE(v.package_name, '') as package_name,
+				COALESCE(v.package_version, '') as package_version,
+				COALESCE(v.severity, '') as severity,
+				COALESCE(v.fix_status, '') as fix_status,
+				COALESCE(v.fixed_version, '') as fixed_version,
+				v.count,
+				v.known_exploited,
+				v.risk
+			FROM containers c
+			JOIN images img ON c.image_id = img.id
+			JOIN image_vulnerabilities v ON img.id = v.image_id
+			WHERE img.status = 'completed'
+			ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to query container vulnerabilities: %w", err)
 		}
-	}()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				log.Warn("failed to close rows", "error", err)
+			}
+		}()
 
-	for rows.Next() {
-		var cv ContainerVulnerability
-		if err := rows.Scan(
-			&cv.VulnID,
-			&cv.Namespace,
-			&cv.Pod,
-			&cv.Name,
-			&cv.NodeName,
-			&cv.Reference,
-			&cv.Digest,
-			&cv.OSName,
-			&cv.CVEID,
-			&cv.PackageName,
-			&cv.PackageVersion,
-			&cv.Severity,
-			&cv.FixStatus,
-			&cv.FixedVersion,
-			&cv.Count,
-			&cv.KnownExploited,
-			&cv.Risk,
-		); err != nil {
-			return fmt.Errorf("failed to scan container vulnerability row: %w", err)
+		for rows.Next() {
+			var cv ContainerVulnerability
+			if err := rows.Scan(
+				&cv.VulnID,
+				&cv.Namespace,
+				&cv.Pod,
+				&cv.Name,
+				&cv.NodeName,
+				&cv.Reference,
+				&cv.Digest,
+				&cv.OSName,
+				&cv.CVEID,
+				&cv.PackageName,
+				&cv.PackageVersion,
+				&cv.Severity,
+				&cv.FixStatus,
+				&cv.FixedVersion,
+				&cv.Count,
+				&cv.KnownExploited,
+				&cv.Risk,
+			); err != nil {
+				return fmt.Errorf("failed to scan container vulnerability row: %w", err)
+			}
+			if err := callback(cv); err != nil {
+				return err
+			}
 		}
-		if err := callback(cv); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+		return rows.Err()
+	})
 }
 
 // QueryStaleness returns rows in the stale grace period: expires_at_unix is set and
@@ -710,8 +714,8 @@ func (db *DB) InsertNewMetrics(batch []StalenessRow) error {
 		return nil
 	}
 
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("insert_new_metrics")
+	defer done()
 
 	tx, err := db.conn.Begin()
 	if err != nil {
@@ -757,8 +761,8 @@ func (db *DB) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
 		return nil
 	}
 
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("mark_metrics_stale")
+	defer done()
 
 	// 1 param for expires_at_unix + 1 per key; chunk at 500 keys.
 	const chunkSize = 500
@@ -794,8 +798,8 @@ func (db *DB) MarkMetricsActive(keys []string) error {
 		return nil
 	}
 
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("mark_metrics_active")
+	defer done()
 
 	const chunkSize = 900
 	for start := 0; start < len(keys); start += chunkSize {
@@ -825,8 +829,8 @@ func (db *DB) MarkMetricsActive(keys []string) error {
 // DeleteExpiredStaleness removes rows whose expires_at_unix has passed.
 // Called asynchronously after each collection cycle.
 func (db *DB) DeleteExpiredStaleness(expireBefore int64) error {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("delete_expired_staleness")
+	defer done()
 	_, err := db.conn.Exec(
 		`DELETE FROM metric_staleness WHERE expires_at_unix IS NOT NULL AND expires_at_unix < ?`,
 		expireBefore,
@@ -864,8 +868,8 @@ func (db *DB) LoadGrypeDBTimestamp() (time.Time, error) {
 
 // SaveGrypeDBTimestamp saves the grype vulnerability database timestamp
 func (db *DB) SaveGrypeDBTimestamp(t time.Time) error {
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("update_last_scanned_at")
+	defer done()
 	_, err := db.conn.Exec(`
 		INSERT OR REPLACE INTO app_state (key, data, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)

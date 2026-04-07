@@ -209,8 +209,8 @@ func (db *DB) UpdateStatus(digest string, status Status, errorMsg string) error 
 		vulnsScannedAt = timestamp
 	}
 
-	db.writeMu.Lock()
-	defer db.writeMu.Unlock()
+	done := db.beginWrite("update_status")
+	defer done()
 	_, err := db.conn.Exec(`
 		UPDATE images
 		SET status = ?,
@@ -258,7 +258,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 		return fmt.Errorf("failed to get image ID: %w", err)
 	}
 
-	db.writeMu.Lock()
+	storeDone := db.beginWrite("store_sbom")
 	_, err = db.conn.Exec(`
 		UPDATE images
 		SET sbom = ?,
@@ -268,7 +268,7 @@ func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
 	`, string(sbomJSON), StatusScanningVulnerabilities.String(), time.Now().UTC().Format(time.RFC3339), digest)
-	db.writeMu.Unlock()
+	storeDone()
 
 	if err != nil {
 		exitOnCorruption(err)
@@ -474,7 +474,7 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		grypeDBBuiltStr = &s
 	}
 
-	db.writeMu.Lock()
+	vulnDone := db.beginWrite("store_vulnerabilities")
 	_, err = db.conn.Exec(`
 		UPDATE images
 		SET vulnerabilities = ?,
@@ -485,7 +485,7 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
 	`, string(vulnJSON), StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), grypeDBBuiltStr, digest)
-	db.writeMu.Unlock()
+	vulnDone()
 
 	if err != nil {
 		exitOnCorruption(err)
