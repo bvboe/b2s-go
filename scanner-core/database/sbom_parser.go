@@ -199,110 +199,126 @@ func parseSBOMData(db *DB, imageID int64, sbomJSON []byte) error {
 		packageInfo[key] = append(packageInfo[key], pkg)
 	}
 
-	// Insert packages into database
+	// Write under the write lock.
 	done := db.beginWrite("store_image_packages")
-	defer done()
+
 	tx, err := db.conn.Begin()
 	if err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	rollback := func() { _ = tx.Rollback() }
 
-	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO image_packages (image_id, name, version, type, number_of_instances)
-		VALUES (?, ?, ?, ?, ?)
-	`)
-	if err != nil {
+	// Delete existing details then packages to allow clean batch inserts.
+	if _, err = tx.Exec(`DELETE FROM image_package_details WHERE package_id IN (SELECT id FROM image_packages WHERE image_id = ?)`, imageID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare statement: %w", err)
+		return fmt.Errorf("failed to delete existing image package details: %w", err)
 	}
-	defer func() {
-		if err := stmt.Close(); err != nil {
-			log.Warn("failed to close statement", "error", err)
-		}
-	}()
-
-	// Prepare statement for package details
-	detailsStmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO image_package_details (package_id, details)
-		VALUES (?, ?)
-	`)
-	if err != nil {
+	if _, err = tx.Exec(`DELETE FROM image_packages WHERE image_id = ?`, imageID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare details statement: %w", err)
+		return fmt.Errorf("failed to delete existing image packages: %w", err)
 	}
-	defer func() {
-		if err := detailsStmt.Close(); err != nil {
-			log.Warn("failed to close details statement", "error", err)
-		}
-	}()
 
-	totalPackages := 0
+	// Collect ordered package list for deterministic details inserts.
+	type pkgEntry struct {
+		name, version, pkgType string
+		count                  int
+		packages               []SyftPackage
+	}
+	entries := make([]pkgEntry, 0, len(packageCounts))
+	pkgRows := make([]any, 0, len(packageCounts)*5)
 	for key, count := range packageCounts {
-		packages := packageInfo[key]
-		if len(packages) == 0 {
-			log.Warn("no packages found for key", "key", key)
+		pkgs := packageInfo[key]
+		if len(pkgs) == 0 {
 			continue
 		}
-
-		// Use first package for summary data (they should all be identical for the same key)
-		firstPkg := packages[0]
-
-		result, err := stmt.Exec(imageID, firstPkg.Name, firstPkg.Version, firstPkg.Type, count)
-		if err != nil {
-			log.Warn("failed to insert package", "package", firstPkg.Name, "error", err)
-			continue
-		}
-
-		// Get the package ID (either newly inserted or existing)
-		packageID, err := result.LastInsertId()
-		if err != nil {
-			log.Warn("failed to get package ID", "package", firstPkg.Name, "error", err)
-			continue
-		}
-
-		// Marshal ALL package instances to JSON with COMPLETE data
-		// This ensures we capture all instances when count > 1 AND preserve all SBOM fields
-		// Using struct marshaling preserves field order as defined in the struct
-		detailsJSON, err := json.Marshal(packages)
-		if err != nil {
-			log.Warn("failed to marshal package details", "package", firstPkg.Name, "error", err)
-			continue
-		}
-
-		// Insert package details
-		if _, err := detailsStmt.Exec(packageID, string(detailsJSON)); err != nil {
-			log.Warn("failed to insert package details", "package", firstPkg.Name, "error", err)
-			// Continue anyway - the package itself was inserted
-		}
-
-		totalPackages++
+		p := pkgs[0]
+		entries = append(entries, pkgEntry{p.Name, p.Version, p.Type, count, pkgs})
+		pkgRows = append(pkgRows, imageID, p.Name, p.Version, p.Type, count)
 	}
 
-	// Update images with architecture information if available
-	if sbom.Source.Metadata.Architecture != "" {
-		arch := sbom.Source.Metadata.Architecture
-		log.Debug("extracted architecture info", "image_id", imageID, "architecture", arch)
+	// Batch INSERT packages (5 cols → 150 rows per batch = 750 params).
+	if err = batchInsert(tx,
+		`INSERT INTO image_packages (image_id, name, version, type, number_of_instances)`,
+		pkgRows, 5, 150); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert image packages: %w", err)
+	}
 
-		_, err = tx.Exec(`
-			UPDATE images
-			SET architecture = ?
-			WHERE id = ?
-		`, arch, imageID)
-		if err != nil {
+	// Query back IDs for details inserts.
+	idRows, err := tx.Query(`SELECT id, name, version, type FROM image_packages WHERE image_id = ?`, imageID)
+	if err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to query image package IDs: %w", err)
+	}
+	pkgIDs := make(map[string]int64) // "name|version|type" → id
+	for idRows.Next() {
+		var id int64
+		var n, v, t string
+		if err = idRows.Scan(&id, &n, &v, &t); err != nil {
+			_ = idRows.Close()
+			rollback()
+			done()
+			return fmt.Errorf("failed to scan image package ID: %w", err)
+		}
+		pkgIDs[n+"|"+v+"|"+t] = id
+	}
+	if err = idRows.Close(); err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to close image package ID rows: %w", err)
+	}
+
+	// Batch INSERT details (2 cols → 400 rows per batch = 800 params).
+	detailRows := make([]any, 0, len(entries)*2)
+	for _, e := range entries {
+		pkgID, ok := pkgIDs[e.name+"|"+e.version+"|"+e.pkgType]
+		if !ok {
+			log.Warn("image package ID not found after insert", "name", e.name)
+			continue
+		}
+		detailsJSON, merr := json.Marshal(e.packages)
+		if merr != nil {
+			log.Warn("failed to marshal image package details", "name", e.name, "error", merr)
+			continue
+		}
+		detailRows = append(detailRows, pkgID, string(detailsJSON))
+	}
+	if err = batchInsert(tx,
+		`INSERT INTO image_package_details (package_id, details)`,
+		detailRows, 2, 400); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert image package details: %w", err)
+	}
+
+	// Update architecture if available.
+	if sbom.Source.Metadata.Architecture != "" {
+		if _, err = tx.Exec(`UPDATE images SET architecture = ? WHERE id = ?`,
+			sbom.Source.Metadata.Architecture, imageID); err != nil {
 			exitOnCorruption(err)
 			log.Warn("failed to update images with architecture info", "error", err)
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	done()
 
 	log.Info("parsed SBOM",
-		"image_id", imageID, "unique_packages", totalPackages, "total_instances", len(sbom.Artifacts))
+		"image_id", imageID, "unique_packages", len(entries), "total_instances", len(sbom.Artifacts))
 	return nil
 }
 
@@ -337,190 +353,197 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 		vulnInfo[key] = append(vulnInfo[key], match)
 	}
 
-	// Insert vulnerabilities into database
+	// Write under the write lock.
 	done := db.beginWrite("store_image_vulnerabilities")
-	defer done()
+
 	tx, err := db.conn.Begin()
 	if err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	rollback := func() { _ = tx.Rollback() }
 
-	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO image_vulnerabilities
-		(image_id, cve_id, package_name, package_version, package_type,
-		 severity, fix_status, fixed_version, count,
-		 risk, epss_score, epss_percentile, known_exploited)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
+	// Delete existing details then vulnerabilities to allow clean batch inserts.
+	if _, err = tx.Exec(`DELETE FROM image_vulnerability_details WHERE vulnerability_id IN (SELECT id FROM image_vulnerabilities WHERE image_id = ?)`, imageID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare statement: %w", err)
+		return fmt.Errorf("failed to delete existing image vulnerability details: %w", err)
 	}
-	defer func() {
-		if err := stmt.Close(); err != nil {
-			log.Warn("failed to close statement", "error", err)
-		}
-	}()
-
-	// Prepare statement for vulnerability details
-	detailsStmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO image_vulnerability_details (vulnerability_id, details)
-		VALUES (?, ?)
-	`)
-	if err != nil {
+	if _, err = tx.Exec(`DELETE FROM image_vulnerabilities WHERE image_id = ?`, imageID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare details statement: %w", err)
+		return fmt.Errorf("failed to delete existing image vulnerabilities: %w", err)
 	}
-	defer func() {
-		if err := detailsStmt.Close(); err != nil {
-			log.Warn("failed to close details statement", "error", err)
-		}
-	}()
 
-	totalVulns := 0
+	// Collect ordered vuln list for deterministic details inserts.
+	type vulnEntry struct {
+		key     vulnKey
+		matches []GrypeMatch
+		// summary fields
+		severity, fixStatus, fixedVersion string
+		count                             int
+		risk, epssScore, epssPercentile   float64
+		knownExploited                    int
+	}
+	entries := make([]vulnEntry, 0, len(vulnCounts))
+	vulnRows := make([]any, 0, len(vulnCounts)*13)
 	for key, count := range vulnCounts {
 		matches := vulnInfo[key]
 		if len(matches) == 0 {
 			log.Warn("no matches found for vulnerability", "cve_id", key.cveID)
 			continue
 		}
-
-		log.Debug("processing vulnerability",
-			"cve_id", key.cveID, "package", key.packageName, "count", count, "matches_in_array", len(matches))
-
-		// Use first match for summary data (they should all be identical for the same vulnerability)
-		firstMatch := matches[0]
-
-		// Determine fix status and version
-		fixStatus := firstMatch.Vulnerability.Fix.State
+		m := matches[0]
+		fixStatus := m.Vulnerability.Fix.State
 		if fixStatus == "" {
-			if len(firstMatch.Vulnerability.Fix.Versions) > 0 {
+			if len(m.Vulnerability.Fix.Versions) > 0 {
 				fixStatus = "fixed"
 			} else {
 				fixStatus = "not-fixed"
 			}
 		}
-
 		fixedVersion := ""
-		if len(firstMatch.Vulnerability.Fix.Versions) > 0 {
-			fixedVersion = firstMatch.Vulnerability.Fix.Versions[0]
+		if len(m.Vulnerability.Fix.Versions) > 0 {
+			fixedVersion = m.Vulnerability.Fix.Versions[0]
 		}
-
-		// Extract risk score
-		risk := firstMatch.Vulnerability.Risk
-
-		// Extract EPSS data (use first entry if available)
-		epssScore := 0.0
-		epssPercentile := 0.0
-		if len(firstMatch.Vulnerability.EPSS) > 0 {
-			epssScore = firstMatch.Vulnerability.EPSS[0].Score
-			epssPercentile = firstMatch.Vulnerability.EPSS[0].Percentile
+		epssScore, epssPercentile := 0.0, 0.0
+		if len(m.Vulnerability.EPSS) > 0 {
+			epssScore = m.Vulnerability.EPSS[0].Score
+			epssPercentile = m.Vulnerability.EPSS[0].Percentile
 		}
+		knownExploited := len(m.Vulnerability.KnownExploited)
 
-		// Count known exploits from CISA KEV catalog
-		knownExploited := len(firstMatch.Vulnerability.KnownExploited)
-
-		result, err := stmt.Exec(
-			imageID,
-			key.cveID,
-			key.packageName,
-			key.packageVersion,
-			key.packageType,
-			firstMatch.Vulnerability.Severity,
-			fixStatus,
-			fixedVersion,
-			count,
-			risk,
-			epssScore,
-			epssPercentile,
-			knownExploited,
+		entries = append(entries, vulnEntry{key, matches, m.Vulnerability.Severity, fixStatus, fixedVersion, count, m.Vulnerability.Risk, epssScore, epssPercentile, knownExploited})
+		vulnRows = append(vulnRows,
+			imageID, key.cveID, key.packageName, key.packageVersion, key.packageType,
+			m.Vulnerability.Severity, fixStatus, fixedVersion, count,
+			m.Vulnerability.Risk, epssScore, epssPercentile, knownExploited,
 		)
-		if err != nil {
-			log.Warn("failed to insert vulnerability", "cve_id", key.cveID, "error", err)
-			continue
-		}
-
-		// Get the vulnerability ID (either newly inserted or existing)
-		vulnID, err := result.LastInsertId()
-		if err != nil {
-			log.Warn("failed to get vulnerability ID", "cve_id", key.cveID, "error", err)
-			continue
-		}
-
-		// Marshal ALL vulnerability matches to JSON (not just the first one)
-		// This ensures we capture all instances when count > 1
-		detailsJSON, err := json.Marshal(matches)
-		if err != nil {
-			log.Warn("failed to marshal vulnerability details", "cve_id", key.cveID, "error", err)
-			continue
-		}
-
-		log.Debug("storing vulnerability details",
-			"cve_id", key.cveID, "vuln_id", vulnID, "matches", len(matches), "json_size", len(detailsJSON))
-
-		// Insert vulnerability details
-		if _, err := detailsStmt.Exec(vulnID, string(detailsJSON)); err != nil {
-			log.Warn("failed to insert vulnerability details", "cve_id", key.cveID, "error", err)
-			// Continue anyway - the vulnerability itself was inserted
-		}
-
-		totalVulns++
 	}
 
-	// Update images with distro information if available
-	if doc.Distro != nil {
-		osName := doc.Distro.Name
-		osVersion := doc.Distro.Version
-		log.Debug("extracted distro info",
-			"image_id", imageID, "os_name", osName, "os_version", osVersion)
+	// Batch INSERT vulnerabilities (13 cols → 50 rows per batch = 650 params).
+	if err = batchInsert(tx,
+		`INSERT INTO image_vulnerabilities (image_id, cve_id, package_name, package_version, package_type, severity, fix_status, fixed_version, count, risk, epss_score, epss_percentile, known_exploited)`,
+		vulnRows, 13, 50); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert image vulnerabilities: %w", err)
+	}
 
-		_, err = tx.Exec(`
-			UPDATE images
-			SET os_name = ?, os_version = ?
-			WHERE id = ?
-		`, osName, osVersion, imageID)
-		if err != nil {
+	// Query back IDs for details inserts.
+	idRows, err := tx.Query(`SELECT id, cve_id, package_name, package_version, package_type FROM image_vulnerabilities WHERE image_id = ?`, imageID)
+	if err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to query image vulnerability IDs: %w", err)
+	}
+	vulnIDs := make(map[string]int64) // "cve|name|ver|type" → id
+	for idRows.Next() {
+		var id int64
+		var cve, pname, pver, ptype string
+		if err = idRows.Scan(&id, &cve, &pname, &pver, &ptype); err != nil {
+			_ = idRows.Close()
+			rollback()
+			done()
+			return fmt.Errorf("failed to scan image vulnerability ID: %w", err)
+		}
+		vulnIDs[cve+"|"+pname+"|"+pver+"|"+ptype] = id
+	}
+	if err = idRows.Close(); err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to close image vulnerability ID rows: %w", err)
+	}
+
+	// Batch INSERT details (2 cols → 400 rows per batch = 800 params).
+	detailRows := make([]any, 0, len(entries)*2)
+	for _, e := range entries {
+		k := e.key.cveID + "|" + e.key.packageName + "|" + e.key.packageVersion + "|" + e.key.packageType
+		vulnID, ok := vulnIDs[k]
+		if !ok {
+			log.Warn("image vulnerability ID not found after insert", "cve_id", e.key.cveID)
+			continue
+		}
+		detailsJSON, merr := json.Marshal(e.matches)
+		if merr != nil {
+			log.Warn("failed to marshal image vulnerability details", "cve_id", e.key.cveID, "error", merr)
+			continue
+		}
+		detailRows = append(detailRows, vulnID, string(detailsJSON))
+	}
+	if err = batchInsert(tx,
+		`INSERT INTO image_vulnerability_details (vulnerability_id, details)`,
+		detailRows, 2, 400); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert image vulnerability details: %w", err)
+	}
+
+	// Update distro info if available.
+	if doc.Distro != nil {
+		if _, err = tx.Exec(`UPDATE images SET os_name = ?, os_version = ? WHERE id = ?`,
+			doc.Distro.Name, doc.Distro.Version, imageID); err != nil {
 			exitOnCorruption(err)
 			log.Warn("failed to update images with distro info", "error", err)
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	done()
 
 	log.Info("parsed vulnerabilities",
-		"image_id", imageID, "unique_vulnerabilities", totalVulns)
+		"image_id", imageID, "unique_vulnerabilities", len(entries))
 	return nil
 }
 
 // ParseAndStoreImageData parses both SBOM and vulnerability data for an image
 // This should be called whenever SBOM or vulnerability data is stored
 func (db *DB) ParseAndStoreImageData(imageID int64) error {
-	// Get SBOM and vulnerability data
-	var sbomJSON, vulnJSON sql.NullString
+	var sbomCompressed, vulnCompressed []byte
+	var sbomRaw, vulnRaw sql.NullString
 	err := db.conn.QueryRow(`
-		SELECT sbom, vulnerabilities
-		FROM images
-		WHERE id = ?
-	`, imageID).Scan(&sbomJSON, &vulnJSON)
+		SELECT sbom_compressed, sbom, vulnerabilities_compressed, vulnerabilities
+		FROM images WHERE id = ?
+	`, imageID).Scan(&sbomCompressed, &sbomRaw, &vulnCompressed, &vulnRaw)
 	if err != nil {
 		return fmt.Errorf("failed to query image data: %w", err)
 	}
 
-	// Parse SBOM if available
-	if sbomJSON.Valid && sbomJSON.String != "" {
-		if err := parseSBOMData(db, imageID, []byte(sbomJSON.String)); err != nil {
+	// Resolve SBOM bytes: compressed wins over raw.
+	var sbomBytes []byte
+	if len(sbomCompressed) > 0 {
+		if sbomBytes, err = decompressGzip(sbomCompressed); err != nil {
+			return fmt.Errorf("failed to decompress SBOM: %w", err)
+		}
+	} else if sbomRaw.Valid && sbomRaw.String != "" {
+		sbomBytes = []byte(sbomRaw.String)
+	}
+	if sbomBytes != nil {
+		if err = parseSBOMData(db, imageID, sbomBytes); err != nil {
 			return fmt.Errorf("failed to parse SBOM: %w", err)
 		}
 	}
 
-	// Parse vulnerabilities if available
-	if vulnJSON.Valid && vulnJSON.String != "" {
-		if err := parseVulnerabilityData(db, imageID, []byte(vulnJSON.String)); err != nil {
+	// Resolve vulnerability bytes: compressed wins over raw.
+	var vulnBytes []byte
+	if len(vulnCompressed) > 0 {
+		if vulnBytes, err = decompressGzip(vulnCompressed); err != nil {
+			return fmt.Errorf("failed to decompress vulnerabilities: %w", err)
+		}
+	} else if vulnRaw.Valid && vulnRaw.String != "" {
+		vulnBytes = []byte(vulnRaw.String)
+	}
+	if vulnBytes != nil {
+		if err = parseVulnerabilityData(db, imageID, vulnBytes); err != nil {
 			return fmt.Errorf("failed to parse vulnerabilities: %w", err)
 		}
 	}

@@ -245,6 +245,11 @@ var migrations = []migration{
 		name:    "cleanup_orphaned_node_details",
 		up:      migrateToV46,
 	},
+	{
+		version: 47,
+		name:    "add_compressed_blob_columns",
+		up:      migrateToV47,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -2770,6 +2775,25 @@ func migrateToV45(conn *sql.DB) error {
 // rows and inserted new ones with fresh auto-increment IDs, but never deleted the old detail
 // rows that referenced the now-deleted parent IDs. On active clusters this accumulated hundreds
 // of thousands of orphaned rows (e.g. 728K vuln details on kubeadm = ~3.6GB of dead data).
+// migrateToV47 adds gzip-compressed blob columns for nodes and images.
+// These replace the uncompressed TEXT blobs (sbom, vulnerabilities) in the hot write path.
+// Old TEXT columns are retained for backward-compatibility reads until all rows are rescanned.
+func migrateToV47(conn *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE nodes  ADD COLUMN vulnerabilities_compressed BLOB`,
+		`ALTER TABLE nodes  ADD COLUMN sbom_compressed BLOB`,
+		`ALTER TABLE images ADD COLUMN vulnerabilities_compressed BLOB`,
+		`ALTER TABLE images ADD COLUMN sbom_compressed BLOB`,
+	}
+	for _, s := range stmts {
+		if _, err := conn.Exec(s); err != nil {
+			return fmt.Errorf("migration v47: %w", err)
+		}
+	}
+	log.Info("migration v47: added compressed blob columns for nodes and images")
+	return nil
+}
+
 func migrateToV46(conn *sql.DB) error {
 	log.Info("migration v46: deleting orphaned node detail rows")
 

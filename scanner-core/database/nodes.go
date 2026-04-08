@@ -547,98 +547,118 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 		}
 	}
 
-	// Step 3: Write everything in a single transaction under the write lock.
-	// Lock hold time is now <2s (pure DB writes) instead of 5-10s (DB + JSON parse).
+	// Step 3: Compress the blob before acquiring any lock (CPU-bound, no DB).
+	compressStart := time.Now()
+	sbomCompressed, err := compressGzip(sbomJSON)
+	if err != nil {
+		return fmt.Errorf("failed to compress SBOM: %w", err)
+	}
+	compressMs := time.Since(compressStart).Milliseconds()
+
+	// Step 4: Write structured package data under the write lock.
+	// No blob write here — blob is written separately below.
+	t0 := time.Now()
 	done := db.beginWrite("store_node_sbom")
-	defer done()
 
 	tx, err := db.conn.Begin()
 	if err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	rollback := func() { _ = tx.Rollback() }
 
-	// Store raw SBOM JSON for API retrieval
-	if _, err = tx.Exec(`UPDATE nodes SET sbom = ? WHERE id = ?`, string(sbomJSON), nodeID); err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to store raw SBOM: %w", err)
-	}
-
-	// Delete details for existing packages before deleting the packages themselves
-	// (details reference package IDs; new scan inserts with new IDs, so old details become orphaned)
+	// Delete existing details then packages (details reference package IDs).
 	if _, err = tx.Exec(`DELETE FROM node_package_details WHERE node_package_id IN (SELECT id FROM node_packages WHERE node_id = ?)`, nodeID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete existing package details: %w", err)
 	}
-
-	// Delete existing packages for this node
 	if _, err = tx.Exec(`DELETE FROM node_packages WHERE node_id = ?`, nodeID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete existing packages: %w", err)
 	}
+	deleteMs := time.Since(t0).Milliseconds()
 
-	// Prepare statements for packages and details
-	pkgStmt, err := tx.Prepare(`
-		INSERT INTO node_packages (node_id, name, version, type, language, purl, number_of_instances)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (node_id, name, version, type) DO UPDATE SET
-			language = excluded.language,
-			purl = excluded.purl,
-			number_of_instances = excluded.number_of_instances
-	`)
-	if err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare package statement: %w", err)
-	}
-	defer func() { _ = pkgStmt.Close() }()
-
-	detailsStmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO node_package_details (node_package_id, details)
-		VALUES (?, ?)
-	`)
-	if err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare details statement: %w", err)
-	}
-	defer func() { _ = detailsStmt.Close() }()
-
-	// Insert packages and their details
-	for key, data := range packageGroups {
-		// Insert package (without details)
-		result, err := pkgStmt.Exec(nodeID, key.Name, key.Version, key.Type, data.Language, data.PURL, len(data.Instances))
-		if err != nil {
-			exitOnCorruption(err)
-			return fmt.Errorf("failed to insert package: %w", err)
+	// Batch INSERT packages (7 cols → 100 rows per batch = 700 params).
+	pkgRows := make([]any, 0, len(packageGroups)*7)
+	type pkgKeyOrder struct {
+		key  struct {
+			Name    string
+			Version string
+			Type    string
 		}
+		data *packageData
+	}
+	orderedPkgs := make([]pkgKeyOrder, 0, len(packageGroups))
+	for k, d := range packageGroups {
+		orderedPkgs = append(orderedPkgs, pkgKeyOrder{key: k, data: d})
+		pkgRows = append(pkgRows, nodeID, k.Name, k.Version, k.Type, d.Language, d.PURL, len(d.Instances))
+	}
+	if err = batchInsert(tx,
+		`INSERT INTO node_packages (node_id, name, version, type, language, purl, number_of_instances)`,
+		pkgRows, 7, 100); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert packages: %w", err)
+	}
+	insertPkgsMs := time.Since(t0).Milliseconds() - deleteMs
 
-		// Get package ID (either from insert or existing)
-		var packageID int64
-		packageID, err = result.LastInsertId()
-		if err != nil || packageID == 0 {
-			// ON CONFLICT happened, need to query for the ID
-			err = tx.QueryRow(`SELECT id FROM node_packages WHERE node_id = ? AND name = ? AND version = ? AND type = ?`,
-				nodeID, key.Name, key.Version, key.Type).Scan(&packageID)
-			if err != nil {
-				return fmt.Errorf("failed to get package ID: %w", err)
-			}
+	// Query back IDs to use for details inserts.
+	idRows, err := tx.Query(`SELECT id, name, version, type FROM node_packages WHERE node_id = ?`, nodeID)
+	if err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to query package IDs: %w", err)
+	}
+	pkgIDs := make(map[struct{ Name, Version, Type string }]int64)
+	for idRows.Next() {
+		var id int64
+		var n, v, t string
+		if err = idRows.Scan(&id, &n, &v, &t); err != nil {
+			_ = idRows.Close()
+			rollback()
+			done()
+			return fmt.Errorf("failed to scan package ID: %w", err)
 		}
+		pkgIDs[struct{ Name, Version, Type string }{n, v, t}] = id
+	}
+	if err = idRows.Close(); err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to close package ID rows: %w", err)
+	}
 
-		// Serialize all instances as JSON array for details
-		detailsJSON, err := json.Marshal(data.Instances)
-		if err != nil {
-			log.Warn("failed to marshal package details", "package", key.Name, "error", err)
+	// Batch INSERT details (2 cols → 400 rows per batch = 800 params).
+	detailRows := make([]any, 0, len(orderedPkgs)*2)
+	for _, p := range orderedPkgs {
+		pkgID, ok := pkgIDs[struct{ Name, Version, Type string }{p.key.Name, p.key.Version, p.key.Type}]
+		if !ok {
+			log.Warn("package ID not found after insert", "name", p.key.Name)
+			continue
+		}
+		detailsJSON, merr := json.Marshal(p.data.Instances)
+		if merr != nil {
+			log.Warn("failed to marshal package details", "package", p.key.Name, "error", merr)
 			detailsJSON = []byte("[]")
 		}
-
-		// Insert details into separate table
-		if _, err = detailsStmt.Exec(packageID, string(detailsJSON)); err != nil {
-			exitOnCorruption(err)
-			return fmt.Errorf("failed to insert package details: %w", err)
-		}
+		detailRows = append(detailRows, pkgID, string(detailsJSON))
 	}
+	if err = batchInsert(tx,
+		`INSERT INTO node_package_details (node_package_id, details)`,
+		detailRows, 2, 400); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert package details: %w", err)
+	}
+	insertDetailsMs := time.Since(t0).Milliseconds() - deleteMs - insertPkgsMs
 
-	// Update node status
+	// Update node status.
 	if _, err = tx.Exec(`
 		UPDATE nodes SET
 			status = ?,
@@ -646,17 +666,44 @@ func (db *DB) StoreNodeSBOM(name string, sbomJSON []byte) error {
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, StatusScanningVulnerabilities.String(), nodeID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	done()
+	structuredMs := time.Since(t0).Milliseconds()
+
+	// Step 5: Write compressed blob in a separate write (keeps it off the hot
+	// structured-data lock and limits lock hold time to a single small write).
+	blobStart := time.Now()
+	blobDone := db.beginWrite("store_node_sbom_blob")
+	_, err = db.conn.Exec(`UPDATE nodes SET sbom_compressed = ? WHERE id = ?`, sbomCompressed, nodeID)
+	blobDone()
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to store compressed SBOM: %w", err)
+	}
+	blobMs := time.Since(blobStart).Milliseconds()
 
 	log.Info("stored SBOM for node",
-		"node", name, "unique_packages", len(packageGroups), "total_artifacts", len(sbom.Artifacts))
+		"node", name,
+		"unique_packages", len(packageGroups),
+		"total_artifacts", len(sbom.Artifacts),
+		"compress_ms", compressMs,
+		"blob_compressed_kb", len(sbomCompressed)/1024,
+		"delete_ms", deleteMs,
+		"insert_pkgs_ms", insertPkgsMs,
+		"insert_details_ms", insertDetailsMs,
+		"structured_total_ms", structuredMs,
+		"blob_write_ms", blobMs,
+	)
 	db.notifyWrite()
 	return nil
 }
@@ -774,90 +821,121 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		}
 	}
 
-	// Step 3: All writes in a single transaction under the write lock.
+	// Step 3: Compress the blob before acquiring any lock (CPU-bound, no DB).
+	compressStart := time.Now()
+	vulnCompressed, err := compressGzip(vulnJSON)
+	if err != nil {
+		return fmt.Errorf("failed to compress vulnerability JSON: %w", err)
+	}
+	compressMs := time.Since(compressStart).Milliseconds()
+
+	// Step 4: Write structured vulnerability data under the write lock.
+	// No blob write here — blob is written separately below.
+	t0 := time.Now()
 	done := db.beginWrite("store_node_vulnerabilities")
-	defer done()
 
 	tx, err := db.conn.Begin()
 	if err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	rollback := func() { _ = tx.Rollback() }
 
-	// Store raw vulnerability JSON for API retrieval
-	if _, err = tx.Exec(`UPDATE nodes SET vulnerabilities = ? WHERE id = ?`, string(vulnJSON), nodeID); err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to store raw vulnerabilities: %w", err)
-	}
-
-	// Delete details for existing vulnerabilities before deleting the vulnerabilities themselves
-	// (details reference vulnerability IDs; new scan inserts with new IDs, so old details become orphaned)
+	// Delete existing details then vulnerabilities (details reference vulnerability IDs).
 	if _, err = tx.Exec(`DELETE FROM node_vulnerability_details WHERE node_vulnerability_id IN (SELECT id FROM node_vulnerabilities WHERE node_id = ?)`, nodeID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete existing vulnerability details: %w", err)
 	}
-
-	// Delete existing vulnerabilities
 	if _, err = tx.Exec(`DELETE FROM node_vulnerabilities WHERE node_id = ?`, nodeID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to delete existing vulnerabilities: %w", err)
 	}
+	deleteMs := time.Since(t0).Milliseconds()
 
-	vulnStmt, err := tx.Prepare(`
-		INSERT INTO node_vulnerabilities
-			(node_id, cve_id, package_name, package_version, package_type,
-			 severity, risk, epss_score, epss_percentile, fix_status, fix_version, known_exploited, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare vulnerability statement: %w", err)
+	// Batch INSERT vulnerabilities (13 cols → 50 rows per batch = 650 params).
+	type vulnRowData struct {
+		key  vulnKey
+		data *vulnData
 	}
-	defer func() { _ = vulnStmt.Close() }()
-
-	detailsStmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO node_vulnerability_details (node_vulnerability_id, details)
-		VALUES (?, ?)
-	`)
-	if err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to prepare details statement: %w", err)
-	}
-	defer func() { _ = detailsStmt.Close() }()
-
-	totalInserted := 0
-	for key, data := range vulnGroups {
-		result, err := vulnStmt.Exec(
-			nodeID, key.CVEID, key.PackageName, key.PackageVersion, key.PackageType,
-			data.Severity, data.Risk, data.EPSSScore, data.EPSSPercentile,
-			data.FixStatus, data.FixVersion, data.KnownExploited, len(data.Instances),
+	orderedVulns := make([]vulnRowData, 0, len(vulnGroups))
+	vulnRows := make([]any, 0, len(vulnGroups)*13)
+	for k, d := range vulnGroups {
+		orderedVulns = append(orderedVulns, vulnRowData{key: k, data: d})
+		vulnRows = append(vulnRows,
+			nodeID, k.CVEID, k.PackageName, k.PackageVersion, k.PackageType,
+			d.Severity, d.Risk, d.EPSSScore, d.EPSSPercentile,
+			d.FixStatus, d.FixVersion, d.KnownExploited, len(d.Instances),
 		)
-		if err != nil {
-			log.Warn("failed to insert vulnerability", "cve_id", key.CVEID, "error", err)
+	}
+	if err = batchInsert(tx,
+		`INSERT INTO node_vulnerabilities (node_id, cve_id, package_name, package_version, package_type, severity, risk, epss_score, epss_percentile, fix_status, fix_version, known_exploited, count)`,
+		vulnRows, 13, 50); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert vulnerabilities: %w", err)
+	}
+	insertVulnsMs := time.Since(t0).Milliseconds() - deleteMs
+
+	// Query back IDs to use for details inserts.
+	idRows, err := tx.Query(
+		`SELECT id, cve_id, package_name, package_version, package_type FROM node_vulnerabilities WHERE node_id = ?`,
+		nodeID)
+	if err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to query vulnerability IDs: %w", err)
+	}
+	type vulnIDKey struct{ CVEID, PkgName, PkgVersion, PkgType string }
+	vulnIDs := make(map[vulnIDKey]int64)
+	for idRows.Next() {
+		var id int64
+		var cve, pkgName, pkgVer, pkgType string
+		if err = idRows.Scan(&id, &cve, &pkgName, &pkgVer, &pkgType); err != nil {
+			_ = idRows.Close()
+			rollback()
+			done()
+			return fmt.Errorf("failed to scan vulnerability ID: %w", err)
+		}
+		vulnIDs[vulnIDKey{cve, pkgName, pkgVer, pkgType}] = id
+	}
+	if err = idRows.Close(); err != nil {
+		rollback()
+		done()
+		return fmt.Errorf("failed to close vulnerability ID rows: %w", err)
+	}
+
+	// Batch INSERT details (2 cols → 400 rows per batch = 800 params).
+	detailRows := make([]any, 0, len(orderedVulns)*2)
+	for _, v := range orderedVulns {
+		vulnID, ok := vulnIDs[vulnIDKey{v.key.CVEID, v.key.PackageName, v.key.PackageVersion, v.key.PackageType}]
+		if !ok {
+			log.Warn("vulnerability ID not found after insert", "cve_id", v.key.CVEID)
 			continue
 		}
-
-		vulnID, err := result.LastInsertId()
-		if err != nil {
-			log.Warn("failed to get vulnerability ID", "cve_id", key.CVEID, "error", err)
-			continue
-		}
-
-		detailsJSON, err := json.Marshal(data.Instances)
-		if err != nil {
-			log.Warn("failed to marshal vulnerability details", "cve_id", key.CVEID, "error", err)
+		detailsJSON, merr := json.Marshal(v.data.Instances)
+		if merr != nil {
+			log.Warn("failed to marshal vulnerability details", "cve_id", v.key.CVEID, "error", merr)
 			detailsJSON = []byte("[]")
 		}
-
-		if _, err = detailsStmt.Exec(vulnID, string(detailsJSON)); err != nil {
-			log.Warn("failed to insert vulnerability details", "cve_id", key.CVEID, "error", err)
-		}
-
-		totalInserted++
+		detailRows = append(detailRows, vulnID, string(detailsJSON))
 	}
+	if err = batchInsert(tx,
+		`INSERT INTO node_vulnerability_details (node_vulnerability_id, details)`,
+		detailRows, 2, 400); err != nil {
+		rollback()
+		done()
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to batch insert vulnerability details: %w", err)
+	}
+	insertDetailsMs := time.Since(t0).Milliseconds() - deleteMs - insertVulnsMs
 
-	// Update node status
+	// Update node status.
 	if _, err = tx.Exec(`
 		UPDATE nodes SET
 			status = ?,
@@ -866,53 +944,89 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, StatusCompleted.String(), grypeDBBuilt.Format(time.RFC3339), nodeID); err != nil {
+		rollback()
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to update node status: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
+		done()
 		exitOnCorruption(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	done()
+	structuredMs := time.Since(t0).Milliseconds()
+
+	// Step 5: Write compressed blob in a separate write.
+	blobStart := time.Now()
+	blobDone := db.beginWrite("store_node_vulnerabilities_blob")
+	_, err = db.conn.Exec(`UPDATE nodes SET vulnerabilities_compressed = ? WHERE id = ?`, vulnCompressed, nodeID)
+	blobDone()
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to store compressed vulnerabilities: %w", err)
+	}
+	blobMs := time.Since(blobStart).Milliseconds()
 
 	log.Info("stored vulnerabilities for node",
 		"node", name,
-		"unique", totalInserted,
-		"total_matches", len(report.Matches))
+		"unique", len(vulnGroups),
+		"total_matches", len(report.Matches),
+		"compress_ms", compressMs,
+		"blob_compressed_kb", len(vulnCompressed)/1024,
+		"delete_ms", deleteMs,
+		"insert_vulns_ms", insertVulnsMs,
+		"insert_details_ms", insertDetailsMs,
+		"structured_total_ms", structuredMs,
+		"blob_write_ms", blobMs,
+	)
 	db.notifyWrite()
 	return nil
 }
 
-// GetNodeSBOM retrieves the raw SBOM JSON for a node
+// GetNodeSBOM retrieves the raw SBOM JSON for a node.
+// Returns the gzip-compressed version if available, otherwise falls back to the
+// uncompressed column (written by older scanner versions).
 func (db *DB) GetNodeSBOM(name string) ([]byte, error) {
-	var sbom sql.NullString
-	err := db.conn.QueryRow(`SELECT sbom FROM nodes WHERE name = ?`, name).Scan(&sbom)
+	var compressed []byte
+	var raw sql.NullString
+	err := db.conn.QueryRow(`SELECT sbom_compressed, sbom FROM nodes WHERE name = ?`, name).Scan(&compressed, &raw)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node SBOM: %w", err)
 	}
-	if !sbom.Valid || sbom.String == "" {
-		return nil, nil
+	if len(compressed) > 0 {
+		return decompressGzip(compressed)
 	}
-	return []byte(sbom.String), nil
+	if raw.Valid && raw.String != "" {
+		return []byte(raw.String), nil
+	}
+	return nil, nil
 }
 
-// GetNodeVulnerabilitiesRaw retrieves the raw vulnerability JSON for a node
+// GetNodeVulnerabilitiesRaw retrieves the raw vulnerability JSON for a node.
+// Returns the gzip-compressed version if available, otherwise falls back to the
+// uncompressed column (written by older scanner versions).
 func (db *DB) GetNodeVulnerabilitiesRaw(name string) ([]byte, error) {
-	var vulns sql.NullString
-	err := db.conn.QueryRow(`SELECT vulnerabilities FROM nodes WHERE name = ?`, name).Scan(&vulns)
+	var compressed []byte
+	var raw sql.NullString
+	err := db.conn.QueryRow(`SELECT vulnerabilities_compressed, vulnerabilities FROM nodes WHERE name = ?`, name).Scan(&compressed, &raw)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node vulnerabilities: %w", err)
 	}
-	if !vulns.Valid || vulns.String == "" {
-		return nil, nil
+	if len(compressed) > 0 {
+		return decompressGzip(compressed)
 	}
-	return []byte(vulns.String), nil
+	if raw.Valid && raw.String != "" {
+		return []byte(raw.String), nil
+	}
+	return nil, nil
 }
 
 // GetNodePackages retrieves all packages for a node with instance counts

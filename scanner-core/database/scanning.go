@@ -108,8 +108,8 @@ func (db *DB) IsScanDataCompleteBulk(digests []string) (map[string]bool, error) 
 		SELECT
 			digest,
 			status,
-			sbom IS NOT NULL AND LENGTH(sbom) > 0,
-			vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0
+			(sbom_compressed IS NOT NULL OR (sbom IS NOT NULL AND LENGTH(sbom) > 0)),
+			(vulnerabilities_compressed IS NOT NULL OR (vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0))
 		FROM images
 		WHERE digest IN (%s)
 	`, joinStrings(placeholders, ","))
@@ -177,8 +177,8 @@ func (db *DB) IsScanDataComplete(digest string) (bool, error) {
 	err := db.conn.QueryRow(`
 		SELECT
 			status,
-			sbom IS NOT NULL AND LENGTH(sbom) > 0,
-			vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0
+			(sbom_compressed IS NOT NULL OR (sbom IS NOT NULL AND LENGTH(sbom) > 0)),
+			(vulnerabilities_compressed IS NOT NULL OR (vulnerabilities IS NOT NULL AND LENGTH(vulnerabilities) > 0))
 		FROM images
 		WHERE digest = ?
 	`, digest).Scan(&status, &hasSBOM, &hasVulns)
@@ -251,60 +251,83 @@ func (db *DB) UpdateScanStatus(digest string, status string, errorMsg string) er
 
 // StoreSBOM stores the SBOM JSON for an image and marks it as scanned
 func (db *DB) StoreSBOM(digest string, sbomJSON []byte) error {
-	// Get image ID first
+	// Get image ID first (read-only, outside any lock).
 	var imageID int64
 	err := db.conn.QueryRow(`SELECT id FROM images WHERE digest = ?`, digest).Scan(&imageID)
 	if err != nil {
 		return fmt.Errorf("failed to get image ID: %w", err)
 	}
 
+	// Compress blob before acquiring any lock.
+	compressStart := time.Now()
+	sbomCompressed, err := compressGzip(sbomJSON)
+	if err != nil {
+		return fmt.Errorf("failed to compress SBOM: %w", err)
+	}
+	compressMs := time.Since(compressStart).Milliseconds()
+
+	// Update image status — tiny write, no blob.
 	storeDone := db.beginWrite("store_sbom")
 	_, err = db.conn.Exec(`
 		UPDATE images
-		SET sbom = ?,
-		    status = ?,
+		SET status = ?,
 		    status_error = NULL,
 		    sbom_scanned_at = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
-	`, string(sbomJSON), StatusScanningVulnerabilities.String(), time.Now().UTC().Format(time.RFC3339), digest)
+	`, StatusScanningVulnerabilities.String(), time.Now().UTC().Format(time.RFC3339), digest)
 	storeDone()
-
 	if err != nil {
 		exitOnCorruption(err)
-		return fmt.Errorf("failed to store SBOM: %w", err)
+		return fmt.Errorf("failed to update SBOM status: %w", err)
 	}
 
-	// Parse and store SBOM data in packages table (parseSBOMData acquires writeMu internally)
-	if err := parseSBOMData(db, imageID, sbomJSON); err != nil {
+	// Parse and store SBOM data with batch inserts (acquires writeMu internally).
+	if err = parseSBOMData(db, imageID, sbomJSON); err != nil {
 		log.Warn("failed to parse SBOM data", "digest", digest, "error", err)
-		// Don't fail the whole operation if parsing fails
 	}
 
+	// Write compressed blob in its own separate write.
+	blobStart := time.Now()
+	blobDone := db.beginWrite("store_sbom_blob")
+	_, err = db.conn.Exec(`UPDATE images SET sbom_compressed = ? WHERE id = ?`, sbomCompressed, imageID)
+	blobDone()
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to store compressed SBOM: %w", err)
+	}
+	blobMs := time.Since(blobStart).Milliseconds()
+
+	log.Info("stored SBOM for image",
+		"digest", digest[:min(16, len(digest))],
+		"compress_ms", compressMs,
+		"blob_compressed_kb", len(sbomCompressed)/1024,
+		"blob_write_ms", blobMs,
+	)
 	db.notifyWrite()
 	return nil
 }
 
-// GetSBOM retrieves the SBOM JSON for an image by digest
+// GetSBOM retrieves the SBOM JSON for an image by digest.
+// Returns the gzip-compressed version if available, otherwise falls back to the
+// uncompressed column (written by older scanner versions).
 func (db *DB) GetSBOM(digest string) ([]byte, error) {
-	var sbom sql.NullString
-	err := db.conn.QueryRow(`
-		SELECT sbom FROM images
-		WHERE digest = ?
-	`, digest).Scan(&sbom)
-
+	var compressed []byte
+	var raw sql.NullString
+	err := db.conn.QueryRow(`SELECT sbom_compressed, sbom FROM images WHERE digest = ?`, digest).Scan(&compressed, &raw)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("image not found")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SBOM: %w", err)
 	}
-
-	if !sbom.Valid || sbom.String == "" {
-		return nil, fmt.Errorf("SBOM not available")
+	if len(compressed) > 0 {
+		return decompressGzip(compressed)
 	}
-
-	return []byte(sbom.String), nil
+	if raw.Valid && raw.String != "" {
+		return []byte(raw.String), nil
+	}
+	return nil, fmt.Errorf("SBOM not available")
 }
 
 // GetImagesByScanStatus is deprecated, use GetImagesByStatus instead
@@ -474,30 +497,53 @@ func (db *DB) StoreVulnerabilities(digest string, vulnJSON []byte, grypeDBBuilt 
 		grypeDBBuiltStr = &s
 	}
 
+	// Compress blob before acquiring any lock.
+	compressStart := time.Now()
+	vulnCompressed, err := compressGzip(vulnJSON)
+	if err != nil {
+		return fmt.Errorf("failed to compress vulnerability JSON: %w", err)
+	}
+	compressMs := time.Since(compressStart).Milliseconds()
+
+	// Update image status — tiny write, no blob.
 	vulnDone := db.beginWrite("store_vulnerabilities")
 	_, err = db.conn.Exec(`
 		UPDATE images
-		SET vulnerabilities = ?,
-		    status = ?,
+		SET status = ?,
 		    status_error = NULL,
 		    vulns_scanned_at = ?,
 		    grype_db_built = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE digest = ?
-	`, string(vulnJSON), StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), grypeDBBuiltStr, digest)
+	`, StatusCompleted.String(), time.Now().UTC().Format(time.RFC3339), grypeDBBuiltStr, digest)
 	vulnDone()
-
 	if err != nil {
 		exitOnCorruption(err)
-		return fmt.Errorf("failed to store vulnerabilities: %w", err)
+		return fmt.Errorf("failed to update vulnerability status: %w", err)
 	}
 
-	// Parse and store vulnerability data in vulnerabilities table (parseVulnerabilityData acquires writeMu internally)
-	if err := parseVulnerabilityData(db, imageID, vulnJSON); err != nil {
+	// Parse and store vulnerability data with batch inserts (acquires writeMu internally).
+	if err = parseVulnerabilityData(db, imageID, vulnJSON); err != nil {
 		log.Warn("failed to parse vulnerability data", "digest", digest, "error", err)
-		// Don't fail the whole operation if parsing fails
 	}
 
+	// Write compressed blob in its own separate write.
+	blobStart := time.Now()
+	blobDone := db.beginWrite("store_vulnerabilities_blob")
+	_, err = db.conn.Exec(`UPDATE images SET vulnerabilities_compressed = ? WHERE id = ?`, vulnCompressed, imageID)
+	blobDone()
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to store compressed vulnerabilities: %w", err)
+	}
+	blobMs := time.Since(blobStart).Milliseconds()
+
+	log.Info("stored vulnerabilities for image",
+		"digest", digest[:min(16, len(digest))],
+		"compress_ms", compressMs,
+		"blob_compressed_kb", len(vulnCompressed)/1024,
+		"blob_write_ms", blobMs,
+	)
 	db.notifyWrite()
 	return nil
 }
@@ -540,24 +586,24 @@ func extractGrypeDBBuiltFromJSON(vulnJSON []byte) *time.Time {
 	return &t
 }
 
-// GetVulnerabilities retrieves the vulnerability scan JSON for an image by digest
+// GetVulnerabilities retrieves the vulnerability scan JSON for an image by digest.
+// Returns the gzip-compressed version if available, otherwise falls back to the
+// uncompressed column (written by older scanner versions).
 func (db *DB) GetVulnerabilities(digest string) ([]byte, error) {
-	var vuln sql.NullString
-	err := db.conn.QueryRow(`
-		SELECT vulnerabilities FROM images
-		WHERE digest = ?
-	`, digest).Scan(&vuln)
-
+	var compressed []byte
+	var raw sql.NullString
+	err := db.conn.QueryRow(`SELECT vulnerabilities_compressed, vulnerabilities FROM images WHERE digest = ?`, digest).Scan(&compressed, &raw)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("image not found")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vulnerabilities: %w", err)
 	}
-
-	if !vuln.Valid || vuln.String == "" {
-		return nil, fmt.Errorf("vulnerabilities not available")
+	if len(compressed) > 0 {
+		return decompressGzip(compressed)
 	}
-
-	return []byte(vuln.String), nil
+	if raw.Valid && raw.String != "" {
+		return []byte(raw.String), nil
+	}
+	return nil, fmt.Errorf("vulnerabilities not available")
 }

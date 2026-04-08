@@ -16,6 +16,8 @@ import (
 // ImageQueryProvider defines the interface for executing image queries
 type ImageQueryProvider interface {
 	ExecuteReadOnlyQuery(query string) (*database.QueryResult, error)
+	GetSBOM(digest string) ([]byte, error)
+	GetVulnerabilities(digest string) ([]byte, error)
 }
 
 // FilterOptionsProvider provides cached image filter options.
@@ -851,25 +853,16 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
 // exportRawVulnerabilitiesJSON exports the raw Grype vulnerability JSON for an image
 func exportRawVulnerabilitiesJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
-	escapedDigest := escapeSQL(digest)
-	query := `SELECT vulnerabilities FROM images WHERE digest = '` + escapedDigest + `'`
-
-	result, err := provider.ExecuteReadOnlyQuery(query)
-	if err != nil || len(result.Rows) == 0 {
+	data, err := provider.GetVulnerabilities(digest)
+	if err != nil || len(data) == 0 {
 		log.Error("error fetching raw vulnerabilities JSON", "error", err)
-		http.Error(w, "Vulnerabilities JSON not found", http.StatusNotFound)
-		return
-	}
-
-	vulnJSON, ok := result.Rows[0]["vulnerabilities"].(string)
-	if !ok || vulnJSON == "" {
 		http.Error(w, "No vulnerabilities data available", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=grype-vulnerabilities.json")
-	if _, err := w.Write([]byte(vulnJSON)); err != nil {
+	if _, err := w.Write(data); err != nil {
 		log.Error("error writing vulnerabilities JSON", "error", err)
 	}
 }
@@ -1048,25 +1041,16 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 
 // exportRawSBOMJSON exports the raw Syft SBOM JSON for an image
 func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {
-	escapedDigest := escapeSQL(digest)
-	query := `SELECT sbom FROM images WHERE digest = '` + escapedDigest + `'`
-
-	result, err := provider.ExecuteReadOnlyQuery(query)
-	if err != nil || len(result.Rows) == 0 {
+	data, err := provider.GetSBOM(digest)
+	if err != nil || len(data) == 0 {
 		log.Error("error fetching raw SBOM JSON", "error", err)
-		http.Error(w, "SBOM JSON not found", http.StatusNotFound)
-		return
-	}
-
-	sbomJSON, ok := result.Rows[0]["sbom"].(string)
-	if !ok || sbomJSON == "" {
 		http.Error(w, "No SBOM data available", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=syft-sbom.json")
-	if _, err := w.Write([]byte(sbomJSON)); err != nil {
+	if _, err := w.Write(data); err != nil {
 		log.Error("error writing SBOM JSON", "error", err)
 	}
 }

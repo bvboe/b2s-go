@@ -1,9 +1,12 @@
 package database
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -376,5 +379,56 @@ func RecoverFromCorruption(dbPath string) error {
 	log.Info("database recovered", "backup_path", backupPath)
 	log.Info("to use recovered database, run command", "command", fmt.Sprintf("mv %s %s", backupPath, dbPath))
 
+	return nil
+}
+
+// compressGzip gzip-compresses data.
+func compressGzip(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write(data); err != nil {
+		return nil, fmt.Errorf("gzip write: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("gzip close: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// decompressGzip decompresses gzip data.
+func decompressGzip(data []byte) ([]byte, error) {
+	r, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer func() { _ = r.Close() }()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("gzip read: %w", err)
+	}
+	return out, nil
+}
+
+// batchInsert executes multi-row INSERTs in chunks to stay within SQLite's
+// variable limit (999 by default). query is the INSERT prefix up to but not
+// including VALUES. rows is a flat slice of all argument values, ncols is the
+// number of columns per row, and batchSize is the max rows per statement.
+func batchInsert(tx *sql.Tx, query string, rows []any, ncols, batchSize int) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	placeholder := "(" + strings.Repeat("?,", ncols-1) + "?)"
+	for i := 0; i < len(rows); i += ncols * batchSize {
+		end := i + ncols*batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		chunk := rows[i:end]
+		n := len(chunk) / ncols
+		placeholders := strings.Repeat(placeholder+",", n-1) + placeholder
+		if _, err := tx.Exec(query+" VALUES "+placeholders, chunk...); err != nil {
+			return err
+		}
+	}
 	return nil
 }

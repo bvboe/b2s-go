@@ -21,6 +21,14 @@ func (m *mockImageQueryProvider) ExecuteReadOnlyQuery(query string) (*database.Q
 	return &database.QueryResult{Rows: []map[string]interface{}{}}, nil
 }
 
+func (m *mockImageQueryProvider) GetSBOM(digest string) ([]byte, error) {
+	return nil, fmt.Errorf("SBOM not available")
+}
+
+func (m *mockImageQueryProvider) GetVulnerabilities(digest string) ([]byte, error) {
+	return nil, fmt.Errorf("vulnerabilities not available")
+}
+
 // TestVulnerabilityIDExtraction tests ID extraction from various URL patterns
 func TestVulnerabilityIDExtraction(t *testing.T) {
 	tests := []struct {

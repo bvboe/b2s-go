@@ -87,6 +87,21 @@ func (m *mockDatabaseProvider) GetVulnerabilities(digest string) ([]byte, error)
 	return []byte("{}"), nil
 }
 
+// combinedTestProvider implements both DatabaseProvider and ImageQueryProvider.
+// Explicit forwarding methods resolve the ambiguity from embedding both mocks.
+type combinedTestProvider struct {
+	*mockDatabaseProvider
+	*mockQueryProvider
+}
+
+func (p *combinedTestProvider) GetSBOM(digest string) ([]byte, error) {
+	return p.mockDatabaseProvider.GetSBOM(digest)
+}
+
+func (p *combinedTestProvider) GetVulnerabilities(digest string) ([]byte, error) {
+	return p.mockDatabaseProvider.GetVulnerabilities(digest)
+}
+
 func TestDatabaseContainersHandler(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -730,13 +745,7 @@ func TestRegisterDatabaseHandlers(t *testing.T) {
 	t.Run("uses ImageQueryProvider when available", func(t *testing.T) {
 		mux := http.NewServeMux()
 
-		// Create a combined provider that implements both interfaces
-		type combinedProvider struct {
-			*mockDatabaseProvider
-			*mockQueryProvider
-		}
-
-		provider := &combinedProvider{
+		provider := &combinedTestProvider{
 			mockDatabaseProvider: &mockDatabaseProvider{},
 			mockQueryProvider: &mockQueryProvider{
 				queryFunc: func(query string) (*database.QueryResult, error) {

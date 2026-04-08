@@ -898,8 +898,7 @@ func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]Container
 		FROM images i
 		INNER JOIN containers c ON c.image_id = i.id
 		WHERE i.status = ?
-		  AND i.sbom IS NOT NULL
-		  AND i.sbom != ''
+		  AND (i.sbom_compressed IS NOT NULL OR (i.sbom IS NOT NULL AND i.sbom != ''))
 		  AND (i.grype_db_built IS NULL OR i.grype_db_built < ?)
 		ORDER BY i.created_at DESC
 	`, StatusCompleted.String(), currentTimestamp)

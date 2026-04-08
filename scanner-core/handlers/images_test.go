@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +26,15 @@ func (m *mockQueryProvider) ExecuteReadOnlyQuery(query string) (*database.QueryR
 		Rows:    []map[string]interface{}{},
 	}, nil
 }
+
+func (m *mockQueryProvider) GetSBOM(digest string) ([]byte, error) {
+	return nil, fmt.Errorf("SBOM not available")
+}
+
+func (m *mockQueryProvider) GetVulnerabilities(digest string) ([]byte, error) {
+	return nil, fmt.Errorf("vulnerabilities not available")
+}
+
 
 // mockFilterOptionsProvider implements FilterOptionsProvider for testing
 type mockFilterOptionsProvider struct {
