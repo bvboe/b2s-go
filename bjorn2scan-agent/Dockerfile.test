@@ -95,6 +95,13 @@ RUN { \
     echo 'WantedBy=multi-user.target'; \
 } > /etc/systemd/system/agent-install.service
 
+# Configure inner Docker to use vfs storage driver.
+# overlay2-on-overlay2 fails with "invalid argument" when the container
+# filesystem is itself an overlay mount (Docker Desktop, GitHub Actions).
+# vfs is slower but works correctly in nested container environments.
+RUN mkdir -p /etc/docker && \
+    echo '{"storage-driver": "vfs"}' > /etc/docker/daemon.json
+
 # Enable Docker and agent install services
 RUN systemctl enable docker agent-install
 

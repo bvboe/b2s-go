@@ -48,10 +48,15 @@ cleanup() {
         done
     fi
 
-    # Stop and remove test container
-    echo "Stopping agent test container..."
-    cd "$AGENT_DIR"
-    ./test-container.sh clean >/dev/null 2>&1 || true
+    # Stop and remove test container only if not running in CI
+    # (CI's own cleanup step handles this, and we want logs available between steps)
+    if [[ -z "${CI:-}" ]]; then
+        echo "Stopping agent test container..."
+        cd "$AGENT_DIR"
+        ./test-container.sh clean >/dev/null 2>&1 || true
+    else
+        echo "Skipping container stop in CI (handled by workflow cleanup step)"
+    fi
 
     # Clean up temp directory
     rm -rf "$TEMP_DIR"
@@ -147,12 +152,27 @@ start_agent_container() {
     for i in {1..60}; do
         if curl -sf "$AGENT_API_URL/health" >/dev/null 2>&1; then
             echo -e "${GREEN}✓ Agent is ready${NC}"
+            break
+        fi
+        sleep 2
+        if [[ $i -eq 60 ]]; then
+            echo -e "${RED}ERROR: Agent failed to start${NC}"
+            exit 1
+        fi
+    done
+
+    # Wait for inner Docker daemon to be ready (separate from agent readiness)
+    echo "Waiting for inner Docker daemon to be ready..."
+    for i in {1..30}; do
+        if docker exec "$CONTAINER_NAME" docker info >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ Inner Docker daemon is ready${NC}"
             return 0
         fi
         sleep 2
     done
 
-    echo -e "${RED}ERROR: Agent failed to start${NC}"
+    echo -e "${RED}ERROR: Inner Docker daemon failed to start${NC}"
+    docker exec "$CONTAINER_NAME" systemctl status docker --no-pager || true
     exit 1
 }
 
@@ -166,10 +186,11 @@ warmup_agent() {
 
     # Pull and run busybox inside the agent's Docker
     docker exec "$CONTAINER_NAME" docker pull "$warmup_image" >/dev/null 2>&1 || true
-    local warmup_id
-    warmup_id=$(docker exec "$CONTAINER_NAME" docker run -d "$warmup_image" sleep 3600 2>/dev/null || echo "")
-    if [[ -z "$warmup_id" ]]; then
+    local warmup_id warmup_err
+    warmup_err=$(docker exec "$CONTAINER_NAME" docker run -d "$warmup_image" sleep 3600 2>&1) && warmup_id="$warmup_err" || warmup_id=""
+    if [[ -z "$warmup_id" ]] || [[ ! "$warmup_id" =~ ^[0-9a-f]{12,}$ ]]; then
         echo -e "${YELLOW}Warning: Could not start warmup container, continuing without warmup${NC}"
+        [[ -n "$warmup_err" ]] && echo "Docker error: $warmup_err"
         return 0
     fi
 
@@ -223,6 +244,7 @@ run_image_in_agent() {
     local output
     if ! output=$(docker exec "$CONTAINER_NAME" docker run -d --name "$container_name" "$image" sleep 3600 2>&1); then
         echo -e "${YELLOW}Warning: Failed to run container${NC}" >&2
+        echo "Docker error: $output" >&2
         return 1
     fi
 

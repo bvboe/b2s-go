@@ -79,7 +79,7 @@ jobs:
         docker ps -a
         echo ""
         echo "=== Agent Container Logs ==="
-        docker logs bjorn2scan-test --tail=100 || echo "Container not found"
+        docker logs bjorn2scan-test --tail=200 || echo "Container not found (already cleaned up)"
         echo ""
         echo "=== Agent Service Status ==="
         docker exec bjorn2scan-test systemctl status bjorn2scan-agent --no-pager || echo "Cannot get service status"
