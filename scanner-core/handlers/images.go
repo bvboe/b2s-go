@@ -602,6 +602,71 @@ ORDER BY namespace, pod, name`
 		}
 		log.Debug("found containers", "count", len(containers))
 
+		// Get vulnerability summary stats
+		vulnStatsQuery := fmt.Sprintf(`
+SELECT
+    COALESCE(SUM(v.risk * v.count), 0) as total_risk,
+    COALESCE(SUM(v.count), 0) as total_cves,
+    COUNT(*) as unique_cves,
+    COALESCE(SUM(CASE WHEN v.known_exploited > 0 THEN v.count ELSE 0 END), 0) as total_exploits,
+    COUNT(CASE WHEN v.known_exploited > 0 THEN 1 END) as unique_exploits,
+    COALESCE(SUM(CASE WHEN v.severity = 'Critical'    THEN v.count ELSE 0 END), 0) as cves_critical,
+    COALESCE(SUM(CASE WHEN v.severity = 'High'        THEN v.count ELSE 0 END), 0) as cves_high,
+    COALESCE(SUM(CASE WHEN v.severity = 'Medium'      THEN v.count ELSE 0 END), 0) as cves_medium,
+    COALESCE(SUM(CASE WHEN v.severity = 'Low'         THEN v.count ELSE 0 END), 0) as cves_low,
+    COALESCE(SUM(CASE WHEN v.severity = 'Negligible'  THEN v.count ELSE 0 END), 0) as cves_negligible,
+    COALESCE(SUM(CASE WHEN v.severity = 'Unknown'     THEN v.count ELSE 0 END), 0) as cves_unknown
+FROM image_vulnerabilities v
+JOIN images images ON v.image_id = images.id
+WHERE images.digest = '%s'`, escapedDigest)
+
+		vulnStatsResult, err := provider.ExecuteReadOnlyQuery(vulnStatsQuery)
+		if err != nil {
+			log.Error("error querying vuln stats", "digest", digest, "error", err)
+			http.Error(w, fmt.Sprintf("Error querying vuln stats: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		var totalRisk, totalCVEs, uniqueCVEs, totalExploits, uniqueExploits interface{}
+		var cvesCritical, cvesHigh, cvesMedium, cvesLow, cvesNegligible, cvesUnknown interface{}
+		if len(vulnStatsResult.Rows) > 0 {
+			row := vulnStatsResult.Rows[0]
+			totalRisk = row["total_risk"]
+			totalCVEs = row["total_cves"]
+			uniqueCVEs = row["unique_cves"]
+			totalExploits = row["total_exploits"]
+			uniqueExploits = row["unique_exploits"]
+			cvesCritical = row["cves_critical"]
+			cvesHigh = row["cves_high"]
+			cvesMedium = row["cves_medium"]
+			cvesLow = row["cves_low"]
+			cvesNegligible = row["cves_negligible"]
+			cvesUnknown = row["cves_unknown"]
+		}
+
+		// Get package summary stats
+		pkgStatsQuery := fmt.Sprintf(`
+SELECT
+    COALESCE(SUM(p.number_of_instances), 0) as total_packages,
+    COUNT(*) as unique_packages
+FROM image_packages p
+JOIN images images ON p.image_id = images.id
+WHERE images.digest = '%s'`, escapedDigest)
+
+		pkgStatsResult, err := provider.ExecuteReadOnlyQuery(pkgStatsQuery)
+		if err != nil {
+			log.Error("error querying package stats", "digest", digest, "error", err)
+			http.Error(w, fmt.Sprintf("Error querying package stats: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		var totalPackages, uniquePackages interface{}
+		if len(pkgStatsResult.Rows) > 0 {
+			row := pkgStatsResult.Rows[0]
+			totalPackages = row["total_packages"]
+			uniquePackages = row["unique_packages"]
+		}
+
 		response := map[string]interface{}{
 			"image_id":            imageRow["image_id"],
 			"references":          references,
@@ -611,6 +676,19 @@ ORDER BY namespace, pod, name`
 			"status_description":  imageRow["status_description"],
 			"vulns_scanned_at":    imageRow["vulns_scanned_at"],
 			"grype_db_built":      imageRow["grype_db_built"],
+			"total_risk":          totalRisk,
+			"total_cves":          totalCVEs,
+			"unique_cves":         uniqueCVEs,
+			"total_exploits":      totalExploits,
+			"unique_exploits":     uniqueExploits,
+			"total_packages":      totalPackages,
+			"unique_packages":     uniquePackages,
+			"cves_critical":       cvesCritical,
+			"cves_high":           cvesHigh,
+			"cves_medium":         cvesMedium,
+			"cves_low":            cvesLow,
+			"cves_negligible":     cvesNegligible,
+			"cves_unknown":        cvesUnknown,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1038,6 +1116,117 @@ WHERE images.digest = '%s'%s`, escapedDigest, whereClause)
 	return mainQuery, countQuery
 }
 
+
+// ImageStatsHandler creates an HTTP handler for /api/images/{digest}/stats endpoint.
+// Returns aggregate vulnerability and package stats, respecting severity/fixStatus/packageType filters.
+func ImageStatsHandler(provider ImageQueryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if len(path) <= 12 {
+			http.Error(w, "Digest required", http.StatusBadRequest)
+			return
+		}
+		pathWithoutPrefix := path[12:]
+		if len(pathWithoutPrefix) <= 6 || pathWithoutPrefix[len(pathWithoutPrefix)-6:] != "/stats" {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		digest := pathWithoutPrefix[:len(pathWithoutPrefix)-6]
+		escapedDigest := escapeSQL(digest)
+
+		params := r.URL.Query()
+		severities := parseMultiSelect(params.Get("severity"))
+		fixStatuses := parseMultiSelect(params.Get("fixStatus"))
+		packageTypes := parseMultiSelect(params.Get("packageType"))
+
+		// Query 1: table-1 stats (total risk, CVEs, exploits) — all three filters applied
+		var vulnConditions []string
+		vulnConditions = appendCondition(vulnConditions, buildINClause("v.severity", severities))
+		vulnConditions = appendCondition(vulnConditions, buildINClause("v.fix_status", fixStatuses))
+		vulnConditions = appendCondition(vulnConditions, buildINClause("v.package_type", packageTypes))
+		vulnWhere := buildWhereClause(vulnConditions)
+
+		vulnStatsQuery := fmt.Sprintf(`
+SELECT
+    COALESCE(SUM(v.risk * v.count), 0) as total_risk,
+    COALESCE(SUM(v.count), 0) as total_cves,
+    COUNT(*) as unique_cves,
+    COALESCE(SUM(CASE WHEN v.known_exploited > 0 THEN v.count ELSE 0 END), 0) as total_exploits,
+    COUNT(CASE WHEN v.known_exploited > 0 THEN 1 END) as unique_exploits
+FROM image_vulnerabilities v
+JOIN images images ON v.image_id = images.id
+WHERE images.digest = '%s'%s`, escapedDigest, vulnWhere)
+
+		vulnResult, err := provider.ExecuteReadOnlyQuery(vulnStatsQuery)
+		if err != nil {
+			log.Error("error querying vuln stats", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Query 2: severity breakdown — same filters as query 1
+		sevStatsQuery := fmt.Sprintf(`
+SELECT
+    COALESCE(SUM(CASE WHEN v.severity = 'Critical'   THEN v.count ELSE 0 END), 0) as cves_critical,
+    COALESCE(SUM(CASE WHEN v.severity = 'High'       THEN v.count ELSE 0 END), 0) as cves_high,
+    COALESCE(SUM(CASE WHEN v.severity = 'Medium'     THEN v.count ELSE 0 END), 0) as cves_medium,
+    COALESCE(SUM(CASE WHEN v.severity = 'Low'        THEN v.count ELSE 0 END), 0) as cves_low,
+    COALESCE(SUM(CASE WHEN v.severity = 'Negligible' THEN v.count ELSE 0 END), 0) as cves_negligible,
+    COALESCE(SUM(CASE WHEN v.severity = 'Unknown'    THEN v.count ELSE 0 END), 0) as cves_unknown
+FROM image_vulnerabilities v
+JOIN images images ON v.image_id = images.id
+WHERE images.digest = '%s'%s`, escapedDigest, vulnWhere)
+
+		sevResult, err := provider.ExecuteReadOnlyQuery(sevStatsQuery)
+		if err != nil {
+			log.Error("error querying severity stats", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Query 3: package stats — packageType only
+		var pkgConditions []string
+		pkgConditions = appendCondition(pkgConditions, buildINClause("p.type", packageTypes))
+		pkgWhere := buildWhereClause(pkgConditions)
+
+		pkgStatsQuery := fmt.Sprintf(`
+SELECT
+    COALESCE(SUM(p.number_of_instances), 0) as total_packages,
+    COUNT(*) as unique_packages
+FROM image_packages p
+JOIN images images ON p.image_id = images.id
+WHERE images.digest = '%s'%s`, escapedDigest, pkgWhere)
+
+		pkgResult, err := provider.ExecuteReadOnlyQuery(pkgStatsQuery)
+		if err != nil {
+			log.Error("error querying package stats", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{}
+		if len(vulnResult.Rows) > 0 {
+			for k, v := range vulnResult.Rows[0] {
+				response[k] = v
+			}
+		}
+		if len(sevResult.Rows) > 0 {
+			for k, v := range sevResult.Rows[0] {
+				response[k] = v
+			}
+		}
+		if len(pkgResult.Rows) > 0 {
+			for k, v := range pkgResult.Rows[0] {
+				response[k] = v
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Error("error encoding stats response", "error", err)
+		}
+	}
+}
 
 // exportRawSBOMJSON exports the raw Syft SBOM JSON for an image
 func exportRawSBOMJSON(w http.ResponseWriter, provider ImageQueryProvider, digest string) {

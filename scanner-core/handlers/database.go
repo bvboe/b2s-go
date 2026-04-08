@@ -398,6 +398,12 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 					ImageVulnerabilitiesDetailHandler(queryProvider)(w, r)
 					return
 				}
+				// Check for /stats suffix
+				if len(pathWithoutPrefix) > 6 && pathWithoutPrefix[len(pathWithoutPrefix)-6:] == "/stats" {
+					log.Debug("routing to ImageStatsHandler")
+					ImageStatsHandler(queryProvider)(w, r)
+					return
+				}
 				// Single image detail with full info (references and containers)
 				log.Debug("routing to ImageDetailFullHandler")
 				ImageDetailFullHandler(queryProvider)(w, r)

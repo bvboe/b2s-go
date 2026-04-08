@@ -23,10 +23,6 @@ let sbomState = {
 
 // Global state
 let currentImageId = '';
-let vulnFiltersVisible = true;
-let sbomFiltersVisible = true;
-let vulnMultiselectInstances = {};
-let sbomMultiselectInstances = {};
 
 // Get image ID from URL
 function getImageId() {
@@ -45,8 +41,7 @@ async function initPage() {
 
     await loadConfig();
     await loadImageDetails(currentImageId);
-    await loadVulnFilterOptions(currentImageId);
-    await loadSBOMFilterOptions(currentImageId);
+    await loadFilterOptions();
     loadVulnerabilitiesTable(currentImageId);
     renderVersionFooter();
 
@@ -55,8 +50,7 @@ async function initPage() {
     updateSBOMExportLinks();
 }
 
-// Global onFilterChange function called by CustomMultiSelect
-// This acts as a dispatcher based on which section is visible
+// Dispatches filter changes to the active tab
 function onFilterChange() {
     const cvesVisible = document.getElementById('cvesSection').style.display !== 'none';
     if (cvesVisible) {
@@ -87,72 +81,46 @@ async function loadImageDetails(imageid) {
         document.getElementById('vulns_scanned_at').textContent = formatTimestamp(data.vulns_scanned_at) || '-';
         document.getElementById('grype_db_built').textContent = formatTimestamp(data.grype_db_built) || '-';
 
+        populateStats(data);
+
     } catch (error) {
         console.error('Error loading image details:', error);
         alert('Error loading image details: ' + error.message);
     }
 }
 
-// Load vulnerabilities filter options
-async function loadVulnFilterOptions(imageid) {
+// Load filter options (shared across both tabs)
+async function loadFilterOptions() {
     try {
-        // Use existing filter options endpoint (it returns all available options)
         const response = await fetch('/api/filter-options');
         if (!response.ok) throw new Error('Failed to load filter options');
 
         const data = await response.json();
 
-        // Severity filter
         const severitySelect = document.getElementById('severityFilter');
         const severities = ['Critical', 'High', 'Medium', 'Low', 'Negligible', 'Unknown'];
         severitySelect.innerHTML = severities.map(sev =>
             `<option value="${escapeHtml(sev)}">${escapeHtml(sev)}</option>`
         ).join('');
 
-        // Fix status filter
         const fixStatusSelect = document.getElementById('fixStatusFilter');
         const fixStatuses = data.vulnStatuses || [];
         fixStatusSelect.innerHTML = fixStatuses.map(status =>
             `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
         ).join('');
 
-        // Package type filter
         const packageTypeSelect = document.getElementById('packageTypeFilter');
         const packageTypes = data.packageTypes || [];
         packageTypeSelect.innerHTML = packageTypes.map(type =>
             `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
         ).join('');
 
-        // Initialize multiselects
-        vulnMultiselectInstances['severityFilter'] = new CustomMultiSelect(severitySelect, 'All severities');
-        vulnMultiselectInstances['fixStatusFilter'] = new CustomMultiSelect(fixStatusSelect, 'All statuses');
-        vulnMultiselectInstances['packageTypeFilter'] = new CustomMultiSelect(packageTypeSelect, 'All types');
+        multiselectInstances['severityFilter'] = new CustomMultiSelect(severitySelect, 'All severities');
+        multiselectInstances['fixStatusFilter'] = new CustomMultiSelect(fixStatusSelect, 'All statuses');
+        multiselectInstances['packageTypeFilter'] = new CustomMultiSelect(packageTypeSelect, 'All types');
 
     } catch (error) {
-        console.error('Error loading vulnerability filter options:', error);
-    }
-}
-
-// Load SBOM filter options
-async function loadSBOMFilterOptions(imageid) {
-    try {
-        const response = await fetch('/api/filter-options');
-        if (!response.ok) throw new Error('Failed to load filter options');
-
-        const data = await response.json();
-
-        // Type filter
-        const sbomTypeSelect = document.getElementById('sbomTypeFilter');
-        const types = data.packageTypes || [];
-        sbomTypeSelect.innerHTML = types.map(type =>
-            `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
-        ).join('');
-
-        // Initialize multiselect
-        sbomMultiselectInstances['sbomTypeFilter'] = new CustomMultiSelect(sbomTypeSelect, 'All types');
-
-    } catch (error) {
-        console.error('Error loading SBOM filter options:', error);
+        console.error('Error loading filter options:', error);
     }
 }
 
@@ -306,11 +274,7 @@ function showVulnerabilityTable() {
     document.getElementById('sbomSection').style.display = 'none';
     document.getElementById('cvesHeader').style.textDecoration = 'underline';
     document.getElementById('sbomHeader').style.textDecoration = 'none';
-
-    // Load vulnerabilities if not already loaded
-    if (document.querySelector('#cvesTable tbody').children.length === 0) {
-        loadVulnerabilitiesTable(currentImageId);
-    }
+    onVulnFilterChange();
 }
 
 function showSBOMTable() {
@@ -318,63 +282,61 @@ function showSBOMTable() {
     document.getElementById('sbomSection').style.display = 'block';
     document.getElementById('cvesHeader').style.textDecoration = 'none';
     document.getElementById('sbomHeader').style.textDecoration = 'underline';
-
-    // Load SBOM if not already loaded
-    if (document.querySelector('#sbomTable tbody').children.length === 0) {
-        loadSBOMTable(currentImageId);
-    }
+    onSBOMFilterChange();
 }
 
-// Filter visibility toggles
-function toggleVulnFilterVisible() {
-    const filterDetails = document.getElementById('vulnFilterDetails');
-    const filterCell = document.getElementById('vulnFilterCell');
-    const filterContainer = document.getElementById('vulnFilterContainer');
-
-    if (vulnFiltersVisible) {
-        filterDetails.style.display = 'none';
-        filterCell.className = 'filterUnSelected';
-        filterContainer.className = 'filterContainerUnSelected';
-    } else {
-        filterDetails.style.display = '';
-        filterCell.className = 'filterSelected';
-        filterContainer.className = 'filterContainerSelected';
-    }
-    vulnFiltersVisible = !vulnFiltersVisible;
+// Populate summary stat fields from a data object
+function populateStats(data) {
+    document.getElementById('total_risk').textContent = formatRiskNumber(data.total_risk);
+    document.getElementById('total_cves').textContent = formatNumber(data.total_cves);
+    document.getElementById('unique_cves').textContent = formatNumber(data.unique_cves);
+    document.getElementById('total_exploits').textContent = formatNumber(data.total_exploits);
+    document.getElementById('unique_exploits').textContent = formatNumber(data.unique_exploits);
+    document.getElementById('total_packages').textContent = formatNumber(data.total_packages);
+    document.getElementById('unique_packages').textContent = formatNumber(data.unique_packages);
+    document.getElementById('cves_critical').textContent = formatNumber(data.cves_critical);
+    document.getElementById('cves_high').textContent = formatNumber(data.cves_high);
+    document.getElementById('cves_medium').textContent = formatNumber(data.cves_medium);
+    document.getElementById('cves_low').textContent = formatNumber(data.cves_low);
+    document.getElementById('cves_negligible').textContent = formatNumber(data.cves_negligible);
+    document.getElementById('cves_unknown').textContent = formatNumber(data.cves_unknown);
 }
 
-function toggleSBOMFilterVisible() {
-    const filterDetails = document.getElementById('sbomFilterDetails');
-    const filterCell = document.getElementById('sbomFilterCell');
-    const filterContainer = document.getElementById('sbomFilterContainer');
+// Fetch and update summary stats with current filter state
+async function loadImageStats() {
+    const params = new URLSearchParams();
+    if (vulnState.severity.length) params.append('severity', vulnState.severity.join(','));
+    if (vulnState.fixStatus.length) params.append('fixStatus', vulnState.fixStatus.join(','));
+    if (vulnState.packageType.length) params.append('packageType', vulnState.packageType.join(','));
 
-    if (sbomFiltersVisible) {
-        filterDetails.style.display = 'none';
-        filterCell.className = 'filterUnSelected';
-        filterContainer.className = 'filterContainerUnSelected';
-    } else {
-        filterDetails.style.display = '';
-        filterCell.className = 'filterSelected';
-        filterContainer.className = 'filterContainerSelected';
+    try {
+        const response = await fetch(`/api/images/${encodeURIComponent(currentImageId)}/stats?${params}`);
+        if (!response.ok) throw new Error('Failed to load stats');
+        const data = await response.json();
+        populateStats(data);
+    } catch (error) {
+        console.error('Error loading image stats:', error);
     }
-    sbomFiltersVisible = !sbomFiltersVisible;
 }
 
 // Filter change handlers
 function onVulnFilterChange() {
-    vulnState.page = 1; // Reset to first page
-    vulnState.severity = vulnMultiselectInstances['severityFilter'] ? vulnMultiselectInstances['severityFilter'].getSelected() : [];
-    vulnState.fixStatus = vulnMultiselectInstances['fixStatusFilter'] ? vulnMultiselectInstances['fixStatusFilter'].getSelected() : [];
-    vulnState.packageType = vulnMultiselectInstances['packageTypeFilter'] ? vulnMultiselectInstances['packageTypeFilter'].getSelected() : [];
+    vulnState.page = 1;
+    vulnState.severity = multiselectInstances['severityFilter'] ? multiselectInstances['severityFilter'].getSelected() : [];
+    vulnState.fixStatus = multiselectInstances['fixStatusFilter'] ? multiselectInstances['fixStatusFilter'].getSelected() : [];
+    vulnState.packageType = multiselectInstances['packageTypeFilter'] ? multiselectInstances['packageTypeFilter'].getSelected() : [];
     loadVulnerabilitiesTable(currentImageId);
     updateVulnExportLinks();
+    loadImageStats();
 }
 
 function onSBOMFilterChange() {
-    sbomState.page = 1; // Reset to first page
-    sbomState.type = sbomMultiselectInstances['sbomTypeFilter'] ? sbomMultiselectInstances['sbomTypeFilter'].getSelected() : [];
+    sbomState.page = 1;
+    sbomState.type = multiselectInstances['packageTypeFilter'] ? multiselectInstances['packageTypeFilter'].getSelected() : [];
+    vulnState.packageType = sbomState.type; // keep in sync for loadImageStats
     loadSBOMTable(currentImageId);
     updateSBOMExportLinks();
+    loadImageStats();
 }
 
 // Sorting handlers
