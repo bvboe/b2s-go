@@ -83,15 +83,6 @@ jobs:
         echo ""
         echo "=== Agent Service Status ==="
         docker exec bjorn2scan-test systemctl status bjorn2scan-agent --no-pager || echo "Cannot get service status"
-        echo ""
-        echo "=== Inner Docker Info ==="
-        docker exec bjorn2scan-test docker info 2>&1 || echo "Cannot get inner docker info"
-        echo ""
-        echo "=== Inner Docker Service Status ==="
-        docker exec bjorn2scan-test systemctl status docker --no-pager || echo "Cannot get docker service status"
-        echo ""
-        echo "=== Test Container Run Attempt ==="
-        docker exec bjorn2scan-test docker run --rm hello-world 2>&1 || echo "hello-world run failed"
 
     - name: Cleanup
       if: always()
