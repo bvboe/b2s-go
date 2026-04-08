@@ -164,7 +164,7 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
   JOIN images images ON instances.image_id = images.id
   JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
-      SELECT image_id, COUNT(*) as package_count
+      SELECT image_id, COALESCE(SUM(number_of_instances), 0) as package_count
       FROM image_packages
       %s
       GROUP BY image_id
@@ -365,7 +365,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
   JOIN images images ON instances.image_id = images.id
   JOIN scan_status status ON images.status = status.status
   LEFT JOIN (
-      SELECT image_id, COUNT(*) as package_count
+      SELECT image_id, COALESCE(SUM(number_of_instances), 0) as package_count
       FROM image_packages
       %s
       GROUP BY image_id
@@ -608,7 +608,7 @@ SELECT
     COALESCE(SUM(v.risk * v.count), 0) as total_risk,
     COALESCE(SUM(v.count), 0) as total_cves,
     COUNT(*) as unique_cves,
-    COALESCE(SUM(CASE WHEN v.known_exploited > 0 THEN v.count ELSE 0 END), 0) as total_exploits,
+    COALESCE(SUM(v.known_exploited * v.count), 0) as total_exploits,
     COUNT(CASE WHEN v.known_exploited > 0 THEN 1 END) as unique_exploits,
     COALESCE(SUM(CASE WHEN v.severity = 'Critical'    THEN v.count ELSE 0 END), 0) as cves_critical,
     COALESCE(SUM(CASE WHEN v.severity = 'High'        THEN v.count ELSE 0 END), 0) as cves_high,
@@ -1151,7 +1151,7 @@ SELECT
     COALESCE(SUM(v.risk * v.count), 0) as total_risk,
     COALESCE(SUM(v.count), 0) as total_cves,
     COUNT(*) as unique_cves,
-    COALESCE(SUM(CASE WHEN v.known_exploited > 0 THEN v.count ELSE 0 END), 0) as total_exploits,
+    COALESCE(SUM(v.known_exploited * v.count), 0) as total_exploits,
     COUNT(CASE WHEN v.known_exploited > 0 THEN 1 END) as unique_exploits
 FROM image_vulnerabilities v
 JOIN images images ON v.image_id = images.id

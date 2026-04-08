@@ -502,8 +502,8 @@ function computeAndPopulateStats() {
         totalRisk += (vuln.risk || 0) * count;
         totalCves += count;
         uniqueCveIds.add(vuln.cve_id);
+        totalExploits += (vuln.known_exploited || 0) * count;
         if ((vuln.known_exploited || 0) > 0) {
-            totalExploits += count;
             uniqueExploitIds.add(vuln.cve_id);
         }
         const sev = vuln.severity || 'Unknown';
@@ -526,7 +526,7 @@ function computeAndPopulateStats() {
         unique_cves: uniqueCveIds.size,
         total_exploits: totalExploits,
         unique_exploits: uniqueExploitIds.size,
-        total_packages: filteredPkgs.length,
+        total_packages: filteredPkgs.reduce((sum, pkg) => sum + (pkg.count || 1), 0),
         unique_packages: filteredPkgs.length,
         cves_critical: sevCounts.Critical,
         cves_high: sevCounts.High,

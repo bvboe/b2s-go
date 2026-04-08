@@ -417,7 +417,7 @@ FROM containers instances
 JOIN images images ON instances.image_id = images.id
 JOIN scan_status status ON images.status = status.status
 LEFT JOIN (
-    SELECT image_id, COUNT(*) as package_count
+    SELECT image_id, COALESCE(SUM(number_of_instances), 0) as package_count
     FROM image_packages
     %s
     GROUP BY image_id
@@ -656,7 +656,7 @@ FROM containers instances
 JOIN images images ON instances.image_id = images.id
 JOIN scan_status status ON images.status = status.status
 LEFT JOIN (
-    SELECT image_id, COUNT(*) as package_count
+    SELECT image_id, COALESCE(SUM(number_of_instances), 0) as package_count
     FROM image_packages
     %s
     GROUP BY image_id
