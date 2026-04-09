@@ -1168,8 +1168,8 @@ func (db *DB) GetNodeSummaries() ([]nodes.NodeSummary, error) {
 
 // GetNodeSummariesFiltered returns vulnerability summaries for nodes with optional filtering
 func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.NodeSummary, error) {
-	// Build the vulnerability filter clause for subqueries
-	vulnFilter := ""
+	// Build optional WHERE clause for the vulnerability aggregation subquery
+	vulnWhere := ""
 	var vulnFilterArgs []interface{}
 
 	if len(filters.VulnStatuses) > 0 || len(filters.PackageTypes) > 0 {
@@ -1181,7 +1181,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 				placeholders[i] = "?"
 				vulnFilterArgs = append(vulnFilterArgs, status)
 			}
-			conditions = append(conditions, "nv.fix_status IN ("+strings.Join(placeholders, ",")+")")
+			conditions = append(conditions, "fix_status IN ("+strings.Join(placeholders, ",")+")")
 		}
 
 		if len(filters.PackageTypes) > 0 {
@@ -1190,16 +1190,14 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 				placeholders[i] = "?"
 				vulnFilterArgs = append(vulnFilterArgs, pkgType)
 			}
-			conditions = append(conditions, "nv.package_type IN ("+strings.Join(placeholders, ",")+")")
+			conditions = append(conditions, "package_type IN ("+strings.Join(placeholders, ",")+")")
 		}
 
-		if len(conditions) > 0 {
-			vulnFilter = " AND " + strings.Join(conditions, " AND ")
-		}
+		vulnWhere = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	// Build node filter clause
-	nodeFilter := ""
+	nodeWhere := ""
 	var nodeFilterArgs []interface{}
 	if len(filters.OSNames) > 0 {
 		placeholders := make([]string, len(filters.OSNames))
@@ -1207,61 +1205,52 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 			placeholders[i] = "?"
 			nodeFilterArgs = append(nodeFilterArgs, os)
 		}
-		nodeFilter = " WHERE n.os_release IN (" + strings.Join(placeholders, ",") + ")"
+		nodeWhere = " WHERE n.os_release IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
-	// Build query with optional package join for vulnerability counts
-	var query string
-	var args []interface{}
-
-	if len(filters.VulnStatuses) > 0 || len(filters.PackageTypes) > 0 {
-		// package_type is now inline on node_vulnerabilities, so no JOIN is needed
-		// regardless of whether we're filtering by package type or vuln status.
-		query = `
+	// Single pass over node_vulnerabilities using conditional aggregation —
+	// replaces 9 correlated subqueries that each re-scanned the table per node.
+	query := `
+	SELECT
+		n.name,
+		COALESCE(n.os_release, '') as os_release,
+		COALESCE(n.status, 'unknown') as status,
+		COALESCE(p.package_count, 0) as package_count,
+		COALESCE(v.critical, 0) as critical,
+		COALESCE(v.high, 0) as high,
+		COALESCE(v.medium, 0) as medium,
+		COALESCE(v.low, 0) as low,
+		COALESCE(v.negligible, 0) as negligible,
+		COALESCE(v.unknown, 0) as unknown,
+		COALESCE(v.total, 0) as total,
+		COALESCE(v.total_risk, 0) as total_risk,
+		COALESCE(v.exploit_count, 0) as exploit_count
+	FROM nodes n
+	LEFT JOIN (
 		SELECT
-			n.name,
-			COALESCE(n.os_release, '') as os_release,
-			COALESCE(n.status, 'unknown') as status,
-			(SELECT COALESCE(SUM(number_of_instances), 0) FROM node_packages WHERE node_id = n.id) as package_count,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Critical'` + vulnFilter + `) as critical,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'High'` + vulnFilter + `) as high,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Medium'` + vulnFilter + `) as medium,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low'` + vulnFilter + `) as low,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible'` + vulnFilter + `) as negligible,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')` + vulnFilter + `) as unknown,
-			(SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total,
-			(SELECT COALESCE(SUM(nv.risk * COALESCE(nv.count, 1)), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as total_risk,
-			(SELECT COALESCE(SUM(nv.known_exploited * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id` + vulnFilter + `) as exploit_count
-		FROM nodes n` + nodeFilter + `
-		ORDER BY n.name`
+			node_id,
+			SUM(CASE WHEN severity = 'Critical' THEN count ELSE 0 END) as critical,
+			SUM(CASE WHEN severity = 'High' THEN count ELSE 0 END) as high,
+			SUM(CASE WHEN severity = 'Medium' THEN count ELSE 0 END) as medium,
+			SUM(CASE WHEN severity = 'Low' THEN count ELSE 0 END) as low,
+			SUM(CASE WHEN severity = 'Negligible' THEN count ELSE 0 END) as negligible,
+			SUM(CASE WHEN severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible') THEN count ELSE 0 END) as unknown,
+			SUM(count) as total,
+			SUM(risk * COALESCE(count, 1)) as total_risk,
+			SUM(known_exploited * count) as exploit_count
+		FROM node_vulnerabilities` + vulnWhere + `
+		GROUP BY node_id
+	) v ON v.node_id = n.id
+	LEFT JOIN (
+		SELECT node_id, SUM(number_of_instances) as package_count
+		FROM node_packages
+		GROUP BY node_id
+	) p ON p.node_id = n.id` + nodeWhere + `
+	ORDER BY n.name`
 
-		// Add args for each subquery (7 severity counts + total + total_risk + exploit_count = 10 subqueries)
-		for i := 0; i < 10; i++ {
-			args = append(args, vulnFilterArgs...)
-		}
-		args = append(args, nodeFilterArgs...)
-	} else {
-		// No vulnerability filtering, use simple query
-		query = `
-		SELECT
-			n.name,
-			COALESCE(n.os_release, '') as os_release,
-			COALESCE(n.status, 'unknown') as status,
-			(SELECT COALESCE(SUM(number_of_instances), 0) FROM node_packages WHERE node_id = n.id) as package_count,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Critical') as critical,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'High') as high,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Medium') as medium,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Low') as low,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id AND severity = 'Negligible') as negligible,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id AND severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible')) as unknown,
-			(SELECT COALESCE(SUM(count), 0) FROM node_vulnerabilities WHERE node_id = n.id) as total,
-			(SELECT COALESCE(SUM(risk * COALESCE(count, 1)), 0) FROM node_vulnerabilities WHERE node_id = n.id) as total_risk,
-			(SELECT COALESCE(SUM(known_exploited * count), 0) FROM node_vulnerabilities WHERE node_id = n.id) as exploit_count
-		FROM nodes n` + nodeFilter + `
-		ORDER BY n.name`
-
-		args = append(args, nodeFilterArgs...)
-	}
+	args := make([]interface{}, 0, len(vulnFilterArgs)+len(nodeFilterArgs))
+	args = append(args, vulnFilterArgs...)
+	args = append(args, nodeFilterArgs...)
 
 	rows, err := db.conn.Query(query, args...)
 	if err != nil {
@@ -1317,16 +1306,35 @@ func (db *DB) GetNodeDistributionSummary() ([]nodes.NodeDistributionSummary, err
 		SELECT
 			COALESCE(n.os_release, 'Unknown') as os_name,
 			COUNT(DISTINCT n.id) as node_count,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Critical')), 0) as avg_critical,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'High')), 0) as avg_high,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Medium')), 0) as avg_medium,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Low')), 0) as avg_low,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity = 'Negligible')), 0) as avg_negligible,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id AND nv.severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible'))), 0) as avg_unknown,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.risk * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_risk,
-			COALESCE(AVG((SELECT COALESCE(SUM(nv.known_exploited * nv.count), 0) FROM node_vulnerabilities nv WHERE nv.node_id = n.id)), 0) as avg_exploits,
-			COALESCE(AVG((SELECT COALESCE(SUM(np.number_of_instances), 0) FROM node_packages np WHERE np.node_id = n.id)), 0) as avg_packages
+			COALESCE(AVG(COALESCE(v.critical, 0)), 0) as avg_critical,
+			COALESCE(AVG(COALESCE(v.high, 0)), 0) as avg_high,
+			COALESCE(AVG(COALESCE(v.medium, 0)), 0) as avg_medium,
+			COALESCE(AVG(COALESCE(v.low, 0)), 0) as avg_low,
+			COALESCE(AVG(COALESCE(v.negligible, 0)), 0) as avg_negligible,
+			COALESCE(AVG(COALESCE(v.unknown, 0)), 0) as avg_unknown,
+			COALESCE(AVG(COALESCE(v.total_risk, 0)), 0) as avg_risk,
+			COALESCE(AVG(COALESCE(v.exploit_count, 0)), 0) as avg_exploits,
+			COALESCE(AVG(COALESCE(p.package_count, 0)), 0) as avg_packages
 		FROM nodes n
+		LEFT JOIN (
+			SELECT
+				node_id,
+				SUM(CASE WHEN severity = 'Critical' THEN count ELSE 0 END) as critical,
+				SUM(CASE WHEN severity = 'High' THEN count ELSE 0 END) as high,
+				SUM(CASE WHEN severity = 'Medium' THEN count ELSE 0 END) as medium,
+				SUM(CASE WHEN severity = 'Low' THEN count ELSE 0 END) as low,
+				SUM(CASE WHEN severity = 'Negligible' THEN count ELSE 0 END) as negligible,
+				SUM(CASE WHEN severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible') THEN count ELSE 0 END) as unknown,
+				SUM(risk * count) as total_risk,
+				SUM(known_exploited * count) as exploit_count
+			FROM node_vulnerabilities
+			GROUP BY node_id
+		) v ON v.node_id = n.id
+		LEFT JOIN (
+			SELECT node_id, SUM(number_of_instances) as package_count
+			FROM node_packages
+			GROUP BY node_id
+		) p ON p.node_id = n.id
 		WHERE n.status = 'completed'
 		GROUP BY COALESCE(n.os_release, 'Unknown')
 		ORDER BY node_count DESC, os_name
