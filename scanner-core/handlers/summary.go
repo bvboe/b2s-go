@@ -152,8 +152,11 @@ func DeploymentMetricsHandler(provider ImageQueryProvider) http.HandlerFunc {
 //
 // Structure:
 //   completed — IDs of nodes with status 'completed', optionally filtered by os_release
-//   vuln_agg  — total CVE count and exploit count; optionally filtered by fix_status
-//               and/or package type (requires JOIN to node_packages)
+//   vuln_agg  — total CVE count, exploit count, and unique CVE count in a single pass;
+//               optionally filtered by fix_status and/or package type
+//
+// unique_cves is computed inside vuln_agg (COUNT(DISTINCT cve_id)) to avoid a
+// second scan of node_vulnerabilities. Previously it was a separate scalar subquery.
 //
 // When all filter slices are empty the generated SQL is equivalent to the
 // original unfiltered query.
@@ -164,7 +167,8 @@ func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string 
 		osFilter = " AND " + c
 	}
 
-	// vuln_agg / unique_cves filters: fix_status and package type
+	// vuln_agg filters: fix_status and package type
+	// unique_cves is computed in the same CTE to avoid a second scan of node_vulnerabilities
 	var nvConds []string
 	if c := buildINClause("nv.fix_status", vulnStatuses); c != "" {
 		nvConds = append(nvConds, c)
@@ -179,21 +183,6 @@ func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string 
 		nvExtraWhere = "\n    AND " + strings.Join(nvConds, "\n    AND ")
 	}
 
-	// Same conditions for the unique_cves correlated subquery (aliased nv2/np2)
-	var uv2Conds []string
-	if c := buildINClause("nv2.fix_status", vulnStatuses); c != "" {
-		uv2Conds = append(uv2Conds, c)
-	}
-	pkgJoin2 := ""
-	if c := buildINClause("np2.type", packageTypes); c != "" {
-		pkgJoin2 = "\n   JOIN node_packages np2 ON nv2.package_id = np2.id"
-		uv2Conds = append(uv2Conds, c)
-	}
-	uvExtraWhere := ""
-	if len(uv2Conds) > 0 {
-		uvExtraWhere = "\n   AND " + strings.Join(uv2Conds, "\n   AND ")
-	}
-
 	return fmt.Sprintf(`WITH
   completed AS (
     SELECT id FROM nodes WHERE status = 'completed'%s
@@ -201,22 +190,22 @@ func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string 
   vuln_agg AS (
     SELECT
       COALESCE(SUM(nv.count),                      0) AS total_cves,
-      COALESCE(SUM(nv.known_exploited * nv.count), 0) AS total_exploits
+      COALESCE(SUM(nv.known_exploited * nv.count), 0) AS total_exploits,
+      COUNT(DISTINCT nv.cve_id)                        AS unique_cves
     FROM node_vulnerabilities nv%s
     WHERE nv.node_id IN (SELECT id FROM completed)%s
   )
 SELECT
   (SELECT COUNT(*) FROM nodes WHERE 1=1%s)                                     AS total_nodes,
   v.total_cves,
-  (SELECT COUNT(DISTINCT nv2.cve_id) FROM node_vulnerabilities nv2%s
-   WHERE nv2.node_id IN (SELECT id FROM completed)%s)                          AS unique_cves,
+  v.unique_cves,
   v.total_exploits,
   (SELECT COUNT(*) FROM nodes
    WHERE status NOT IN ('completed','sbom_failed','vuln_scan_failed')%s)       AS nodes_pending,
   (SELECT COUNT(*) FROM nodes
    WHERE status IN ('sbom_failed','vuln_scan_failed')%s)                       AS nodes_failed
 FROM vuln_agg v
-`, osFilter, pkgJoin, nvExtraWhere, osFilter, pkgJoin2, uvExtraWhere, osFilter, osFilter)
+`, osFilter, pkgJoin, nvExtraWhere, osFilter, osFilter, osFilter)
 }
 
 // NodeMetricsSummaryHandler returns a single-row JSON summary of node scan results.
