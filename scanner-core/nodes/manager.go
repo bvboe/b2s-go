@@ -52,97 +52,15 @@ func (m *Manager) SetDatabase(db NodeDatabaseInterface) {
 	log.Info("database persistence enabled")
 }
 
-// SetScanQueue configures the manager to use a scan queue for host SBOM generation
-// After setting the queue, it enqueues scans for any nodes that were discovered
-// before the queue was connected (catch-up for initial sync)
+// SetScanQueue configures the manager to use a scan queue for host SBOM generation.
+// Catch-up scanning (enqueuing scans for existing nodes on startup) is handled
+// exclusively by CatchUpScans, which is called after the informer cache is fully
+// synced and all nodes are guaranteed to be in memory.
 func (m *Manager) SetScanQueue(queue NodeScanQueueInterface) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.scanQueue = queue
 	log.Info("scan queue enabled")
-
-	// Catch-up: enqueue scans for nodes discovered before queue was connected
-	if m.db != nil && len(m.nodes) > 0 {
-		nodeCount := len(m.nodes)
-		log.Info("checking nodes for pending scans", "count", nodeCount)
-
-		// Build map of node name -> node
-		nodeMap := make(map[string]Node)
-		nodeNames := make([]string, 0, nodeCount)
-		for _, n := range m.nodes {
-			nodeMap[n.Name] = n
-			nodeNames = append(nodeNames, n.Name)
-		}
-		m.mu.Unlock()
-
-		if len(nodeNames) == 0 {
-			log.Debug("no nodes to check for pending scans")
-			return
-		}
-
-		// Get status for all nodes in a single bulk query
-		scanStatuses, err := m.db.GetNodeScanStatusBulk(nodeNames)
-		if err != nil {
-			log.Error("failed to fetch bulk node scan status", slog.Any("error", err))
-			return
-		}
-
-		// Identify nodes that need completeness check (those marked as "completed")
-		scannedNodes := make([]string, 0)
-		for name, status := range scanStatuses {
-			if status == "completed" {
-				scannedNodes = append(scannedNodes, name)
-			}
-		}
-
-		// Get completeness status for scanned nodes in a single bulk query
-		var completenessStatus map[string]bool
-		if len(scannedNodes) > 0 {
-			completenessStatus, err = m.db.IsNodeScanCompleteBulk(scannedNodes)
-			if err != nil {
-				log.Error("failed to fetch bulk node completeness status", slog.Any("error", err))
-				completenessStatus = make(map[string]bool)
-			}
-		} else {
-			completenessStatus = make(map[string]bool)
-		}
-
-		// Enqueue scans based on status (using actual database status values)
-		log := log
-		enqueuedCount := 0
-		for name, status := range scanStatuses {
-			switch status {
-			case "pending":
-				// New node, enqueue normal scan
-				log.Debug("enqueuing scan for new node", "node", name)
-				m.scanQueue.EnqueueHostScan(name)
-				enqueuedCount++
-
-			case "sbom_failed", "sbom_unavailable", "vuln_scan_failed":
-				// Previous scan failed, retry with force scan
-				log.Debug("retrying failed scan", "node", name, "status", status)
-				m.scanQueue.EnqueueHostForceScan(name)
-				enqueuedCount++
-
-			case "completed":
-				// Check if data is actually complete
-				if !completenessStatus[name] {
-					log.Debug("retrying scan for incomplete data", "node", name)
-					m.scanQueue.EnqueueHostForceScan(name)
-					enqueuedCount++
-				}
-
-			case "generating_sbom", "scanning_vulnerabilities":
-				// Node is in an intermediate state (previous scan was interrupted)
-				log.Debug("retrying interrupted scan", "node", name)
-				m.scanQueue.EnqueueHostForceScan(name)
-				enqueuedCount++
-			}
-		}
-
-		log.Info("queued catch-up scans", "enqueued", enqueuedCount, "total", len(nodeNames))
-		return
-	}
-	m.mu.Unlock()
 }
 
 // CatchUpScans enqueues scans for all known nodes that need processing.
