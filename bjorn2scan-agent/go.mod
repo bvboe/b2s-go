@@ -4,7 +4,7 @@ go 1.25.8
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/anchore/syft v1.42.3
+	github.com/anchore/syft v1.42.4
 	github.com/bvboe/b2s-go/sbom-generator-shared v0.0.0-20260318203456-d47caeb6547a
 	github.com/bvboe/b2s-go/scanner-core v0.0.0-20251229133410-246b755cc828
 	github.com/sigstore/sigstore-go v1.1.4
@@ -327,10 +327,10 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/gorm v1.31.1 // indirect
-	modernc.org/libc v1.67.6 // indirect
+	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.46.1 // indirect
+	modernc.org/sqlite v1.46.2 // indirect
 )
 
 require (
