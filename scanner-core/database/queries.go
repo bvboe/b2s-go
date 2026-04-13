@@ -764,6 +764,14 @@ func (db *DB) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
 	done := db.beginWrite("mark_metrics_stale")
 	defer done()
 
+	// Wrap all chunks in one transaction — one WAL flush instead of N.
+	tx, err := db.conn.Begin()
+	if err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// 1 param for expires_at_unix + 1 per key; chunk at 500 keys.
 	const chunkSize = 500
 	for start := 0; start < len(keys); start += chunkSize {
@@ -783,10 +791,14 @@ func (db *DB) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
 
 		query := "UPDATE metric_staleness SET expires_at_unix = ? WHERE metric_key IN (" +
 			strings.Join(placeholders, ",") + ")"
-		if _, err := db.conn.Exec(query, args...); err != nil {
+		if _, err := tx.Exec(query, args...); err != nil {
 			exitOnCorruption(err)
 			return fmt.Errorf("failed to mark metrics stale: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		exitOnCorruption(err)
+		return fmt.Errorf("failed to commit mark_metrics_stale: %w", err)
 	}
 	return nil
 }

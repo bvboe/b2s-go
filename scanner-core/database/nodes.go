@@ -34,14 +34,29 @@ type NodeRow struct {
 // AddNode adds a new node to the database or returns existing
 // Returns true if a new node was created, false if it already existed
 func (db *DB) AddNode(n nodes.Node) (bool, error) {
-	// Try to get existing node
-	var existingID int64
+	// Read all mutable fields so we can skip the write if nothing changed.
+	var existingHostname, existingOSRelease, existingKernelVersion string
+	var existingArchitecture, existingContainerRuntime, existingKubeletVersion string
 	err := db.conn.QueryRow(`
-		SELECT id FROM nodes WHERE name = ?
-	`, n.Name).Scan(&existingID)
+		SELECT
+			COALESCE(hostname, ''), COALESCE(os_release, ''), COALESCE(kernel_version, ''),
+			COALESCE(architecture, ''), COALESCE(container_runtime, ''), COALESCE(kubelet_version, '')
+		FROM nodes WHERE name = ?
+	`, n.Name).Scan(
+		&existingHostname, &existingOSRelease, &existingKernelVersion,
+		&existingArchitecture, &existingContainerRuntime, &existingKubeletVersion,
+	)
 
 	if err == nil {
-		// Node already exists, update it
+		// Node already exists — skip write if nothing changed.
+		if existingHostname == n.Hostname &&
+			existingOSRelease == n.OSRelease &&
+			existingKernelVersion == n.KernelVersion &&
+			existingArchitecture == n.Architecture &&
+			existingContainerRuntime == n.ContainerRuntime &&
+			existingKubeletVersion == n.KubeletVersion {
+			return false, nil
+		}
 		done := db.beginWrite("add_node")
 		_, err = db.conn.Exec(`
 			UPDATE nodes SET
@@ -68,7 +83,7 @@ func (db *DB) AddNode(n nodes.Node) (bool, error) {
 		return false, fmt.Errorf("failed to query node: %w", err)
 	}
 
-	// Node doesn't exist, create it
+	// Node doesn't exist, create it.
 	done := db.beginWrite("add_node")
 	result, err := db.conn.Exec(`
 		INSERT INTO nodes (name, hostname, os_release, kernel_version, architecture, container_runtime, kubelet_version, status)

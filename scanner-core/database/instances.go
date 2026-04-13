@@ -38,7 +38,25 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 			c.ID.Namespace, c.ID.Pod, c.ID.Name)
 	}
 
-	// Start a transaction to ensure atomic operation across both tables
+	// Fast path: check without holding the write lock.
+	// If the image already exists and the container already has the same image, nothing to write.
+	var fastImageID int64
+	if imgErr := db.conn.QueryRow(`SELECT id FROM images WHERE digest = ?`, c.Image.Digest).Scan(&fastImageID); imgErr == nil {
+		var existingImageID int64
+		if scanErr := db.conn.QueryRow(`
+			SELECT image_id FROM containers WHERE namespace = ? AND pod = ? AND name = ?
+		`, c.ID.Namespace, c.ID.Pod, c.ID.Name).Scan(&existingImageID); scanErr == nil {
+			if existingImageID == fastImageID {
+				return false, nil // nothing changed, skip write
+			}
+		} else if scanErr != sql.ErrNoRows {
+			return false, fmt.Errorf("failed to query container: %w", scanErr)
+		}
+	} else if imgErr != sql.ErrNoRows {
+		return false, fmt.Errorf("failed to query image: %w", imgErr)
+	}
+
+	// Slow path: something needs writing. Acquire write lock and re-verify under lock.
 	done := db.beginWrite("add_container")
 	defer done()
 	tx, err := db.conn.Begin()
@@ -48,13 +66,13 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// First, get or create the image (using transaction-aware helper)
+	// Get or create the image under the lock (handles concurrent inserts safely).
 	imageID, _, err := db.getOrCreateImageTx(tx, c.Image)
 	if err != nil {
 		return false, fmt.Errorf("failed to get/create image: %w", err)
 	}
 
-	// Check if container already exists and get its current image_id
+	// Re-check container state under the lock.
 	var existingID int64
 	var existingImageID int64
 	err = tx.QueryRow(`
@@ -63,32 +81,25 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 	`, c.ID.Namespace, c.ID.Pod, c.ID.Name).Scan(&existingID, &existingImageID)
 
 	if err == nil {
-		// Container already exists, check if image has changed
+		// Container exists — update if image changed, otherwise no-op.
 		if existingImageID != imageID {
-			// Image has changed (or digest was empty before), update it
 			_, err = tx.Exec(`
 				UPDATE containers
 				SET image_id = ?, reference = ?, node_name = ?, container_runtime = ?
 				WHERE id = ?
 			`, imageID, c.Image.Reference, c.NodeName, c.ContainerRuntime, existingID)
-
 			if err != nil {
 				exitOnCorruption(err)
 				return false, fmt.Errorf("failed to update container: %w", err)
 			}
-
-			// Commit the transaction
 			if err := tx.Commit(); err != nil {
 				exitOnCorruption(err)
 				return false, fmt.Errorf("failed to commit transaction: %w", err)
 			}
-
 			log.Info("updated container in database",
 				"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
 			return true, nil
 		}
-
-		// Image hasn't changed, nothing to do
 		if err := tx.Commit(); err != nil {
 			exitOnCorruption(err)
 			return false, fmt.Errorf("failed to commit transaction: %w", err)
@@ -100,27 +111,22 @@ func (db *DB) AddContainer(c containers.Container) (bool, error) {
 		return false, fmt.Errorf("failed to query container: %w", err)
 	}
 
-	// Container doesn't exist, create it
+	// Container doesn't exist, insert it.
 	_, err = tx.Exec(`
 		INSERT INTO containers (namespace, pod, name, reference, image_id, node_name, container_runtime)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, c.ID.Namespace, c.ID.Pod, c.ID.Name,
 		c.Image.Reference, imageID, c.NodeName, c.ContainerRuntime)
-
 	if err != nil {
 		exitOnCorruption(err)
 		return false, fmt.Errorf("failed to insert container: %w", err)
 	}
-
-	// Commit the transaction
 	if err := tx.Commit(); err != nil {
 		exitOnCorruption(err)
 		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
 	log.Info("new container added to database",
 		"namespace", c.ID.Namespace, "pod", c.ID.Pod, "name", c.ID.Name, "image_id", imageID)
-
 	db.notifyWrite()
 	return true, nil
 }
