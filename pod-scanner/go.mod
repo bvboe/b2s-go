@@ -3,13 +3,13 @@ module github.com/bvboe/b2s-go/pod-scanner
 go 1.25.8
 
 require (
-	github.com/anchore/syft v1.42.3
+	github.com/anchore/syft v1.42.4
 	github.com/bvboe/b2s-go/sbom-generator-shared v0.0.0-20260318203456-d47caeb6547a
 	github.com/containerd/containerd/v2 v2.2.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
-	modernc.org/sqlite v1.48.1
+	modernc.org/sqlite v1.48.2
 )
 
 replace github.com/bvboe/b2s-go/sbom-generator-shared => ../sbom-generator-shared
