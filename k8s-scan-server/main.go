@@ -511,6 +511,9 @@ func main() {
 	// Runs in background every 5 minutes so slow NFS I/O does not affect /health.
 	database.StartWALMonitor(ctx, db)
 
+	// Warm the node vulnerability metrics cache so /metrics scrapes don't hit NFS.
+	db.StartNodeVulnCacheRefresh(ctx)
+
 	mux := http.NewServeMux()
 
 	// Register standard handlers

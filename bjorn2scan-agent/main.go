@@ -367,6 +367,9 @@ func main() {
 	// a restart (which would otherwise trigger the startup TRUNCATE checkpoint).
 	database.StartWALMonitor(ctx, db)
 
+	// Warm the node vulnerability metrics cache so /metrics scrapes don't hit disk.
+	db.StartNodeVulnCacheRefresh(ctx)
+
 	// Configure host scanning if enabled
 	if cfg.HostScanningEnabled {
 		logging.For(logging.ComponentNodes).Info("host scanning enabled, configuring host SBOM retriever")

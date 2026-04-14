@@ -997,6 +997,9 @@ func (db *DB) StoreNodeVulnerabilities(name string, vulnJSON []byte, grypeDBBuil
 		"blob_write_ms", blobMs,
 	)
 	db.notifyWrite()
+	// Invalidate and rebuild the node vulnerability metrics cache. The old
+	// cache continues to serve until the rebuild completes (~20s on NFS).
+	go db.rebuildNodeVulnCache()
 	return nil
 }
 
@@ -1503,55 +1506,77 @@ func (db *DB) GetNodeVulnerabilitiesForMetrics() ([]NodeVulnerabilityForMetrics,
 	return result, nil
 }
 
-// StreamNodeVulnerabilitiesForMetrics iterates over all node vulnerabilities for metrics,
-// calling the callback for each row. This avoids loading all data into memory, which is
-// critical for large datasets (e.g., 174,000+ vulnerabilities across multiple nodes).
+// StreamNodeVulnerabilitiesForMetrics iterates over all node vulnerabilities for
+// metrics. On a warm cache (populated after the first node scan completes) it
+// serves entirely from memory with no DB I/O. On a cold start it falls back to
+// a direct DB read and simultaneously triggers an async cache rebuild so that
+// subsequent calls hit the fast path.
 func (db *DB) StreamNodeVulnerabilitiesForMetrics(callback func(v NodeVulnerabilityForMetrics) error) error {
-	return trackRead("stream_node_vulnerabilities", func() error {
-		rows, err := db.conn.Query(`
-			SELECT
-				n.name,
-				COALESCE(n.hostname, '') as hostname,
-				COALESCE(n.os_release, '') as os_release,
-				COALESCE(n.kernel_version, '') as kernel_version,
-				COALESCE(n.architecture, '') as architecture,
-				nv.id as vuln_id,
-				nv.cve_id,
-				COALESCE(nv.severity, 'Unknown') as severity,
-				COALESCE(nv.risk, 0) as risk,
-				COALESCE(nv.fix_status, 'unknown') as fix_status,
-				COALESCE(nv.fix_version, '') as fix_version,
-				COALESCE(nv.known_exploited, 0) as known_exploited,
-				nv.package_name,
-				nv.package_version,
-				COALESCE(nv.package_type, '') as package_type,
-				COALESCE(nv.count, 1) as count
-			FROM node_vulnerabilities nv
-			JOIN nodes n ON nv.node_id = n.id
-			WHERE n.status = 'completed'
-		`)
-		if err != nil {
-			return fmt.Errorf("failed to query node vulnerabilities for metrics: %w", err)
-		}
-		defer func() { _ = rows.Close() }()
+	db.cachesMu.RLock()
+	cached := db.nodeVulnRows
+	db.cachesMu.RUnlock()
 
-		for rows.Next() {
-			var v NodeVulnerabilityForMetrics
-			err := rows.Scan(
-				&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
-				&v.VulnID, &v.CVEID, &v.Severity, &v.Risk, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
-				&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to scan node vulnerability row: %w", err)
-			}
+	if cached != nil {
+		for _, v := range cached {
 			if err := callback(v); err != nil {
 				return err
 			}
 		}
+		return nil
+	}
 
-		return rows.Err()
+	// Cold path: cache not yet built. Read directly from DB and schedule a
+	// background rebuild so the next call hits the fast path.
+	go db.rebuildNodeVulnCache()
+	return trackRead("stream_node_vulnerabilities", func() error {
+		return db.readNodeVulnsFromDB(callback)
 	})
+}
+
+// readNodeVulnsFromDB is the raw DB read used by both the cold path of
+// StreamNodeVulnerabilitiesForMetrics and rebuildNodeVulnCache.
+func (db *DB) readNodeVulnsFromDB(callback func(v NodeVulnerabilityForMetrics) error) error {
+	rows, err := db.conn.Query(`
+		SELECT
+			n.name,
+			COALESCE(n.hostname, '') as hostname,
+			COALESCE(n.os_release, '') as os_release,
+			COALESCE(n.kernel_version, '') as kernel_version,
+			COALESCE(n.architecture, '') as architecture,
+			nv.id as vuln_id,
+			nv.cve_id,
+			COALESCE(nv.severity, 'Unknown') as severity,
+			COALESCE(nv.risk, 0) as risk,
+			COALESCE(nv.fix_status, 'unknown') as fix_status,
+			COALESCE(nv.fix_version, '') as fix_version,
+			COALESCE(nv.known_exploited, 0) as known_exploited,
+			nv.package_name,
+			nv.package_version,
+			COALESCE(nv.package_type, '') as package_type,
+			COALESCE(nv.count, 1) as count
+		FROM node_vulnerabilities nv
+		JOIN nodes n ON nv.node_id = n.id
+		WHERE n.status = 'completed'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query node vulnerabilities for metrics: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var v NodeVulnerabilityForMetrics
+		if err := rows.Scan(
+			&v.NodeName, &v.Hostname, &v.OSRelease, &v.KernelVersion, &v.Architecture,
+			&v.VulnID, &v.CVEID, &v.Severity, &v.Risk, &v.FixStatus, &v.FixVersion, &v.KnownExploited,
+			&v.PackageName, &v.PackageVersion, &v.PackageType, &v.Count,
+		); err != nil {
+			return fmt.Errorf("failed to scan node vulnerability row: %w", err)
+		}
+		if err := callback(v); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // GetScannedNodes retrieves all completed nodes for the bjorn2scan_node_scanned metric
