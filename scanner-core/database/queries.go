@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 )
@@ -521,6 +522,20 @@ type StalenessRow struct {
 	FamilyName    string // Prometheus metric family name (e.g. "bjorn2scan_image_vulnerability")
 	LabelsJSON    string // JSON-encoded label map, used to reconstruct NaN lines for stale metrics
 	ExpiresAtUnix *int64 // nil = active; non-nil = expiry timestamp (set when metric disappears)
+	KeyHash       uint64 // FNV-1a 64-bit of MetricKey; PRIMARY KEY in metric_staleness; computed lazily by HashMetricKey
+}
+
+// HashMetricKey returns a deterministic 64-bit hash of the metric key. It is used
+// as the PRIMARY KEY in the metric_staleness table so that the in-memory diff
+// cache can store ~9MB of map[uint64]int64 instead of ~200MB of full keys.
+// FNV-1a is deterministic across processes (no per-run seed) and has good
+// distribution. Collision probability at 371k keys is ~7.5×10⁻⁶, acceptable for
+// non-adversarial bookkeeping where a collision would cost at most one cycle of
+// incorrect staleness signaling.
+func HashMetricKey(key string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(key))
+	return h.Sum64()
 }
 
 // StreamScannedContainers calls callback for each completed container scan row.
@@ -573,73 +588,97 @@ func (db *DB) StreamScannedContainers(callback func(ScannedContainer) error) err
 	})
 }
 
-// StreamContainerVulnerabilities calls callback for each vulnerability in a running container.
-// This is the streaming variant of GetContainerVulnerabilities, used for memory-efficient metrics generation.
+// StreamContainerVulnerabilities calls callback for each vulnerability in a running
+// container. On a warm cache it serves entirely from memory with no DB I/O. On a
+// cold start it falls back to a direct DB read and triggers an async cache rebuild
+// so that subsequent calls hit the fast path.
 func (db *DB) StreamContainerVulnerabilities(callback func(ContainerVulnerability) error) error {
-	return trackRead("stream_container_vulnerabilities", func() error {
-		rows, err := db.conn.Query(`
-			SELECT
-				v.id,
-				c.namespace,
-				c.pod,
-				c.name,
-				c.node_name,
-				c.reference,
-				img.digest,
-				COALESCE(img.os_name, '') as os_name,
-				v.cve_id,
-				COALESCE(v.package_name, '') as package_name,
-				COALESCE(v.package_version, '') as package_version,
-				COALESCE(v.severity, '') as severity,
-				COALESCE(v.fix_status, '') as fix_status,
-				COALESCE(v.fixed_version, '') as fixed_version,
-				v.count,
-				v.known_exploited,
-				v.risk
-			FROM containers c
-			JOIN images img ON c.image_id = img.id
-			JOIN image_vulnerabilities v ON img.id = v.image_id
-			WHERE img.status = 'completed'
-			ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
-		`)
-		if err != nil {
-			return fmt.Errorf("failed to query container vulnerabilities: %w", err)
-		}
-		defer func() {
-			if err := rows.Close(); err != nil {
-				log.Warn("failed to close rows", "error", err)
-			}
-		}()
+	db.cachesMu.RLock()
+	cached := db.containerVulnRows
+	db.cachesMu.RUnlock()
 
-		for rows.Next() {
-			var cv ContainerVulnerability
-			if err := rows.Scan(
-				&cv.VulnID,
-				&cv.Namespace,
-				&cv.Pod,
-				&cv.Name,
-				&cv.NodeName,
-				&cv.Reference,
-				&cv.Digest,
-				&cv.OSName,
-				&cv.CVEID,
-				&cv.PackageName,
-				&cv.PackageVersion,
-				&cv.Severity,
-				&cv.FixStatus,
-				&cv.FixedVersion,
-				&cv.Count,
-				&cv.KnownExploited,
-				&cv.Risk,
-			); err != nil {
-				return fmt.Errorf("failed to scan container vulnerability row: %w", err)
-			}
-			if err := callback(cv); err != nil {
+	if cached != nil {
+		for _, v := range cached {
+			if err := callback(v); err != nil {
 				return err
 			}
 		}
-		return rows.Err()
+		return nil
+	}
+
+	// Cold path: cache not yet built. Read directly from DB and schedule a
+	// background rebuild so the next call hits the fast path.
+	go db.rebuildContainerVulnCache()
+	return trackRead("stream_container_vulnerabilities", func() error {
+		return db.readContainerVulnsFromDB(callback)
 	})
+}
+
+// readContainerVulnsFromDB is the raw DB read used by both the cold path of
+// StreamContainerVulnerabilities and rebuildContainerVulnCache.
+func (db *DB) readContainerVulnsFromDB(callback func(ContainerVulnerability) error) error {
+	rows, err := db.conn.Query(`
+		SELECT
+			v.id,
+			c.namespace,
+			c.pod,
+			c.name,
+			c.node_name,
+			c.reference,
+			img.digest,
+			COALESCE(img.os_name, '') as os_name,
+			v.cve_id,
+			COALESCE(v.package_name, '') as package_name,
+			COALESCE(v.package_version, '') as package_version,
+			COALESCE(v.severity, '') as severity,
+			COALESCE(v.fix_status, '') as fix_status,
+			COALESCE(v.fixed_version, '') as fixed_version,
+			v.count,
+			v.known_exploited,
+			v.risk
+		FROM containers c
+		JOIN images img ON c.image_id = img.id
+		JOIN image_vulnerabilities v ON img.id = v.image_id
+		WHERE img.status = 'completed'
+		ORDER BY c.namespace, c.pod, c.name, v.severity, v.cve_id
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query container vulnerabilities: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Warn("failed to close rows", "error", err)
+		}
+	}()
+
+	for rows.Next() {
+		var cv ContainerVulnerability
+		if err := rows.Scan(
+			&cv.VulnID,
+			&cv.Namespace,
+			&cv.Pod,
+			&cv.Name,
+			&cv.NodeName,
+			&cv.Reference,
+			&cv.Digest,
+			&cv.OSName,
+			&cv.CVEID,
+			&cv.PackageName,
+			&cv.PackageVersion,
+			&cv.Severity,
+			&cv.FixStatus,
+			&cv.FixedVersion,
+			&cv.Count,
+			&cv.KnownExploited,
+			&cv.Risk,
+		); err != nil {
+			return fmt.Errorf("failed to scan container vulnerability row: %w", err)
+		}
+		if err := callback(cv); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // QueryStaleness returns rows in the stale grace period: expires_at_unix is set and
@@ -673,48 +712,51 @@ func (db *DB) QueryStaleness(cycleStart int64) ([]StalenessRow, error) {
 	return result, rows.Err()
 }
 
-// LoadStalenessState returns all non-expired rows: active (expires_at_unix IS NULL) and
-// stale-in-window (expires_at_unix > cycleStart). Used by StalenessStore.ApplyDiff to
-// compute the diff between the previous and current collection cycle.
-func (db *DB) LoadStalenessState(cycleStart int64) ([]StalenessRow, error) {
-	rows, err := db.conn.Query(`
-		SELECT metric_key, family_name, labels_json, expires_at_unix
-		FROM metric_staleness
-		WHERE expires_at_unix IS NULL OR expires_at_unix > ?
-	`, cycleStart)
+// HydrateStalenessState reads (key_hash, expires_at_unix) for every row in the
+// metric_staleness table. Called once at StalenessStore construction so that
+// subsequent ApplyDiff cycles can compute their diff against an in-memory map
+// instead of re-reading the entire table on every collection. Returns a fresh
+// map keyed by FNV-64a hash of metric_key with value 0 for active rows or the
+// expiry timestamp for stale-but-still-in-grace rows.
+func (db *DB) HydrateStalenessState() (map[uint64]int64, error) {
+	rows, err := db.conn.Query(`SELECT key_hash, expires_at_unix FROM metric_staleness`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load staleness state: %w", err)
+		return nil, fmt.Errorf("failed to hydrate staleness state: %w", err)
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Warn("failed to close staleness state rows", "error", err)
+			log.Warn("failed to close hydrate rows", "error", err)
 		}
 	}()
 
-	var result []StalenessRow
+	state := make(map[uint64]int64, 1024)
 	for rows.Next() {
-		var r StalenessRow
+		var hash int64
 		var expiresAt sql.NullInt64
-		if err := rows.Scan(&r.MetricKey, &r.FamilyName, &r.LabelsJSON, &expiresAt); err != nil {
-			return nil, fmt.Errorf("failed to scan staleness state row: %w", err)
+		if err := rows.Scan(&hash, &expiresAt); err != nil {
+			return nil, fmt.Errorf("failed to scan hydrate row: %w", err)
 		}
 		if expiresAt.Valid {
-			r.ExpiresAtUnix = &expiresAt.Int64
+			state[uint64(hash)] = expiresAt.Int64
+		} else {
+			state[uint64(hash)] = 0 // active sentinel
 		}
-		result = append(result, r)
 	}
-	return result, rows.Err()
+	return state, rows.Err()
 }
 
-// InsertNewMetrics inserts metric rows that are new to the staleness table.
-// Uses INSERT OR IGNORE so re-inserts for already-tracked metrics are no-ops.
-// expires_at_unix is set to NULL (active) for all inserted rows.
-func (db *DB) InsertNewMetrics(batch []StalenessRow) error {
-	if len(batch) == 0 {
+// ApplyStalenessChanges commits the staleness diff in a single transaction.
+// toUpsert covers both newly-seen metrics and previously-stale metrics that
+// reappeared (UPSERT collapses the two cases). toStale lists key hashes for
+// metrics that disappeared and now need an expiry timestamp set so Prometheus
+// receives a final NaN marker. Either or both may be empty; the caller is
+// responsible for skipping the call when nothing changed.
+func (db *DB) ApplyStalenessChanges(toUpsert []StalenessRow, toStale []uint64, expiresAtUnix int64) error {
+	if len(toUpsert) == 0 && len(toStale) == 0 {
 		return nil
 	}
 
-	done := db.beginWrite("insert_new_metrics")
+	done := db.beginWrite("apply_staleness_diff")
 	defer done()
 
 	tx, err := db.conn.Begin()
@@ -724,116 +766,68 @@ func (db *DB) InsertNewMetrics(batch []StalenessRow) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// 3 params per row (metric_key, family_name, labels_json); expires_at_unix is literal NULL.
-	const chunkSize = 250
-	for start := 0; start < len(batch); start += chunkSize {
-		end := start + chunkSize
-		if end > len(batch) {
-			end = len(batch)
-		}
-		chunk := batch[start:end]
+	// UPSERT new and reactivated rows. ON CONFLICT(key_hash) handles both
+	// "previously stale, now active" (UPDATE expires_at_unix=NULL) and
+	// "metadata refreshed" (rare; labels_json/family/key shouldn't drift but
+	// the UPSERT keeps the row consistent if they do).
+	if len(toUpsert) > 0 {
+		const cols = 4
+		const chunkSize = 200 // 200 × 4 = 800 params, well under SQLite's 999 default
+		for start := 0; start < len(toUpsert); start += chunkSize {
+			end := start + chunkSize
+			if end > len(toUpsert) {
+				end = len(toUpsert)
+			}
+			chunk := toUpsert[start:end]
 
-		args := make([]any, 0, len(chunk)*3)
-		placeholders := make([]string, 0, len(chunk))
-		for _, r := range chunk {
-			placeholders = append(placeholders, "(?,?,?,NULL)")
-			args = append(args, r.MetricKey, r.FamilyName, r.LabelsJSON)
-		}
+			args := make([]any, 0, len(chunk)*cols)
+			placeholders := make([]string, 0, len(chunk))
+			for _, r := range chunk {
+				placeholders = append(placeholders, "(?,?,?,?)")
+				args = append(args, int64(r.KeyHash), r.MetricKey, r.FamilyName, r.LabelsJSON)
+			}
 
-		query := "INSERT OR IGNORE INTO metric_staleness (metric_key, family_name, labels_json, expires_at_unix) VALUES " +
-			strings.Join(placeholders, ",")
-		if _, err := tx.Exec(query, args...); err != nil {
-			exitOnCorruption(err)
-			return fmt.Errorf("failed to insert new metrics: %w", err)
+			query := "INSERT INTO metric_staleness (key_hash, metric_key, family_name, labels_json) VALUES " +
+				strings.Join(placeholders, ",") +
+				" ON CONFLICT(key_hash) DO UPDATE SET expires_at_unix=NULL, metric_key=excluded.metric_key, family_name=excluded.family_name, labels_json=excluded.labels_json"
+			if _, err := tx.Exec(query, args...); err != nil {
+				exitOnCorruption(err)
+				return fmt.Errorf("failed to upsert staleness rows: %w", err)
+			}
 		}
 	}
+
+	// Mark disappeared rows as stale. WHERE key_hash IN (...) is fast on the
+	// PRIMARY KEY index — no full table scan, no metric_key string comparisons.
+	if len(toStale) > 0 {
+		const chunkSize = 500
+		for start := 0; start < len(toStale); start += chunkSize {
+			end := start + chunkSize
+			if end > len(toStale) {
+				end = len(toStale)
+			}
+			chunk := toStale[start:end]
+
+			args := make([]any, 0, 1+len(chunk))
+			args = append(args, expiresAtUnix)
+			placeholders := make([]string, len(chunk))
+			for i, h := range chunk {
+				placeholders[i] = "?"
+				args = append(args, int64(h))
+			}
+
+			query := "UPDATE metric_staleness SET expires_at_unix = ? WHERE key_hash IN (" +
+				strings.Join(placeholders, ",") + ")"
+			if _, err := tx.Exec(query, args...); err != nil {
+				exitOnCorruption(err)
+				return fmt.Errorf("failed to mark staleness rows stale: %w", err)
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		exitOnCorruption(err)
-		return err
-	}
-	return nil
-}
-
-// MarkMetricsStale sets expires_at_unix on the given metric keys to signal they have
-// disappeared. Called once per disappeared metric; not called on subsequent cycles.
-func (db *DB) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
-	if len(keys) == 0 {
-		return nil
-	}
-
-	done := db.beginWrite("mark_metrics_stale")
-	defer done()
-
-	// Wrap all chunks in one transaction — one WAL flush instead of N.
-	tx, err := db.conn.Begin()
-	if err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// 1 param for expires_at_unix + 1 per key; chunk at 500 keys.
-	const chunkSize = 500
-	for start := 0; start < len(keys); start += chunkSize {
-		end := start + chunkSize
-		if end > len(keys) {
-			end = len(keys)
-		}
-		chunk := keys[start:end]
-
-		args := make([]any, 0, 1+len(chunk))
-		args = append(args, expiresAtUnix)
-		placeholders := make([]string, len(chunk))
-		for i, k := range chunk {
-			placeholders[i] = "?"
-			args = append(args, k)
-		}
-
-		query := "UPDATE metric_staleness SET expires_at_unix = ? WHERE metric_key IN (" +
-			strings.Join(placeholders, ",") + ")"
-		if _, err := tx.Exec(query, args...); err != nil {
-			exitOnCorruption(err)
-			return fmt.Errorf("failed to mark metrics stale: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		exitOnCorruption(err)
-		return fmt.Errorf("failed to commit mark_metrics_stale: %w", err)
-	}
-	return nil
-}
-
-// MarkMetricsActive clears expires_at_unix for metrics that have reappeared after being
-// marked stale. Called once per reappeared metric; not called for already-active metrics.
-func (db *DB) MarkMetricsActive(keys []string) error {
-	if len(keys) == 0 {
-		return nil
-	}
-
-	done := db.beginWrite("mark_metrics_active")
-	defer done()
-
-	const chunkSize = 900
-	for start := 0; start < len(keys); start += chunkSize {
-		end := start + chunkSize
-		if end > len(keys) {
-			end = len(keys)
-		}
-		chunk := keys[start:end]
-
-		args := make([]any, len(chunk))
-		placeholders := make([]string, len(chunk))
-		for i, k := range chunk {
-			placeholders[i] = "?"
-			args[i] = k
-		}
-
-		query := "UPDATE metric_staleness SET expires_at_unix = NULL WHERE metric_key IN (" +
-			strings.Join(placeholders, ",") + ")"
-		if _, err := db.conn.Exec(query, args...); err != nil {
-			exitOnCorruption(err)
-			return fmt.Errorf("failed to mark metrics active: %w", err)
-		}
+		return fmt.Errorf("failed to commit apply_staleness_diff: %w", err)
 	}
 	return nil
 }

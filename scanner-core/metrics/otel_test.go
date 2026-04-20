@@ -231,13 +231,11 @@ func TestRecordMetrics_NaNForStaleMetrics(t *testing.T) {
 	provider := newMockStreamingProvider()
 	// Pre-seed a stale row with a future expiry so QueryStaleness returns it.
 	futureExpiry := time.Now().Add(1 * time.Hour).Unix()
-	staleRow := database.StalenessRow{
-		MetricKey:     "bjorn2scan_deployment|deployment_name=old-cluster|deployment_uuid=old-uuid",
-		FamilyName:    "bjorn2scan_deployment",
-		LabelsJSON:    `{"deployment_name":"old-cluster","deployment_uuid":"old-uuid"}`,
-		ExpiresAtUnix: &futureExpiry,
-	}
-	provider.stalenessDB.rows = []database.StalenessRow{staleRow}
+	withHydratedRow(provider.stalenessDB,
+		"bjorn2scan_deployment|deployment_name=old-cluster|deployment_uuid=old-uuid",
+		"bjorn2scan_deployment",
+		`{"deployment_name":"old-cluster","deployment_uuid":"old-uuid"}`,
+		&futureExpiry)
 
 	config := UnifiedConfig{DeploymentEnabled: true}
 	e, mock := makeTestOTELExporter(t, provider, defaultOTELConfig(), config)

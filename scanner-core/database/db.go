@@ -38,6 +38,14 @@ type DB struct {
 	// nil = cold (not yet built or invalidated); non-nil = ready to serve.
 	nodeVulnRows     []NodeVulnerabilityForMetrics
 	nodeVulnBuilding atomic.Bool // true while a rebuild is in progress
+
+	// containerVulnRows caches the full container × image_vulnerabilities join used
+	// by the bjorn2scan_image_vulnerability* metric families. Rebuilt asynchronously
+	// after StoreImageVulnerabilities, SetContainers, CleanupOrphanedImages and on a
+	// 30-minute TTL safety net. add_container/remove_container do NOT trigger rebuilds
+	// (too frequent: ~5k/5d on kubeadm); the TTL bounds staleness instead.
+	containerVulnRows     []ContainerVulnerability
+	containerVulnBuilding atomic.Bool
 }
 
 // StartNodeVulnCacheRefresh warms the node vulnerability cache immediately and
@@ -84,6 +92,52 @@ func (db *DB) rebuildNodeVulnCache() {
 	db.nodeVulnRows = rows
 	db.cachesMu.Unlock()
 	log.Debug("node vuln cache rebuilt", "rows", len(rows), "duration", time.Since(start).Round(time.Millisecond))
+}
+
+// StartContainerVulnCacheRefresh warms the container vulnerability cache immediately
+// and refreshes it every 30 minutes as a safety net. Should be called once at
+// startup, after the database is initialised. The primary invalidation paths are
+// StoreImageVulnerabilities, SetContainers, and CleanupOrphanedImages.
+func (db *DB) StartContainerVulnCacheRefresh(ctx context.Context) {
+	go func() {
+		db.rebuildContainerVulnCache()
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				db.rebuildContainerVulnCache()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// rebuildContainerVulnCache reads all container × image_vulnerability rows from
+// the DB and atomically replaces the in-memory cache. The old cache continues to
+// serve callers until the rebuild completes. CompareAndSwap prevents concurrent
+// rebuilds from stacking up.
+func (db *DB) rebuildContainerVulnCache() {
+	if !db.containerVulnBuilding.CompareAndSwap(false, true) {
+		return // rebuild already in progress
+	}
+	defer db.containerVulnBuilding.Store(false)
+
+	start := time.Now()
+	rows := make([]ContainerVulnerability, 0, 10000)
+	if err := db.readContainerVulnsFromDB(func(v ContainerVulnerability) error {
+		rows = append(rows, v)
+		return nil
+	}); err != nil {
+		log.Error("container vuln cache rebuild failed", slog.Any("error", err))
+		return
+	}
+
+	db.cachesMu.Lock()
+	db.containerVulnRows = rows
+	db.cachesMu.Unlock()
+	log.Debug("container vuln cache rebuilt", "rows", len(rows), "duration", time.Since(start).Round(time.Millisecond))
 }
 
 // notifyWrite updates the in-memory last-updated signature and invalidates

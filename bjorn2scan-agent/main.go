@@ -369,6 +369,8 @@ func main() {
 
 	// Warm the node vulnerability metrics cache so /metrics scrapes don't hit disk.
 	db.StartNodeVulnCacheRefresh(ctx)
+	// Same for the container × image_vulnerability join.
+	db.StartContainerVulnCacheRefresh(ctx)
 
 	// Configure host scanning if enabled
 	if cfg.HostScanningEnabled {

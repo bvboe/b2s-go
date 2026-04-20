@@ -97,20 +97,12 @@ func (m *MockStreamingProvider) QueryStaleness(cycleStart int64) ([]database.Sta
 	return m.stalenessDB.QueryStaleness(cycleStart)
 }
 
-func (m *MockStreamingProvider) LoadStalenessState(cycleStart int64) ([]database.StalenessRow, error) {
-	return m.stalenessDB.LoadStalenessState(cycleStart)
+func (m *MockStreamingProvider) HydrateStalenessState() (map[uint64]int64, error) {
+	return m.stalenessDB.HydrateStalenessState()
 }
 
-func (m *MockStreamingProvider) InsertNewMetrics(batch []database.StalenessRow) error {
-	return m.stalenessDB.InsertNewMetrics(batch)
-}
-
-func (m *MockStreamingProvider) MarkMetricsStale(keys []string, expiresAtUnix int64) error {
-	return m.stalenessDB.MarkMetricsStale(keys, expiresAtUnix)
-}
-
-func (m *MockStreamingProvider) MarkMetricsActive(keys []string) error {
-	return m.stalenessDB.MarkMetricsActive(keys)
+func (m *MockStreamingProvider) ApplyStalenessChanges(toUpsert []database.StalenessRow, toStale []uint64, expiresAtUnix int64) error {
+	return m.stalenessDB.ApplyStalenessChanges(toUpsert, toStale, expiresAtUnix)
 }
 
 func (m *MockStreamingProvider) DeleteExpiredStaleness(expireBefore int64) error {
@@ -339,8 +331,8 @@ func TestStreamMetrics_StalenessTracking(t *testing.T) {
 		t.Fatalf("ApplyDiff failed: %v", err)
 	}
 
-	// Verify new metrics were inserted (first cycle — nothing in DB yet)
-	if len(provider.stalenessDB.inserts) == 0 {
-		t.Error("Expected new metrics to be inserted after ApplyDiff")
+	// Verify new metrics were upserted (first cycle — nothing in DB yet)
+	if len(provider.stalenessDB.upserts) == 0 {
+		t.Error("Expected new metrics to be upserted after ApplyDiff")
 	}
 }

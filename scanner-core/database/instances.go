@@ -242,6 +242,8 @@ func (db *DB) SetContainers(containerList []containers.Container) (*containers.R
 	log.Info("reconciliation complete",
 		"added", stats.ContainersAdded, "removed", stats.ContainersRemoved, "new_images", stats.ImagesAdded)
 	db.notifyWrite()
+	// Invalidate and rebuild the container vulnerability metrics cache.
+	go db.rebuildContainerVulnCache()
 	return stats, nil
 }
 
@@ -590,6 +592,9 @@ func (db *DB) CleanupOrphanedImages() (*CleanupStats, error) {
 		"image_package_details_removed", stats.PackageDetailsRemoved,
 		"vulnerabilities_removed", stats.VulnerabilitiesRemoved,
 		"image_vulnerability_details_removed", stats.VulnerabilityDetailsRemoved)
+
+	// Invalidate and rebuild the container vulnerability metrics cache.
+	go db.rebuildContainerVulnCache()
 
 	return stats, nil
 }

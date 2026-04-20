@@ -250,6 +250,11 @@ var migrations = []migration{
 		name:    "add_compressed_blob_columns",
 		up:      migrateToV47,
 	},
+	{
+		version: 48,
+		name:    "metric_staleness_key_hash",
+		up:      migrateToV48,
+	},
 }
 
 // ensureSchemaVersion checks the current schema version and applies necessary migrations
@@ -2818,5 +2823,36 @@ func migrateToV46(conn *sql.DB) error {
 	log.Info("migration v46: orphaned node detail rows deleted",
 		"node_vulnerability_details", vulnRows,
 		"node_package_details", pkgRows)
+	return nil
+}
+
+// migrateToV48 recreates metric_staleness with a key_hash column. The hash is a
+// stable FNV-1a 64-bit digest of metric_key, used as the lookup key so the
+// in-memory diff cache can be a compact map[uint64]int64 (~9MB at 371k rows)
+// instead of carrying the ~500-byte composite key per entry (~200MB).
+//
+// The table is dropped rather than altered+backfilled. Staleness rows are
+// non-critical metadata: missing them for one collection cycle means a metric
+// that disappeared during the upgrade window won't get a final NaN marker in
+// Prometheus — Prometheus's own staleness handling covers the gap. Avoiding the
+// per-row UPDATE backfill keeps this migration fast on slow NFS storage.
+func migrateToV48(conn *sql.DB) error {
+	log.Info("migration v48: recreating metric_staleness with key_hash column")
+	_, err := conn.Exec(`
+		DROP TABLE IF EXISTS metric_staleness;
+		CREATE TABLE metric_staleness (
+			key_hash        INTEGER PRIMARY KEY,
+			metric_key      TEXT NOT NULL,
+			family_name     TEXT NOT NULL,
+			labels_json     TEXT NOT NULL,
+			expires_at_unix INTEGER
+		);
+		CREATE INDEX idx_metric_staleness_expires
+			ON metric_staleness(expires_at_unix) WHERE expires_at_unix IS NOT NULL;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to recreate metric_staleness with key_hash: %w", err)
+	}
+	log.Info("migration v48: metric_staleness recreated; rows will be repopulated on next collection cycle")
 	return nil
 }

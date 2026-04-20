@@ -54,11 +54,11 @@ type StreamingProvider interface {
 	// Node data
 	GetScannedNodes() ([]nodes.NodeWithStatus, error)
 	StreamNodeVulnerabilitiesForMetrics(func(database.NodeVulnerabilityForMetrics) error) error
-	// Staleness persistence (backed by the metric_staleness table, migration v37)
+	// Staleness persistence (backed by the metric_staleness table; key_hash schema added in v48).
+	// HydrateStalenessState is called once at StalenessStore construction; ApplyStalenessChanges
+	// commits each cycle's diff in a single transaction.
 	QueryStaleness(cycleStart int64) ([]database.StalenessRow, error)
-	LoadStalenessState(cycleStart int64) ([]database.StalenessRow, error)
-	InsertNewMetrics(batch []database.StalenessRow) error
-	MarkMetricsStale(keys []string, expiresAtUnix int64) error
-	MarkMetricsActive(keys []string) error
+	HydrateStalenessState() (map[uint64]int64, error)
+	ApplyStalenessChanges(toUpsert []database.StalenessRow, toStale []uint64, expiresAtUnix int64) error
 	DeleteExpiredStaleness(expireBefore int64) error
 }

@@ -513,6 +513,8 @@ func main() {
 
 	// Warm the node vulnerability metrics cache so /metrics scrapes don't hit NFS.
 	db.StartNodeVulnCacheRefresh(ctx)
+	// Same for the container × image_vulnerability join.
+	db.StartContainerVulnCacheRefresh(ctx)
 
 	mux := http.NewServeMux()
 

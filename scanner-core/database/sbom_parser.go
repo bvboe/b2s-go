@@ -500,6 +500,10 @@ func parseVulnerabilityData(db *DB, imageID int64, vulnJSON []byte) error {
 	}
 	done()
 
+	// Invalidate and rebuild the container vulnerability metrics cache. The old
+	// cache continues to serve until the rebuild completes.
+	go db.rebuildContainerVulnCache()
+
 	log.Info("parsed vulnerabilities",
 		"image_id", imageID, "unique_vulnerabilities", len(entries))
 	return nil
