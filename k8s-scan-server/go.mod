@@ -51,8 +51,8 @@ require (
 	github.com/anchore/go-struct-converter v0.1.0 // indirect
 	github.com/anchore/go-sync v0.1.0 // indirect
 	github.com/anchore/go-version v1.2.2-0.20210903204242-51efa5b487c4 // indirect
-	github.com/anchore/grype v0.110.0 // indirect
-	github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115 // indirect
+	github.com/anchore/grype v0.111.0 // indirect
+	github.com/anchore/packageurl-go v0.2.0 // indirect
 	github.com/anchore/stereoscope v0.1.22 // indirect
 	github.com/anchore/syft v1.42.4 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
@@ -156,7 +156,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-containerregistry v0.21.2 // indirect
+	github.com/google/go-containerregistry v0.21.3 // indirect
 	github.com/google/licensecheck v0.3.1 // indirect
 	github.com/google/pprof v0.0.0-20250630185457-6e76a2b096b5 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
