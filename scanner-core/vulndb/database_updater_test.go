@@ -443,7 +443,12 @@ func TestDatabaseUpdater_ShouldDetectChangeWhenLoaderReturnsStale(t *testing.T) 
 //
 // This reproduces the production failure where K8s pods have a persistent NFS volume
 // with yesterday's grype DB, and today's new DB listing has no compatible delta update.
-func TestDatabaseUpdater_IncrementalUpdateFails_RetriesWithFullDownload(t *testing.T) {
+// TestDatabaseUpdater_LoaderError_OnDiskFresh_AcceptsIt covers the regression
+// fix: grype's loader can return errors (e.g. its post-update validateAge in
+// Status() returning a stale timestamp) AFTER successfully downloading and
+// activating a fresh DB. We must trust the on-disk file rather than treating
+// the loader's error as fatal.
+func TestDatabaseUpdater_LoaderError_OnDiskFresh_AcceptsIt(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	du, err := NewDatabaseUpdater(tmpDir)
@@ -451,71 +456,53 @@ func TestDatabaseUpdater_IncrementalUpdateFails_RetriesWithFullDownload(t *testi
 		t.Fatalf("NewDatabaseUpdater failed: %v", err)
 	}
 
-	// Create a fake existing DB file so dbExisted=true
+	// Pretend the loader downloaded a fresh DB but still returned an error.
 	schemaDir := filepath.Join(tmpDir, "grype", "6")
 	dbPath := filepath.Join(schemaDir, "vulnerability.db")
-	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+	if err := os.MkdirAll(schemaDir, 0o755); err != nil {
 		t.Fatalf("failed to create schema dir: %v", err)
 	}
-	if err := os.WriteFile(dbPath, []byte("old db"), 0644); err != nil {
-		t.Fatalf("failed to create existing db: %v", err)
+	if err := os.WriteFile(dbPath, []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("failed to create db file: %v", err)
 	}
 
-	newTimestamp := time.Date(2026, 3, 25, 6, 33, 34, 0, time.UTC)
+	freshTimestamp := time.Now().UTC().Add(-1 * time.Hour) // fresh, < 5 days
 
 	calls := 0
 	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
 		calls++
-		if calls == 1 {
-			// First call: incremental update=true fails (simulates today's grype DB incompatibility)
-			if !update {
-				t.Error("first call should use update=true")
-			}
-			return nil, fmt.Errorf("database does not exist")
-		}
-		// Second call: full download update=false should succeed
-		if update {
-			t.Error("retry call should use update=false")
-		}
-		return &DatabaseStatus{
-			Built:         newTimestamp,
-			SchemaVersion: "v6.1.3",
-			Path:          dbPath,
-		}, nil
+		return nil, fmt.Errorf("the vulnerability database was built 1 week ago (max allowed age is 5 days)")
 	})
-
 	du.SetDescriptionReader(func(path string) (time.Time, error) {
-		return newTimestamp, nil
+		return freshTimestamp, nil
 	})
 
 	_, err = du.CheckForUpdates(context.Background())
 	if err != nil {
-		t.Fatalf("CheckForUpdates should succeed after retry, got: %v", err)
+		t.Fatalf("CheckForUpdates should accept fresh on-disk DB despite loader error, got: %v", err)
 	}
 
-	if calls != 2 {
-		t.Errorf("expected 2 loader calls (update attempt + retry), got %d", calls)
+	if calls != 1 {
+		t.Errorf("expected exactly 1 loader call (no retry), got %d", calls)
 	}
 
-	// Schema dir should have been deleted before the retry
-	// (it won't exist because the retry loader doesn't recreate it in this mock)
-	if _, err := os.Stat(schemaDir); !os.IsNotExist(err) {
-		t.Log("schema dir still present after retry (ok if retry recreated it)")
+	// Schema dir must still exist — we no longer delete it on loader error.
+	if _, err := os.Stat(schemaDir); err != nil {
+		t.Errorf("schema dir was removed; on loader error we must trust the on-disk DB, not delete it: %v", err)
 	}
 
 	version := du.GetCurrentVersion()
 	if version == nil {
-		t.Fatal("version should be set after successful retry")
+		t.Fatal("version should be set after accepting on-disk DB")
 	}
-	if !version.Built.Equal(newTimestamp) {
-		t.Errorf("expected built %v, got %v", newTimestamp, version.Built)
+	if !version.Built.Equal(freshTimestamp) {
+		t.Errorf("expected built %v (from disk), got %v", freshTimestamp, version.Built)
 	}
 }
 
-// TestDatabaseUpdater_IncrementalUpdateFails_NoRetryWithoutExistingDB tests that when
-// there is no existing database and the download fails, the error is returned immediately
-// without a retry (nothing to clean up, retry would be identical).
-func TestDatabaseUpdater_IncrementalUpdateFails_NoRetryWithoutExistingDB(t *testing.T) {
+// TestDatabaseUpdater_LoaderError_NoOnDiskDB_Fails covers the case where the
+// loader fails and there's nothing usable on disk — that's a real error.
+func TestDatabaseUpdater_LoaderError_NoOnDiskDB_Fails(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	du, err := NewDatabaseUpdater(tmpDir)
@@ -528,49 +515,17 @@ func TestDatabaseUpdater_IncrementalUpdateFails_NoRetryWithoutExistingDB(t *test
 		calls++
 		return nil, fmt.Errorf("network error")
 	})
-
-	_, err = du.CheckForUpdates(context.Background())
-	if err == nil {
-		t.Error("expected error when download fails with no existing DB")
-	}
-
-	if calls != 1 {
-		t.Errorf("expected exactly 1 loader call (no retry without existing DB), got %d", calls)
-	}
-}
-
-// TestDatabaseUpdater_IncrementalUpdateFails_RetryAlsoFails tests that when the retry
-// full download also fails, the error from the retry is returned.
-func TestDatabaseUpdater_IncrementalUpdateFails_RetryAlsoFails(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	du, err := NewDatabaseUpdater(tmpDir)
-	if err != nil {
-		t.Fatalf("NewDatabaseUpdater failed: %v", err)
-	}
-
-	// Create existing DB so retry path is triggered
-	schemaDir := filepath.Join(tmpDir, "grype", "6")
-	if err := os.MkdirAll(schemaDir, 0755); err != nil {
-		t.Fatalf("failed to create schema dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(schemaDir, "vulnerability.db"), []byte("old db"), 0644); err != nil {
-		t.Fatalf("failed to create existing db: %v", err)
-	}
-
-	calls := 0
-	du.SetLoader(func(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
-		calls++
-		return nil, fmt.Errorf("download failed")
+	du.SetDescriptionReader(func(path string) (time.Time, error) {
+		return time.Time{}, fmt.Errorf("no DB on disk")
 	})
 
 	_, err = du.CheckForUpdates(context.Background())
 	if err == nil {
-		t.Error("expected error when both update and retry fail")
+		t.Error("expected error when both loader and on-disk read fail")
 	}
 
-	if calls != 2 {
-		t.Errorf("expected 2 loader calls (update + retry), got %d", calls)
+	if calls != 1 {
+		t.Errorf("expected exactly 1 loader call (no retry), got %d", calls)
 	}
 }
 

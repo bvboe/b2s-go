@@ -77,6 +77,26 @@ func readGrypeDBTimestampFromSQLite(dbPath string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
+// readOnDiskBuilt returns the build timestamp from the on-disk grype DB at
+// dbPath, preferring an injected descriptionReader (for tests), falling back to
+// a direct SQLite read, then to grype's v6.ReadDescription. Returns an error
+// only if all readers fail (e.g. the file is missing or unreadable).
+func (du *DatabaseUpdater) readOnDiskBuilt(dbPath string) (time.Time, error) {
+	if du.descriptionReader != nil {
+		return du.descriptionReader(dbPath)
+	}
+	if t, err := readGrypeDBTimestampFromSQLite(dbPath); err == nil {
+		return t, nil
+	} else {
+		log.Debug("direct SQLite read failed, falling back to v6.ReadDescription", "error", err)
+	}
+	desc, err := v6.ReadDescription(dbPath)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read on-disk DB description: %w", err)
+	}
+	return desc.Built.UTC(), nil
+}
+
 // defaultDatabaseLoader wraps grype.LoadVulnerabilityDB
 func defaultDatabaseLoader(distCfg distribution.Config, installCfg installation.Config, update bool) (*DatabaseStatus, error) {
 	_, dbStatus, err := grype.LoadVulnerabilityDB(distCfg, installCfg, update)
@@ -242,84 +262,50 @@ func (du *DatabaseUpdater) CheckForUpdates(ctx context.Context) (bool, error) {
 		}
 	}()
 
-	dbStatus, err := du.loader(du.distCfg, du.installCfg, true)
+	dbStatus, loaderErr := du.loader(du.distCfg, du.installCfg, true)
 	close(done)
 
-	if err != nil {
-		if !dbExisted {
-			return false, fmt.Errorf("failed to update vulnerability database: %w", err)
-		}
-		// Update failed with an existing database (e.g. grype DB schema changed and no
-		// compatible delta is available). Delete the existing DB and retry with a full download.
-		log.Warn("incremental update failed, deleting existing database and retrying with full download",
-			"error", err)
-		schemaDir := filepath.Join(du.dbRootDir, "grype", "6")
-		if removeErr := os.RemoveAll(schemaDir); removeErr != nil {
-			log.Warn("failed to remove schema directory before retry", "error", removeErr)
-		}
-		startTime = time.Now()
-		done2 := make(chan struct{})
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-done2:
-					return
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					log.Debug("still downloading database (retry)",
-						"elapsed", time.Since(startTime).Round(time.Second))
-				}
-			}
-		}()
-		dbStatus, err = du.loader(du.distCfg, du.installCfg, false)
-		close(done2)
-		if err != nil {
-			return false, fmt.Errorf("failed to download vulnerability database after retry: %w", err)
-		}
-		log.Info("full database download succeeded after incremental update failure")
+	// Trust the on-disk DB as the source of truth. grype's LoadVulnerabilityDB
+	// can return errors (e.g. its post-update validateAge in Status() returning a
+	// stale timestamp) AFTER successfully downloading and activating a fresh DB.
+	// Don't delete the schema dir on error — that throws away grype's good work.
+	// Instead, read the file on disk and accept it if it's usable.
+	actualBuilt, diskErr := du.readOnDiskBuilt(dbPath)
+
+	switch {
+	case loaderErr == nil && diskErr == nil:
+		// Both succeeded; prefer disk timestamp (it's the authoritative source).
+	case loaderErr == nil && diskErr != nil:
+		// Loader succeeded, disk read failed (e.g. unit test with mock path);
+		// fall back to the loader-reported timestamp.
+		log.Debug("on-disk read failed, falling back to loader timestamp", "error", diskErr)
+		actualBuilt = dbStatus.Built
+	case loaderErr != nil && diskErr == nil:
+		// Loader complained but the file on disk is readable. Trust the disk.
+		log.Warn("loader returned error but on-disk DB is readable, accepting it",
+			"error", loaderErr,
+			"actual_built", actualBuilt.Format(time.RFC3339))
+	default:
+		// Both failed — genuine failure.
+		return false, fmt.Errorf("failed to update vulnerability database: %w (also unable to read on-disk DB: %v)", loaderErr, diskErr)
 	}
 
-	log.Debug("loader returned",
-		"built", dbStatus.Built.Format(time.RFC3339),
+	if dbStatus == nil {
+		// Synthesise dbStatus from on-disk metadata when loader didn't produce one.
+		dbStatus = &DatabaseStatus{
+			Built: actualBuilt,
+			Path:  dbPath,
+		}
+	}
+
+	log.Debug("database loaded",
+		"loader_built", dbStatus.Built.Format(time.RFC3339),
+		"actual_built", actualBuilt.Format(time.RFC3339),
 		"schema", dbStatus.SchemaVersion,
 		"duration", time.Since(startTime).Round(time.Millisecond))
 
-	// 4. Read the actual database timestamp directly from SQLite
-	// This bypasses grype's library which may cache stale values
-	var actualBuilt time.Time
-	if du.descriptionReader != nil {
-		// Use injected reader (for testing)
-		if t, err := du.descriptionReader(dbPath); err == nil {
-			actualBuilt = t
-		} else {
-			log.Warn("description reader failed", "error", err)
-			actualBuilt = dbStatus.Built
-		}
-	} else {
-		// Read directly from SQLite - this is the authoritative source
-		if t, err := readGrypeDBTimestampFromSQLite(dbPath); err == nil {
-			actualBuilt = t
-			if !actualBuilt.Equal(dbStatus.Built) {
-				log.Debug("corrected timestamp",
-					"loader_timestamp", dbStatus.Built.Format(time.RFC3339),
-					"actual_timestamp", actualBuilt.Format(time.RFC3339))
-			}
-		} else {
-			log.Warn("failed to read timestamp from SQLite", "error", err)
-			// Fall back to v6.ReadDescription
-			if desc, err := v6.ReadDescription(dbPath); err == nil {
-				actualBuilt = desc.Built.Time
-			} else {
-				log.Warn("failed to re-read database description", "error", err)
-				actualBuilt = dbStatus.Built
-			}
-		}
-	}
-
-	// Store current version in memory for metrics (using actual timestamp)
+	// Store current version in memory for metrics (using actual on-disk timestamp
+	// when available, loader timestamp as fallback).
 	du.currentVersion = &DatabaseStatus{
 		Built:         actualBuilt,
 		SchemaVersion: dbStatus.SchemaVersion,
