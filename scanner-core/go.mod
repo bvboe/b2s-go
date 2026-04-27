@@ -10,7 +10,7 @@ require (
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/ini.v1 v1.67.1
-	modernc.org/sqlite v1.46.2
+	modernc.org/sqlite v1.50.0
 )
 
 require (
