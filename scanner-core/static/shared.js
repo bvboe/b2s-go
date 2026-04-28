@@ -26,6 +26,9 @@ let multiselectInstances = {}; // Store custom multiselect instances
 function initSharedPage(config) {
     pageConfig = config;
     sortBy = config.defaultSortBy;
+    if (config.defaultSortOrder) {
+        sortOrder = config.defaultSortOrder;
+    }
 }
 
 // Filter visibility toggle
@@ -458,7 +461,7 @@ async function loadImageSummary() {
         if (m.images_failed)  stats.push(['Failed',  formatNumber(m.images_failed)]);
 
         div.innerHTML = stats
-            .map(([label, value]) => `<span><b>${escapeHtml(label)}:</b> ${value}</span>`)
+            .map(([label, value]) => `<div class="stat"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value">${value}</div></div>`)
             .join('');
     } catch (e) {
         console.error('Error loading image summary:', e);
@@ -712,12 +715,44 @@ function renderSidebarNav() {
     }
 }
 
+// Render top-bar navigation (horizontal). Used by pages that opt into
+// the top-bar layout via #topbarNav; sidebar pages still use renderSidebarNav.
+function renderTopBarNav() {
+    const container = document.getElementById('topbarNav');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const showContainerScans = appConfig.scanContainers;
+    const showNodeScans = appConfig.scanNodes;
+
+    function addNavItem(title, url, includeFilters = false) {
+        const basePage = url.split('?')[0];
+        const isCurrentPage = basePage === pageConfig.currentPageUrl;
+        const fullUrl = includeFilters ? basePage + getCurrentFilterQueryString() : url;
+
+        const a = document.createElement('a');
+        a.href = fullUrl;
+        a.textContent = title;
+        if (isCurrentPage) a.classList.add('active');
+        container.appendChild(a);
+    }
+
+    addNavItem('Summary', 'index.html');
+    if (showContainerScans) {
+        addNavItem('Images', 'images.html', true);
+        addNavItem('Pods', 'pods.html', true);
+    }
+    if (showNodeScans) {
+        addNavItem('Nodes', 'nodes.html');
+    }
+}
+
 // Render version footer
 function renderVersionFooter() {
     const footer = document.getElementById('app-footer');
     if (!footer) return;
 
-    footer.innerHTML = `<p style="text-align: right; color: #666; font-style: italic;"><a href="https://github.com/bvboe/b2s-go" target="_blank" style="color: #666; text-decoration: underline;">bjorn2scan v${appConfig.version}</a></p>`;
+    footer.innerHTML = `<p style="text-align: right; color: #666; font-style: italic;"><a href="https://github.com/bvboe/b2s-go" target="_blank" style="color: #666; text-decoration: underline;">Bjørn2Scan v${appConfig.version}</a></p>`;
 }
 
 // Auto-refresh functionality
@@ -752,14 +787,16 @@ async function checkForUpdates() {
 async function initPage() {
     await loadConfig();
     renderSidebarNav();
+    renderTopBarNav();
     renderVersionFooter();
     await loadFilterOptions();
 
     // Apply URL parameters to filters after multiselects are initialized
     applyUrlFilters();
 
-    // Update sidebar navigation with URL filters
+    // Update navigation with URL filters
     renderSidebarNav();
+    renderTopBarNav();
 
     loadDataTable();
     loadImageSummary();

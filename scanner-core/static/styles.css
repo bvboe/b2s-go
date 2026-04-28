@@ -18,11 +18,22 @@ a {
 
 .listingTable {
     border-collapse: collapse;
+    width: max-content;
 }
 
 .listingTable th, .listingTable td {
-    border: 1px solid;
-    padding: 8px;
+    border: none;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 8px 10px;
+}
+
+.listingTable thead th {
+    border-bottom: 1px solid #888;
+    text-align: right;
+}
+
+.listingTable thead th:first-child {
+    text-align: left;
 }
 
 .summaryTable {
@@ -138,30 +149,25 @@ td.filterBody {
     cursor: pointer;
     user-select: none;
     position: relative;
-    padding-right: 20px !important;
 }
 
 .sortable:hover {
     background-color: #f0f0f0;
 }
 
-/* Sort direction indicators */
-.sortable::after {
-    content: "";
-    position: absolute;
-    right: 5px;
-    opacity: 0.3;
+/* Sort direction indicators (inline, after the header text) */
+.sortable.sort-asc::after,
+.sortable.sort-desc::after {
+    margin-left: 4px;
     font-size: 0.8em;
 }
 
 .sortable.sort-asc::after {
     content: "▲";
-    opacity: 1;
 }
 
 .sortable.sort-desc::after {
     content: "▼";
-    opacity: 1;
 }
 
 /* Clickable row styles */
