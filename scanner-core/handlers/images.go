@@ -603,13 +603,15 @@ ORDER BY namespace, pod, name`
 		log.Debug("found containers", "count", len(containers))
 
 		// Get vulnerability summary stats
+		// unique_cves and unique_exploits dedupe by cve_id alone — a single CVE that
+		// affects multiple (package, version) tuples in the same image counts once.
 		vulnStatsQuery := fmt.Sprintf(`
 SELECT
     COALESCE(SUM(v.risk * v.count), 0) as total_risk,
     COALESCE(SUM(v.count), 0) as total_cves,
-    COUNT(*) as unique_cves,
+    COUNT(DISTINCT v.cve_id) as unique_cves,
     COALESCE(SUM(v.known_exploited * v.count), 0) as total_exploits,
-    COUNT(CASE WHEN v.known_exploited > 0 THEN 1 END) as unique_exploits,
+    COUNT(DISTINCT CASE WHEN v.known_exploited > 0 THEN v.cve_id END) as unique_exploits,
     COALESCE(SUM(CASE WHEN v.severity = 'Critical'    THEN v.count ELSE 0 END), 0) as cves_critical,
     COALESCE(SUM(CASE WHEN v.severity = 'High'        THEN v.count ELSE 0 END), 0) as cves_high,
     COALESCE(SUM(CASE WHEN v.severity = 'Medium'      THEN v.count ELSE 0 END), 0) as cves_medium,
@@ -1146,13 +1148,15 @@ func ImageStatsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		vulnConditions = appendCondition(vulnConditions, buildINClause("v.package_type", packageTypes))
 		vulnWhere := buildWhereClause(vulnConditions)
 
+		// unique_cves and unique_exploits dedupe by cve_id alone — see note in
+		// the unfiltered handler above.
 		vulnStatsQuery := fmt.Sprintf(`
 SELECT
     COALESCE(SUM(v.risk * v.count), 0) as total_risk,
     COALESCE(SUM(v.count), 0) as total_cves,
-    COUNT(*) as unique_cves,
+    COUNT(DISTINCT v.cve_id) as unique_cves,
     COALESCE(SUM(v.known_exploited * v.count), 0) as total_exploits,
-    COUNT(CASE WHEN v.known_exploited > 0 THEN 1 END) as unique_exploits
+    COUNT(DISTINCT CASE WHEN v.known_exploited > 0 THEN v.cve_id END) as unique_exploits
 FROM image_vulnerabilities v
 JOIN images images ON v.image_id = images.id
 WHERE images.digest = '%s'%s`, escapedDigest, vulnWhere)

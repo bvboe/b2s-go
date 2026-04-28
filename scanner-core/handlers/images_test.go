@@ -468,6 +468,152 @@ func TestImageDetailFullHandler(t *testing.T) {
 	}
 }
 
+// TestImageDetailFullHandler_UniqueCVEsDedupedByCVEID verifies that the vuln stats
+// query dedupes by cve_id alone — a single CVE affecting multiple (package, version)
+// rows in the same image counts as one unique CVE. The same applies to unique_exploits.
+func TestImageDetailFullHandler_UniqueCVEsDedupedByCVEID(t *testing.T) {
+	var capturedQueries []string
+	provider := &mockQueryProvider{
+		queryFunc: func(query string) (*database.QueryResult, error) {
+			capturedQueries = append(capturedQueries, query)
+			switch {
+			case strings.Contains(query, "FROM images") && strings.Contains(query, "scan_status"):
+				return &database.QueryResult{
+					Columns: []string{"id", "image_id", "scan_status", "distro_display_name", "status_description"},
+					Rows: []map[string]interface{}{
+						{"id": int64(1), "image_id": "sha256:abc", "scan_status": "completed", "distro_display_name": "alpine", "status_description": "ok"},
+					},
+				}, nil
+			case strings.Contains(query, "reference"):
+				return &database.QueryResult{
+					Columns: []string{"ref"},
+					Rows:    []map[string]interface{}{{"ref": "nginx:latest"}},
+				}, nil
+			case strings.Contains(query, "namespace") || strings.Contains(query, "container"):
+				return &database.QueryResult{
+					Columns: []string{"container"},
+					Rows:    []map[string]interface{}{{"container": "default.foo.bar"}},
+				}, nil
+			case strings.Contains(query, "unique_cves"):
+				// Mock returns 1 unique CVE (e.g. CVE-2023-24531 hitting many packages).
+				return &database.QueryResult{
+					Columns: []string{"total_risk", "total_cves", "unique_cves", "total_exploits", "unique_exploits", "cves_critical", "cves_high", "cves_medium", "cves_low", "cves_negligible", "cves_unknown"},
+					Rows: []map[string]interface{}{
+						{"total_risk": float64(0.5), "total_cves": int64(791), "unique_cves": int64(1), "total_exploits": int64(0), "unique_exploits": int64(0), "cves_critical": int64(791), "cves_high": int64(0), "cves_medium": int64(0), "cves_low": int64(0), "cves_negligible": int64(0), "cves_unknown": int64(0)},
+					},
+				}, nil
+			case strings.Contains(query, "unique_packages"):
+				return &database.QueryResult{
+					Columns: []string{"total_packages", "unique_packages"},
+					Rows:    []map[string]interface{}{{"total_packages": int64(265), "unique_packages": int64(265)}},
+				}, nil
+			}
+			return &database.QueryResult{Columns: []string{}, Rows: []map[string]interface{}{}}, nil
+		},
+	}
+
+	handler := ImageDetailFullHandler(provider)
+	req := httptest.NewRequest(http.MethodGet, "/api/images/sha256:abc", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Find the vuln-stats query and assert it dedupes by cve_id.
+	var vulnQuery string
+	for _, q := range capturedQueries {
+		if strings.Contains(q, "unique_cves") {
+			vulnQuery = q
+			break
+		}
+	}
+	if vulnQuery == "" {
+		t.Fatal("expected a query selecting unique_cves to be executed")
+	}
+	if !strings.Contains(vulnQuery, "COUNT(DISTINCT v.cve_id) as unique_cves") {
+		t.Errorf("unique_cves must use COUNT(DISTINCT v.cve_id); got query: %s", vulnQuery)
+	}
+	if !strings.Contains(vulnQuery, "COUNT(DISTINCT CASE WHEN v.known_exploited > 0 THEN v.cve_id END) as unique_exploits") {
+		t.Errorf("unique_exploits must use COUNT(DISTINCT ... cve_id ...); got query: %s", vulnQuery)
+	}
+	if strings.Contains(vulnQuery, "COUNT(*) as unique_cves") {
+		t.Errorf("unique_cves must not use COUNT(*); got query: %s", vulnQuery)
+	}
+
+	// Sanity-check the response carries the deduped value through.
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if got := response["unique_cves"]; got != float64(1) {
+		t.Errorf("expected unique_cves=1 (deduped), got %v", got)
+	}
+}
+
+// TestImageStatsHandler_UniqueCVEsDedupedByCVEID is the same dedup assertion
+// for the filtered /api/images/{digest}/stats endpoint.
+func TestImageStatsHandler_UniqueCVEsDedupedByCVEID(t *testing.T) {
+	var capturedQueries []string
+	provider := &mockQueryProvider{
+		queryFunc: func(query string) (*database.QueryResult, error) {
+			capturedQueries = append(capturedQueries, query)
+			switch {
+			case strings.Contains(query, "unique_cves"):
+				return &database.QueryResult{
+					Columns: []string{"total_risk", "total_cves", "unique_cves", "total_exploits", "unique_exploits"},
+					Rows: []map[string]interface{}{
+						{"total_risk": float64(0.5), "total_cves": int64(791), "unique_cves": int64(1), "total_exploits": int64(0), "unique_exploits": int64(0)},
+					},
+				}, nil
+			case strings.Contains(query, "cves_critical"):
+				return &database.QueryResult{
+					Columns: []string{"cves_critical", "cves_high", "cves_medium", "cves_low", "cves_negligible", "cves_unknown"},
+					Rows: []map[string]interface{}{
+						{"cves_critical": int64(791), "cves_high": int64(0), "cves_medium": int64(0), "cves_low": int64(0), "cves_negligible": int64(0), "cves_unknown": int64(0)},
+					},
+				}, nil
+			case strings.Contains(query, "unique_packages"):
+				return &database.QueryResult{
+					Columns: []string{"total_packages", "unique_packages"},
+					Rows:    []map[string]interface{}{{"total_packages": int64(265), "unique_packages": int64(265)}},
+				}, nil
+			}
+			return &database.QueryResult{Columns: []string{}, Rows: []map[string]interface{}{}}, nil
+		},
+	}
+
+	handler := ImageStatsHandler(provider)
+	req := httptest.NewRequest(http.MethodGet, "/api/images/sha256:abc/stats", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var vulnQuery string
+	for _, q := range capturedQueries {
+		if strings.Contains(q, "unique_cves") {
+			vulnQuery = q
+			break
+		}
+	}
+	if vulnQuery == "" {
+		t.Fatal("expected a query selecting unique_cves to be executed")
+	}
+	if !strings.Contains(vulnQuery, "COUNT(DISTINCT v.cve_id) as unique_cves") {
+		t.Errorf("unique_cves must use COUNT(DISTINCT v.cve_id); got query: %s", vulnQuery)
+	}
+	if !strings.Contains(vulnQuery, "COUNT(DISTINCT CASE WHEN v.known_exploited > 0 THEN v.cve_id END) as unique_exploits") {
+		t.Errorf("unique_exploits must use COUNT(DISTINCT ... cve_id ...); got query: %s", vulnQuery)
+	}
+	if strings.Contains(vulnQuery, "COUNT(*) as unique_cves") {
+		t.Errorf("unique_cves must not use COUNT(*); got query: %s", vulnQuery)
+	}
+}
+
 func TestImageVulnerabilitiesDetailHandler(t *testing.T) {
 	tests := []struct {
 		name           string
