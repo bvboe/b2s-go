@@ -40,6 +40,8 @@ async function initPage() {
     }
 
     await loadConfig();
+    pageConfig.currentPageUrl = 'images.html';
+    renderTopBarNav();
     await loadImageDetails(currentImageId);
     await loadFilterOptions();
     loadVulnerabilitiesTable(currentImageId);
@@ -75,6 +77,19 @@ async function loadImageDetails(imageid) {
 
         document.getElementById('image_id').textContent = data.image_id || '';
         document.getElementById('references').innerHTML = (data.references || []).join('<br>') || 'N/A';
+
+        // Populate the page heading with one <h1> per image reference.
+        // Most images have a single reference; multi-tag images get one heading each.
+        const headingContainer = document.getElementById('pageHeading');
+        if (headingContainer) {
+            const refs = data.references || [];
+            if (refs.length > 0) {
+                headingContainer.innerHTML = refs.map(r => `<h1>${escapeHtml(r)}</h1>`).join('');
+                document.title = refs[0] + (appConfig && appConfig.clusterName ? ' - ' + appConfig.clusterName : '');
+            } else {
+                headingContainer.innerHTML = '<h1>Image Summary</h1>';
+            }
+        }
         document.getElementById('containers').innerHTML = (data.containers || []).join('<br>') || 'N/A';
         document.getElementById('distro_display_name').textContent = data.distro_display_name || 'Unknown';
         document.getElementById('scan_status').textContent = data.status_description || 'Unknown';
@@ -272,16 +287,16 @@ async function loadSBOMTable(imageid) {
 function showVulnerabilityTable() {
     document.getElementById('cvesSection').style.display = 'block';
     document.getElementById('sbomSection').style.display = 'none';
-    document.getElementById('cvesHeader').style.textDecoration = 'underline';
-    document.getElementById('sbomHeader').style.textDecoration = 'none';
+    document.getElementById('cvesHeader').classList.add('active');
+    document.getElementById('sbomHeader').classList.remove('active');
     onVulnFilterChange();
 }
 
 function showSBOMTable() {
     document.getElementById('cvesSection').style.display = 'none';
     document.getElementById('sbomSection').style.display = 'block';
-    document.getElementById('cvesHeader').style.textDecoration = 'none';
-    document.getElementById('sbomHeader').style.textDecoration = 'underline';
+    document.getElementById('cvesHeader').classList.remove('active');
+    document.getElementById('sbomHeader').classList.add('active');
     onSBOMFilterChange();
 }
 

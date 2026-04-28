@@ -130,25 +130,26 @@
 
 /* === images.html redesign === */
 
-/* Top bar — slim chrome with brand on the left and inline nav links */
+/* Top bar — chrome with brand on the left and inline nav links.
+   Uses h1-equivalent size (matching the page title font scale). */
 .topbar {
     display: flex;
     align-items: center;
-    gap: 24px;
-    padding: 8px 24px;
+    gap: 28px;
+    padding: 10px 24px;
     border-bottom: 1px solid #e5e7eb;
     background: #fafafa;
-    font-size: 14px;
+    font-family: 'Times', "Times New Roman", serif;
+    font-size: 1.5em;
 }
 
 .topbar .brand {
     font-weight: 700;
-    font-size: 16px;
 }
 
 .topbar .topbar-links {
     display: flex;
-    gap: 18px;
+    gap: 20px;
 }
 
 .topbar .topbar-links a {
@@ -293,4 +294,95 @@
    right-aligns to the table's right edge instead of the viewport. */
 .table-wrap {
     display: inline-block;
+}
+
+/* Section headings (used on index.html for Namespace / Distribution / Node Distribution Summary).
+   Indented 10px to align with the first column's cell-padded content below. */
+.section-heading {
+    margin: 32px 0 4px;
+    padding-left: 10px;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.section-sub {
+    color: #555;
+    font-size: 13px;
+    margin-bottom: 8px;
+    padding-left: 10px;
+}
+
+/* Multi-table container on index.html — sizes to the widest table's natural width
+   so all three tables share that width. */
+.index-tables {
+    display: inline-block;
+}
+
+.index-tables .table-wrap {
+    display: block;
+}
+
+.index-tables .listingTable {
+    width: 100%;
+}
+
+/* Back link (image/node detail pages) */
+.back-link {
+    margin: 0 10px 4px;
+    font-size: 14px;
+}
+.back-link a {
+    color: #555;
+    text-decoration: none;
+}
+.back-link a:hover {
+    color: #000;
+}
+
+/* Image / Node summary grid — three side-by-side metadata tables.
+   Preserves all the existing summary data; only the layout is updated. */
+.image-summary-grid {
+    display: flex;
+    gap: 40px;
+    flex-wrap: wrap;
+    margin: 12px 10px 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.image-summary-grid .summaryTable {
+    border-collapse: collapse;
+}
+.image-summary-grid .summaryTable td {
+    padding: 4px 12px 4px 0;
+    vertical-align: top;
+}
+.image-summary-grid .summaryTable td:first-child {
+    color: #555;
+    white-space: nowrap;
+}
+.image-summary-grid .summaryTable td:last-child {
+    word-break: break-all;
+}
+
+/* Tabs (image/node detail) */
+.tabs {
+    display: flex;
+    gap: 28px;
+    border-bottom: 1px solid #e5e7eb;
+    margin: 18px 10px 12px;
+    padding-bottom: 6px;
+    font-family: 'Times', "Times New Roman", serif;
+    font-size: 1.3em;
+}
+.tabs a {
+    color: #555;
+    text-decoration: none;
+    font-weight: 700;
+    cursor: pointer;
+}
+.tabs a.active {
+    color: #000;
+    border-bottom: 2px solid #000;
+    padding-bottom: 4px;
+    margin-bottom: -8px;
 }

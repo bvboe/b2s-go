@@ -384,6 +384,8 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
           SUM(CASE WHEN LOWER(severity) = 'low' THEN count ELSE 0 END) as low_count,
           SUM(CASE WHEN LOWER(severity) = 'negligible' THEN count ELSE 0 END) as negligible_count,
           SUM(CASE WHEN LOWER(severity) = 'unknown' THEN count ELSE 0 END) as unknown_count,
+          SUM(count) as total_cves,
+          COUNT(DISTINCT cve_id) as unique_cves,
           SUM(risk * count) as total_risk,
           SUM(known_exploited * count) as exploit_count
       FROM image_vulnerabilities
@@ -434,6 +436,8 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
       COALESCE(vuln_counts.low_count, 0) as low_count,
       COALESCE(vuln_counts.negligible_count, 0) as negligible_count,
       COALESCE(vuln_counts.unknown_count, 0) as unknown_count,
+      COALESCE(vuln_counts.total_cves, 0) as total_cves,
+      COALESCE(vuln_counts.unique_cves, 0) as unique_cves,
       COALESCE(vuln_counts.total_risk, 0) as total_risk,
       COALESCE(vuln_counts.exploit_count, 0) as exploit_count,
       COALESCE(pkg_counts.package_count, 0) as package_count,
@@ -452,6 +456,7 @@ func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNam
 		"low_count": true, "negligible_count": true, "unknown_count": true,
 		"total_risk": true, "exploit_count": true, "package_count": true,
 		"os_name": true,
+		"total_cves": true, "unique_cves": true,
 	}
 
 	if sortBy != "" && validSortColumns[sortBy] {

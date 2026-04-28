@@ -108,6 +108,7 @@ type NodeSummary struct {
 	Negligible        int     `json:"negligible"`
 	Unknown           int     `json:"unknown"`
 	Total             int     `json:"total"`
+	UniqueCVEs        int     `json:"unique_cves"`
 	TotalRisk         float64 `json:"total_risk"`
 	ExploitCount      int     `json:"exploit_count"`
 }

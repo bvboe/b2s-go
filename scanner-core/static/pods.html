@@ -9,81 +9,48 @@
     <link rel="stylesheet" href="custom-styles.css">
 </head>
 <body>
-    <table width="100%">
-        <tr>
-            <td valign="top">
-                <table id="headerTable">
-                    <thead></thead>
-                    <tbody id="sidebarNav">
-                        <!-- Sidebar navigation will be populated here -->
-                    </tbody>
-                </table>
-            </td>
-            <td width="100%" valign="top">
+    <nav class="topbar">
+        <span class="brand">Bjørn2Scan</span>
+        <div id="topbarNav" class="topbar-links"></div>
+    </nav>
+    <main class="page-content">
                 <h1><div id="clusterName">bjorn2scan</div></h1>
 
-                <table style="border-collapse: collapse;" width="100%" id="filterTable">
-                    <thead>
-                        <tr>
-                            <td width="1%" style="cursor: pointer" onclick="toggleFilterVisible()" class="filterSelected" id="filterCell">
-                                <b><div class="filterContainerSelected" id="filterContainer">Filters</div></b>
-                            </td>
-                            <td colspan="1"></td>
-                        </tr>
-                    </thead>
-                    <tbody id="filterDetails">
-                        <tr height="1px">
-                            <td style="border-left: 1px solid black;"/>
-                            <td style="border-top: 1px solid black; border-right: 1px solid black;"/>
-                        </tr>
-                        <tr>
-                            <td colspan="2" class="filterBody">
-                                <form>
-                                    <label for="namespaceFilter"><b>Namespace:</b></label>
-                                    <select id="namespaceFilter" name="namespaces" multiple onchange="onFilterChange()">
-                                    </select>
+                <div id="imageSummary" class="stats-strip"></div>
 
-                                    <label for="vulnerabilityStatusFilter"><b>Vulnerability Status:</b></label>
-                                    <select id="vulnerabilityStatusFilter" name="vulnerabilityStatus" multiple onchange="onFilterChange()">
-                                    </select>
+                <div class="inline-filters">
+                    <form>
+                        <label for="namespaceFilter"><b>Namespace:</b></label>
+                        <select id="namespaceFilter" name="namespaces" multiple onchange="onFilterChange()">
+                        </select>
 
-                                    <label for="packageTypeFilter"><b>Vulnerable Package Type:</b></label>
-                                    <select id="packageTypeFilter" name="packageType" multiple onchange="onFilterChange()">
-                                    </select>
+                        <label for="vulnerabilityStatusFilter"><b>Vulnerability Status:</b></label>
+                        <select id="vulnerabilityStatusFilter" name="vulnerabilityStatus" multiple onchange="onFilterChange()">
+                        </select>
 
-                                    <label for="osNameFilter"><b>OS Distribution:</b></label>
-                                    <select id="osNameFilter" name="osName" multiple onchange="onFilterChange()">
-                                    </select>
-                                </form>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                        <label for="packageTypeFilter"><b>Vulnerable Package Type:</b></label>
+                        <select id="packageTypeFilter" name="packageType" multiple onchange="onFilterChange()">
+                        </select>
 
-                <div id="imageSummary" style="display: flex; gap: 20px; flex-wrap: wrap; margin: 8px 0; padding: 4px 0;"></div>
-
-                <div style="text-align: right; text-decoration: underline;">
-                    <b><a href="" id="csvlink">Export to CSV</a></b>
+                        <label for="osNameFilter"><b>OS Distribution:</b></label>
+                        <select id="osNameFilter" name="osName" multiple onchange="onFilterChange()">
+                        </select>
+                    </form>
                 </div>
 
-                <table id="vulnerabilityTable" width="100%" class="listingTable">
+                <div class="table-wrap">
+                <div class="csv-row"><a href="" id="csvlink">Export to CSV</a></div>
+                <table id="vulnerabilityTable" class="listingTable">
                     <thead>
                         <tr>
-                            <th rowspan="2" class="sortable" data-sort-field="namespace" onclick="sortByColumn('namespace')"><b>Namespace</b></th>
-                            <th rowspan="2" class="sortable" data-sort-field="pod" onclick="sortByColumn('pod')"><b>Pod</b></th>
-                            <th rowspan="2" class="sortable" data-sort-field="container" onclick="sortByColumn('container')"><b>Container</b></th>
-                            <th colspan="6"><b>Vulnerabilities</b></th>
-                            <th rowspan="2" class="sortable" data-sort-field="total_risk" onclick="sortByColumn('total_risk')"><b>Risk Score</b></th>
-                            <th rowspan="2" class="sortable" data-sort-field="exploit_count" onclick="sortByColumn('exploit_count')"><b>Known Exploits</b></th>
-                            <th rowspan="2" class="sortable" data-sort-field="package_count" onclick="sortByColumn('package_count')"><b># Packages</b></th>
-                        </tr>
-                        <tr>
+                            <th class="sortable" data-sort-field="namespace" onclick="sortByColumn('namespace')"><b>Pod / Container</b></th>
+                            <th class="sortable" data-sort-field="total_risk" onclick="sortByColumn('total_risk')"><b>Risk Score</b></th>
                             <th class="sortable" data-sort-field="critical_count" onclick="sortByColumn('critical_count')"><b>Critical</b></th>
                             <th class="sortable" data-sort-field="high_count" onclick="sortByColumn('high_count')"><b>High</b></th>
-                            <th class="sortable" data-sort-field="medium_count" onclick="sortByColumn('medium_count')"><b>Medium</b></th>
-                            <th class="sortable" data-sort-field="low_count" onclick="sortByColumn('low_count')"><b>Low</b></th>
-                            <th class="sortable" data-sort-field="negligible_count" onclick="sortByColumn('negligible_count')"><b>Negligible</b></th>
-                            <th class="sortable" data-sort-field="unknown_count" onclick="sortByColumn('unknown_count')"><b>Unknown</b></th>
+                            <th class="sortable other-col" data-sort-field="medium_count" onclick="sortByColumn('medium_count')" title="Medium + Low + Negligible + Unknown"><b>Other</b></th>
+                            <th class="sortable" data-sort-field="total_cves" onclick="sortByColumn('total_cves')"><b>CVEs (total / unique)</b></th>
+                            <th class="sortable" data-sort-field="exploit_count" onclick="sortByColumn('exploit_count')"><b>Exploits</b></th>
+                            <th class="sortable" data-sort-field="package_count" onclick="sortByColumn('package_count')"><b>Packages</b></th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -94,9 +61,8 @@
                 </div>
 
                 <div id="app-footer"></div>
-            </td>
-        </tr>
-    </table>
+                </div>
+    </main>
 
     <script src="shared.js"></script>
     <script>
@@ -104,10 +70,11 @@
         initSharedPage({
             apiEndpoint: '/api/pods',
             dataKey: 'pods',
-            pageTitle: 'Pod Summary',
+            pageTitle: 'Pods',
             currentPageUrl: 'pods.html',
-            defaultSortBy: 'namespace',
-            columnCount: 12,
+            defaultSortBy: 'total_risk',
+            defaultSortOrder: 'DESC',
+            columnCount: 8,
             renderRow: function(row, item) {
                 // Make row clickable to navigate to image detail page
                 row.onclick = function() {
@@ -115,36 +82,81 @@
                 };
                 row.style.cursor = 'pointer';
 
-                // Add namespace
-                addCellToRow(row, 'left', item.namespace || '');
+                // Pod / Container cell — namespace · pod on top, container muted below
+                const podCell = document.createElement('td');
+                podCell.style.textAlign = 'left';
+                const ns = escapeHtml(item.namespace || '');
+                const pod = escapeHtml(item.pod || '');
+                const container = escapeHtml(item.name || '');
+                podCell.innerHTML =
+                    `<div class="img-name">${ns} / ${pod}</div>` +
+                    `<div class="img-tag">${container}</div>`;
+                row.appendChild(podCell);
 
-                // Add pod name
-                addCellToRow(row, 'left', item.pod || '');
-
-                // Add container name
-                addCellToRow(row, 'left', item.name || '');
-
-                // Check if scan is complete
                 if (isScanComplete(item.status_description)) {
-                    // Show vulnerability counts
-                    addCellToRow(row, 'right', formatNumber(item.critical_count));
-                    addCellToRow(row, 'right', formatNumber(item.high_count));
-                    addCellToRow(row, 'right', formatNumber(item.medium_count));
-                    addCellToRow(row, 'right', formatNumber(item.low_count));
-                    addCellToRow(row, 'right', formatNumber(item.negligible_count));
-                    addCellToRow(row, 'right', formatNumber(item.unknown_count));
-                    addCellToRow(row, 'right', formatRiskNumber(item.total_risk));
-                    addCellToRow(row, 'right', formatNumber(item.exploit_count));
+                    // Risk Score
+                    const riskCell = document.createElement('td');
+                    riskCell.style.textAlign = 'right';
+                    if (!item.total_risk) {
+                        riskCell.innerHTML = '<span class="zero-dash">—</span>';
+                    } else {
+                        riskCell.textContent = formatRiskNumber(item.total_risk);
+                    }
+                    row.appendChild(riskCell);
+
+                    // Critical, High
+                    addNumOrDash(row, item.critical_count);
+                    addNumOrDash(row, item.high_count);
+
+                    // Other = Medium + Low + Negligible + Unknown
+                    const other = (item.medium_count || 0) + (item.low_count || 0) +
+                                  (item.negligible_count || 0) + (item.unknown_count || 0);
+                    const otherCell = addNumOrDash(row, other);
+                    if (other > 0) otherCell.classList.add('muted-num');
+                    otherCell.title = 'Medium: ' + formatNumber(item.medium_count) +
+                                      ' · Low: ' + formatNumber(item.low_count) +
+                                      ' · Negligible: ' + formatNumber(item.negligible_count) +
+                                      ' · Unknown: ' + formatNumber(item.unknown_count);
+
+                    // CVEs (total / unique)
+                    const cveCell = document.createElement('td');
+                    cveCell.style.textAlign = 'right';
+                    cveCell.className = 'cve-combo';
+                    if (!item.total_cves && !item.unique_cves) {
+                        cveCell.innerHTML = '<span class="zero-dash">—</span>';
+                    } else {
+                        cveCell.innerHTML =
+                            `<span class="cve-total">${formatNumber(item.total_cves)}</span>` +
+                            `<span class="cve-sep">/</span>` +
+                            `<span class="cve-unique">${formatNumber(item.unique_cves)}</span>`;
+                    }
+                    row.appendChild(cveCell);
+
+                    // Exploits
+                    addNumOrDash(row, item.exploit_count);
+
+                    // Packages
                     addCellToRow(row, 'right', formatNumber(item.package_count));
                 } else {
-                    // Show status message spanning all vulnerability columns
                     const cell = addCellToRow(row, 'left', item.status_description || 'Unknown status');
-                    cell.colSpan = 9;
+                    cell.colSpan = 7;
                 }
             }
         });
 
-        // Load page when DOM is ready
+        function addNumOrDash(row, value) {
+            const v = value || 0;
+            const cell = document.createElement('td');
+            cell.style.textAlign = 'right';
+            if (v === 0) {
+                cell.innerHTML = '<span class="zero-dash">—</span>';
+            } else {
+                cell.textContent = formatNumber(v);
+            }
+            row.appendChild(cell);
+            return cell;
+        }
+
         document.addEventListener('DOMContentLoaded', initPage);
     </script>
 </body>

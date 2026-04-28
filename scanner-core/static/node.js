@@ -42,6 +42,8 @@ async function initPage() {
     }
 
     await loadConfig();
+    pageConfig.currentPageUrl = 'nodes.html';
+    renderTopBarNav();
     await loadNodeDetails(currentNodeName);
     await loadFilterOptions();
     loadVulnerabilitiesTable(currentNodeName);
@@ -77,6 +79,14 @@ async function loadNodeDetails(nodeName) {
 
         document.getElementById('node_name').textContent = data.name || '';
         document.getElementById('hostname').textContent = data.hostname || data.name || '';
+
+        // Populate the page heading with the node name as <h1>.
+        const headingContainer = document.getElementById('pageHeading');
+        if (headingContainer) {
+            const name = data.name || 'Node Summary';
+            headingContainer.innerHTML = `<h1>${escapeHtml(name)}</h1>`;
+            document.title = name + (appConfig && appConfig.clusterName ? ' - ' + appConfig.clusterName : '');
+        }
         document.getElementById('os_release').textContent = data.os_release || 'Unknown';
         document.getElementById('kernel_version').textContent = data.kernel_version || '-';
         document.getElementById('architecture').textContent = data.architecture || '-';
@@ -428,16 +438,16 @@ function renderSBOMTable() {
 function showVulnerabilityTable() {
     document.getElementById('cvesSection').style.display = 'block';
     document.getElementById('sbomSection').style.display = 'none';
-    document.getElementById('cvesHeader').style.textDecoration = 'underline';
-    document.getElementById('sbomHeader').style.textDecoration = 'none';
+    document.getElementById('cvesHeader').classList.add('active');
+    document.getElementById('sbomHeader').classList.remove('active');
     onVulnFilterChange();
 }
 
 function showSBOMTable() {
     document.getElementById('cvesSection').style.display = 'none';
     document.getElementById('sbomSection').style.display = 'block';
-    document.getElementById('cvesHeader').style.textDecoration = 'none';
-    document.getElementById('sbomHeader').style.textDecoration = 'underline';
+    document.getElementById('cvesHeader').classList.remove('active');
+    document.getElementById('sbomHeader').classList.add('active');
     onSBOMFilterChange();
 }
 

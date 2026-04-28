@@ -1241,6 +1241,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 		COALESCE(v.negligible, 0) as negligible,
 		COALESCE(v.unknown, 0) as unknown,
 		COALESCE(v.total, 0) as total,
+		COALESCE(v.unique_cves, 0) as unique_cves,
 		COALESCE(v.total_risk, 0) as total_risk,
 		COALESCE(v.exploit_count, 0) as exploit_count
 	FROM nodes n
@@ -1254,6 +1255,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 			SUM(CASE WHEN severity = 'Negligible' THEN count ELSE 0 END) as negligible,
 			SUM(CASE WHEN severity NOT IN ('Critical', 'High', 'Medium', 'Low', 'Negligible') THEN count ELSE 0 END) as unknown,
 			SUM(count) as total,
+			COUNT(DISTINCT cve_id) as unique_cves,
 			SUM(risk * COALESCE(count, 1)) as total_risk,
 			SUM(known_exploited * count) as exploit_count
 		FROM node_vulnerabilities` + vulnWhere + `
@@ -1281,7 +1283,7 @@ func (db *DB) GetNodeSummariesFiltered(filters NodeSummaryFilters) ([]nodes.Node
 	for rows.Next() {
 		var summary nodes.NodeSummary
 		err := rows.Scan(&summary.NodeName, &summary.OSRelease, &summary.Status, &summary.PackageCount, &summary.Critical, &summary.High,
-			&summary.Medium, &summary.Low, &summary.Negligible, &summary.Unknown, &summary.Total, &summary.TotalRisk, &summary.ExploitCount)
+			&summary.Medium, &summary.Low, &summary.Negligible, &summary.Unknown, &summary.Total, &summary.UniqueCVEs, &summary.TotalRisk, &summary.ExploitCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan summary row: %w", err)
 		}
