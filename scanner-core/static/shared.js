@@ -245,25 +245,18 @@ async function loadFilterOptions() {
 
         const data = await response.json();
 
-        const nsSelect = document.getElementById('namespaceFilter');
-        nsSelect.innerHTML = (data.namespaces || []).map(ns =>
-            `<option value="${escapeHtml(ns)}">${escapeHtml(ns)}</option>`
-        ).join('');
-
-        const vulnSelect = document.getElementById('vulnerabilityStatusFilter');
-        vulnSelect.innerHTML = (data.vulnStatuses || []).map(status =>
-            `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
-        ).join('');
-
-        const pkgSelect = document.getElementById('packageTypeFilter');
-        pkgSelect.innerHTML = (data.packageTypes || []).map(type =>
-            `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
-        ).join('');
-
-        const osSelect = document.getElementById('osNameFilter');
-        osSelect.innerHTML = (data.osNames || []).map(os =>
-            `<option value="${escapeHtml(os)}">${escapeHtml(os)}</option>`
-        ).join('');
+        // Each <select> is optional — nodes.html, for example, has no namespace filter.
+        const populate = (id, values) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerHTML = (values || []).map(v =>
+                `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`
+            ).join('');
+        };
+        populate('namespaceFilter', data.namespaces);
+        populate('vulnerabilityStatusFilter', data.vulnStatuses);
+        populate('packageTypeFilter', data.packageTypes);
+        populate('osNameFilter', data.osNames);
 
         initializeMultiselects();
 
