@@ -296,6 +296,63 @@
     display: inline-block;
 }
 
+/* Top-of-page summary on index.html — a hero metric (total CVE instances
+   across the cluster) plus a breakdown grid that splits image vs node by
+   metric. Pending / Failed columns appear in the grid only when their counts
+   are non-zero, so a clean cluster shows just the steady-state columns. */
+.summary-hero {
+    display: flex;
+    align-items: baseline;
+    gap: 64px;
+    flex-wrap: wrap;
+    margin: 12px 10px 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.hero-metric .hero-value {
+    font-size: 56px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.hero-metric .hero-label {
+    font-size: 13px;
+    color: #555;
+    margin-top: 4px;
+}
+
+.hero-grid {
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    align-self: flex-end;
+}
+
+.hero-grid th, .hero-grid td {
+    padding: 4px 16px 4px 0;
+    text-align: right;
+    font-weight: 400;
+}
+
+.hero-grid thead th {
+    font-size: 12px;
+    color: #555;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.hero-grid tbody td {
+    font-weight: 700;
+}
+
+.hero-grid .row-label {
+    font-weight: 700;
+    text-align: left;
+    padding-right: 24px;
+}
+
 /* Section headings (used on index.html for Namespace / Distribution / Node Distribution Summary).
    Indented 10px to align with the first column's cell-padded content below. */
 .section-heading {
