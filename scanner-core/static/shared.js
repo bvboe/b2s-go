@@ -345,6 +345,80 @@ function addCellToRow(row, align, text) {
     return cell;
 }
 
+// ===== Listing-table cell helpers used by images / pods / nodes =====
+
+// Append a right-aligned numeric cell. Renders 0 as a muted "—".
+// Returns the <td> so callers can attach a className or title.
+function addNumOrDash(row, value) {
+    const v = value || 0;
+    const cell = document.createElement('td');
+    cell.style.textAlign = 'right';
+    if (v === 0) {
+        cell.innerHTML = '<span class="zero-dash">—</span>';
+    } else {
+        cell.textContent = formatNumber(v);
+    }
+    row.appendChild(cell);
+    return cell;
+}
+
+// Append a right-aligned Risk Score cell. Renders 0 as a muted "—".
+function addRiskCell(row, value) {
+    const cell = document.createElement('td');
+    cell.style.textAlign = 'right';
+    if (!value) {
+        cell.innerHTML = '<span class="zero-dash">—</span>';
+    } else {
+        cell.textContent = formatRiskNumber(value);
+    }
+    row.appendChild(cell);
+    return cell;
+}
+
+// Append a "CVEs (total / unique)" combo cell. Renders a single "—"
+// when both counts are zero.
+function addCveComboCell(row, total, unique) {
+    const cell = document.createElement('td');
+    cell.style.textAlign = 'right';
+    cell.className = 'cve-combo';
+    if (!total && !unique) {
+        cell.innerHTML = '<span class="zero-dash">—</span>';
+    } else {
+        cell.innerHTML =
+            `<span class="cve-total">${formatNumber(total)}</span>` +
+            `<span class="cve-sep">/</span>` +
+            `<span class="cve-unique">${formatNumber(unique)}</span>`;
+    }
+    row.appendChild(cell);
+    return cell;
+}
+
+// Append the "Other" column cell — folds Medium + Low + Negligible +
+// Unknown into a single muted number with a tooltip showing the breakdown.
+function addOtherCell(row, medium, low, negligible, unknown) {
+    const other = (medium || 0) + (low || 0) + (negligible || 0) + (unknown || 0);
+    const cell = addNumOrDash(row, other);
+    if (other > 0) cell.classList.add('muted-num');
+    cell.title = 'Medium: ' + formatNumber(medium) +
+                 ' · Low: ' + formatNumber(low) +
+                 ' · Negligible: ' + formatNumber(negligible) +
+                 ' · Unknown: ' + formatNumber(unknown);
+    return cell;
+}
+
+// Append a two-line left-aligned cell — bold-ish primary on top,
+// muted secondary below. Used for image (name + tag), pod (namespace/pod
+// + container), and node (name + OS distribution).
+function addTwoLineCell(row, primary, secondary) {
+    const cell = document.createElement('td');
+    cell.style.textAlign = 'left';
+    cell.innerHTML =
+        `<div class="img-name">${escapeHtml(primary || '')}</div>` +
+        (secondary ? `<div class="img-tag">${escapeHtml(secondary)}</div>` : '');
+    row.appendChild(cell);
+    return cell;
+}
+
 // Format number with commas
 function formatNumber(num) {
     if (num === null || num === undefined || num === 0) return '0';

@@ -82,60 +82,17 @@
                 };
                 row.style.cursor = 'pointer';
 
-                // Pod / Container cell — namespace · pod on top, container muted below
-                const podCell = document.createElement('td');
-                podCell.style.textAlign = 'left';
-                const ns = escapeHtml(item.namespace || '');
-                const pod = escapeHtml(item.pod || '');
-                const container = escapeHtml(item.name || '');
-                podCell.innerHTML =
-                    `<div class="img-name">${ns} / ${pod}</div>` +
-                    `<div class="img-tag">${container}</div>`;
-                row.appendChild(podCell);
+                // Pod / Container cell — namespace / pod on top, container muted below
+                const primary = (item.namespace || '') + ' / ' + (item.pod || '');
+                addTwoLineCell(row, primary, item.name);
 
                 if (isScanComplete(item.status_description)) {
-                    // Risk Score
-                    const riskCell = document.createElement('td');
-                    riskCell.style.textAlign = 'right';
-                    if (!item.total_risk) {
-                        riskCell.innerHTML = '<span class="zero-dash">—</span>';
-                    } else {
-                        riskCell.textContent = formatRiskNumber(item.total_risk);
-                    }
-                    row.appendChild(riskCell);
-
-                    // Critical, High
+                    addRiskCell(row, item.total_risk);
                     addNumOrDash(row, item.critical_count);
                     addNumOrDash(row, item.high_count);
-
-                    // Other = Medium + Low + Negligible + Unknown
-                    const other = (item.medium_count || 0) + (item.low_count || 0) +
-                                  (item.negligible_count || 0) + (item.unknown_count || 0);
-                    const otherCell = addNumOrDash(row, other);
-                    if (other > 0) otherCell.classList.add('muted-num');
-                    otherCell.title = 'Medium: ' + formatNumber(item.medium_count) +
-                                      ' · Low: ' + formatNumber(item.low_count) +
-                                      ' · Negligible: ' + formatNumber(item.negligible_count) +
-                                      ' · Unknown: ' + formatNumber(item.unknown_count);
-
-                    // CVEs (total / unique)
-                    const cveCell = document.createElement('td');
-                    cveCell.style.textAlign = 'right';
-                    cveCell.className = 'cve-combo';
-                    if (!item.total_cves && !item.unique_cves) {
-                        cveCell.innerHTML = '<span class="zero-dash">—</span>';
-                    } else {
-                        cveCell.innerHTML =
-                            `<span class="cve-total">${formatNumber(item.total_cves)}</span>` +
-                            `<span class="cve-sep">/</span>` +
-                            `<span class="cve-unique">${formatNumber(item.unique_cves)}</span>`;
-                    }
-                    row.appendChild(cveCell);
-
-                    // Exploits
+                    addOtherCell(row, item.medium_count, item.low_count, item.negligible_count, item.unknown_count);
+                    addCveComboCell(row, item.total_cves, item.unique_cves);
                     addNumOrDash(row, item.exploit_count);
-
-                    // Packages
                     addCellToRow(row, 'right', formatNumber(item.package_count));
                 } else {
                     const cell = addCellToRow(row, 'left', item.status_description || 'Unknown status');
@@ -143,19 +100,6 @@
                 }
             }
         });
-
-        function addNumOrDash(row, value) {
-            const v = value || 0;
-            const cell = document.createElement('td');
-            cell.style.textAlign = 'right';
-            if (v === 0) {
-                cell.innerHTML = '<span class="zero-dash">—</span>';
-            } else {
-                cell.textContent = formatNumber(v);
-            }
-            row.appendChild(cell);
-            return cell;
-        }
 
         document.addEventListener('DOMContentLoaded', initPage);
     </script>

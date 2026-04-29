@@ -80,57 +80,15 @@
                 };
                 row.style.cursor = 'pointer';
 
-                // Node cell — name on top, OS distribution muted below
-                const nodeCell = document.createElement('td');
-                nodeCell.style.textAlign = 'left';
-                nodeCell.innerHTML =
-                    `<div class="img-name">${escapeHtml(item.node_name || '')}</div>` +
-                    `<div class="img-tag">${escapeHtml(item.os_release || '-')}</div>`;
-                row.appendChild(nodeCell);
+                addTwoLineCell(row, item.node_name, item.os_release || '-');
 
                 if (isScanComplete(item.status_description)) {
-                    // Risk Score
-                    const riskCell = document.createElement('td');
-                    riskCell.style.textAlign = 'right';
-                    if (!item.total_risk) {
-                        riskCell.innerHTML = '<span class="zero-dash">—</span>';
-                    } else {
-                        riskCell.textContent = formatRiskNumber(item.total_risk);
-                    }
-                    row.appendChild(riskCell);
-
-                    // Critical, High
+                    addRiskCell(row, item.total_risk);
                     addNumOrDash(row, item.critical);
                     addNumOrDash(row, item.high);
-
-                    // Other = Medium + Low + Negligible + Unknown
-                    const other = (item.medium || 0) + (item.low || 0) +
-                                  (item.negligible || 0) + (item.unknown || 0);
-                    const otherCell = addNumOrDash(row, other);
-                    if (other > 0) otherCell.classList.add('muted-num');
-                    otherCell.title = 'Medium: ' + formatNumber(item.medium) +
-                                      ' · Low: ' + formatNumber(item.low) +
-                                      ' · Negligible: ' + formatNumber(item.negligible) +
-                                      ' · Unknown: ' + formatNumber(item.unknown);
-
-                    // CVEs (total / unique)
-                    const cveCell = document.createElement('td');
-                    cveCell.style.textAlign = 'right';
-                    cveCell.className = 'cve-combo';
-                    if (!item.total && !item.unique_cves) {
-                        cveCell.innerHTML = '<span class="zero-dash">—</span>';
-                    } else {
-                        cveCell.innerHTML =
-                            `<span class="cve-total">${formatNumber(item.total)}</span>` +
-                            `<span class="cve-sep">/</span>` +
-                            `<span class="cve-unique">${formatNumber(item.unique_cves)}</span>`;
-                    }
-                    row.appendChild(cveCell);
-
-                    // Exploits
+                    addOtherCell(row, item.medium, item.low, item.negligible, item.unknown);
+                    addCveComboCell(row, item.total, item.unique_cves);
                     addNumOrDash(row, item.exploit_count);
-
-                    // Packages
                     addCellToRow(row, 'right', formatNumber(item.package_count));
                 } else {
                     const cell = addCellToRow(row, 'left', item.status_description || 'Unknown status');
@@ -138,19 +96,6 @@
                 }
             }
         });
-
-        function addNumOrDash(row, value) {
-            const v = value || 0;
-            const cell = document.createElement('td');
-            cell.style.textAlign = 'right';
-            if (v === 0) {
-                cell.innerHTML = '<span class="zero-dash">—</span>';
-            } else {
-                cell.textContent = formatNumber(v);
-            }
-            row.appendChild(cell);
-            return cell;
-        }
 
         // Override loadFilterOptions for node-specific filters
         async function loadFilterOptions() {

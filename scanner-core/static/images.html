@@ -83,99 +83,38 @@
                 };
                 row.style.cursor = 'pointer';
 
-                // Two-line image cell: name on top, :tag muted below
-                const imageCell = document.createElement('td');
-                imageCell.style.textAlign = 'left';
+                // Two-line image cell: name on top, :tag/digest muted below.
+                // Split at '@' (digest) or last ':' after the registry segment.
                 const ref = item.image || '';
-                const colonIdx = lastTagSeparator(ref);
-                if (colonIdx > 0) {
-                    const namePart = ref.substring(0, colonIdx);
-                    const tagPart  = ref.substring(colonIdx);
-                    imageCell.innerHTML = `<div class="img-name">${escapeHtml(namePart)}</div><div class="img-tag">${escapeHtml(tagPart)}</div>`;
-                } else {
-                    imageCell.innerHTML = `<div class="img-name">${escapeHtml(ref)}</div>`;
-                }
-                row.appendChild(imageCell);
+                const sepIdx = lastTagSeparator(ref);
+                const namePart = sepIdx > 0 ? ref.substring(0, sepIdx) : ref;
+                const tagPart  = sepIdx > 0 ? ref.substring(sepIdx) : '';
+                addTwoLineCell(row, namePart, tagPart);
 
                 if (isScanComplete(item.status_description)) {
-                    // Risk Score — render "—" for zero risk (consistent with severity columns)
-                    const riskCell = document.createElement('td');
-                    riskCell.style.textAlign = 'right';
-                    if (!item.total_risk) {
-                        riskCell.innerHTML = '<span class="zero-dash">—</span>';
-                    } else {
-                        riskCell.textContent = formatRiskNumber(item.total_risk);
-                    }
-                    row.appendChild(riskCell);
-
-                    // Critical, High — show "—" for zero
+                    addRiskCell(row, item.total_risk);
                     addNumOrDash(row, item.critical_count);
                     addNumOrDash(row, item.high_count);
-
-                    // Other = Medium + Low + Negligible + Unknown
-                    const other = (item.medium_count || 0) + (item.low_count || 0) +
-                                  (item.negligible_count || 0) + (item.unknown_count || 0);
-                    const otherCell = addNumOrDash(row, other);
-                    if (other > 0) otherCell.classList.add('muted-num');
-                    otherCell.title = 'Medium: ' + formatNumber(item.medium_count) +
-                                      ' · Low: ' + formatNumber(item.low_count) +
-                                      ' · Negligible: ' + formatNumber(item.negligible_count) +
-                                      ' · Unknown: ' + formatNumber(item.unknown_count);
-
-                    // CVEs (total / unique) — render "—" when both are zero
-                    const cveCell = document.createElement('td');
-                    cveCell.style.textAlign = 'right';
-                    cveCell.className = 'cve-combo';
-                    if (!item.total_cves && !item.unique_cves) {
-                        cveCell.innerHTML = '<span class="zero-dash">—</span>';
-                    } else {
-                        cveCell.innerHTML =
-                            `<span class="cve-total">${formatNumber(item.total_cves)}</span>` +
-                            `<span class="cve-sep">/</span>` +
-                            `<span class="cve-unique">${formatNumber(item.unique_cves)}</span>`;
-                    }
-                    row.appendChild(cveCell);
-
-                    // Exploits
+                    addOtherCell(row, item.medium_count, item.low_count, item.negligible_count, item.unknown_count);
+                    addCveComboCell(row, item.total_cves, item.unique_cves);
                     addNumOrDash(row, item.exploit_count);
-
-                    // Containers
                     addCellToRow(row, 'right', formatNumber(item.container_count));
-
-                    // Packages
                     addCellToRow(row, 'right', formatNumber(item.package_count));
                 } else {
-                    // Show status message spanning all data columns
                     const cell = addCellToRow(row, 'left', item.status_description || 'Unknown status');
                     cell.colSpan = 8;
                 }
             }
         });
 
-        // Render number, or "—" when zero. Returns the cell.
-        function addNumOrDash(row, value) {
-            const v = value || 0;
-            const cell = document.createElement('td');
-            cell.style.textAlign = 'right';
-            if (v === 0) {
-                cell.innerHTML = '<span class="zero-dash">—</span>';
-            } else {
-                cell.textContent = formatNumber(v);
-            }
-            row.appendChild(cell);
-            return cell;
-        }
-
-        // Find the position of ':' or '@' that separates the image name from the tag/digest.
-        // Returns -1 if not found. Skips ':' inside port numbers in registry hostnames.
+        // Find the position of ':' or '@' that separates the image name from the
+        // tag/digest. Skips ':' inside "registry:port/..." prefixes.
         function lastTagSeparator(ref) {
             const at = ref.indexOf('@');
             if (at >= 0) return at;
-            // Find last ':' that is not part of "registry:port/" prefix
             const slash = ref.lastIndexOf('/');
             const colon = ref.lastIndexOf(':');
-            if (colon > slash) return colon;
-            return -1;
+            return colon > slash ? colon : -1;
         }
 
         // Load page when DOM is ready
