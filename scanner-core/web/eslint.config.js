@@ -5,7 +5,6 @@ import globals from "globals";
 const sharedGlobals = {
     // Functions
     initSharedPage: "readonly",
-    toggleFilterVisible: "readonly",
     getSelectedValues: "readonly",
     buildQueryParams: "readonly",
     loadFilterOptions: "readonly",
@@ -49,7 +48,6 @@ const sharedGlobals = {
     totalItems: "writable",
     sortBy: "writable",
     sortOrder: "writable",
-    filtersVisible: "writable",
     multiselectInstances: "writable",
     appConfig: "writable",
     currentTimestamp: "writable",

@@ -1,59 +1,74 @@
-/* Custom multi-select dropdown styles */
+/* Custom multi-select dropdown — minimal "underlined value" treatment.
+   No box, no background. The selected value (or placeholder) gets a thin
+   hyperlink-style underline; an inline chevron sits next to it. */
 .custom-multiselect {
     position: relative;
-    min-width: 120px;
-    max-width: 180px;
+    display: inline-block;
 }
 
 .multiselect-header {
-    border: 1px solid #ccc;
-    background: white;
-    padding: 2px 25px 2px 6px;
     cursor: pointer;
-    font-size: 12px;
-    min-height: 22px;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 2px;
-    position: relative;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: #555;
+    text-decoration: underline;
+    text-decoration-color: #d1d5db;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
 }
 
 .multiselect-header:hover {
-    border-color: #999;
+    color: #000;
+    text-decoration-color: #000;
+}
+
+/* When at least one value is selected, render the value(s) bold + black */
+.custom-multiselect.has-selection .multiselect-header {
+    color: #000;
+    font-weight: 600;
+    text-decoration-color: #888;
 }
 
 .multiselect-placeholder {
-    color: #999;
-    font-size: 12px;
+    /* Inherits header styling — same underline + color */
 }
 
 .multiselect-arrow {
-    position: absolute;
-    right: 6px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #666;
+    width: auto;
+    height: auto;
+    border: 0;
+    color: #888;
+    font-size: 0.75em;
+    text-decoration: none;
+    line-height: 1;
     pointer-events: none;
+}
+
+.multiselect-arrow::before {
+    content: "▾";
 }
 
 .multiselect-dropdown {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 4px);
     left: 0;
-    right: 0;
-    background: white;
-    border: 1px solid #ccc;
-    border-top: none;
-    max-height: 200px;
+
+    /* Grow to fit the longest option; trigger width is the floor, not the cap. */
+    min-width: 100%;
+    width: max-content;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    padding: 4px 0;
+    max-height: 240px;
     overflow-y: auto;
     display: none;
     z-index: 1000;
-    box-shadow: 0 2px 4px rgb(0 0 0 / 10%);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 
 .multiselect-dropdown.open {
@@ -61,71 +76,23 @@
 }
 
 .multiselect-option {
-    padding: 4px 8px;
+    padding: 5px 14px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+    white-space: nowrap;
 }
 
 .multiselect-option:hover {
-    background: #f0f0f0;
+    background: #fafafa;
 }
 
 .multiselect-option input[type="checkbox"] {
     margin: 0;
     cursor: pointer;
-    accent-color: #666;
-}
-
-.multiselect-tag {
-    background: lightgrey;
-    color: #333;
-    padding: 0px 4px;
-    font-size: 11px;
-    border-radius: 3px;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    line-height: 1;
-    height: 16px;
-}
-
-.multiselect-tag-remove {
-    cursor: pointer;
-    font-weight: bold;
-    font-size: 14px;
-    line-height: 1;
-    color: #666;
-}
-
-.multiselect-tag-remove:hover {
-    color: #f00;
-}
-
-/* Filter form layout */
-.filterBody form {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: nowrap;
-}
-
-.filterBody label {
-    white-space: nowrap;
-    margin-right: 3px;
-    font-size: 13px;
-}
-
-.filterBody select {
-    min-width: 120px;
-    max-width: 180px;
-}
-
-.ss-main {
-    min-width: 120px;
-    max-width: 180px;
+    accent-color: #555;
 }
 
 /* === Listing-page redesign (images / pods / nodes / index / image / node) === */

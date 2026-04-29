@@ -19,7 +19,6 @@ let totalPages = 1;
 let totalItems = 0;
 let sortBy = null;
 let sortOrder = 'ASC';
-let filtersVisible = true;
 let multiselectInstances = {}; // Store custom multiselect instances
 
 // Initialize page with configuration
@@ -29,24 +28,6 @@ function initSharedPage(config) {
     if (config.defaultSortOrder) {
         sortOrder = config.defaultSortOrder;
     }
-}
-
-// Filter visibility toggle
-function toggleFilterVisible() {
-    const filterDetails = document.getElementById('filterDetails');
-    const filterCell = document.getElementById('filterCell');
-    const filterContainer = document.getElementById('filterContainer');
-
-    if (filtersVisible) {
-        filterDetails.style.display = 'none';
-        filterCell.className = 'filterUnSelected';
-        filterContainer.className = 'filterContainerUnSelected';
-    } else {
-        filterDetails.style.display = '';
-        filterCell.className = 'filterSelected';
-        filterContainer.className = 'filterContainerSelected';
-    }
-    filtersVisible = !filtersVisible;
 }
 
 // Get selected values from multi-select
@@ -172,25 +153,23 @@ class CustomMultiSelect {
     updateHeader() {
         this.header.innerHTML = '';
 
+        // Toggle .has-selection on the container so CSS can render selected
+        // values bolder/darker than the placeholder.
         if (this.selected.length === 0) {
-            this.placeholderElement = document.createElement('span');
-            this.placeholderElement.className = 'multiselect-placeholder';
-            this.placeholderElement.textContent = this.placeholder;
-            this.header.appendChild(this.placeholderElement);
+            this.container.classList.remove('has-selection');
+            const placeholder = document.createElement('span');
+            placeholder.className = 'multiselect-placeholder';
+            placeholder.textContent = this.placeholder;
+            this.header.appendChild(placeholder);
         } else {
-            this.selected.forEach(item => {
-                const tag = document.createElement('span');
-                tag.className = 'multiselect-tag';
-                tag.innerHTML = `${item.text} <span class="multiselect-tag-remove">×</span>`;
-                tag.querySelector('.multiselect-tag-remove').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.removeItem(item.value);
-                });
-                this.header.appendChild(tag);
-            });
+            this.container.classList.add('has-selection');
+            const valueSpan = document.createElement('span');
+            valueSpan.className = 'multiselect-value';
+            valueSpan.textContent = this.selected.map(s => s.text).join(', ');
+            this.header.appendChild(valueSpan);
         }
 
-        this.arrow = document.createElement('div');
+        this.arrow = document.createElement('span');
         this.arrow.className = 'multiselect-arrow';
         this.header.appendChild(this.arrow);
     }
