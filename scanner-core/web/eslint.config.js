@@ -17,6 +17,7 @@ const sharedGlobals = {
     addCveComboCell: "readonly",
     addOtherCell: "readonly",
     addTwoLineCell: "readonly",
+    showTab: "readonly",
     formatNumber: "readonly",
     formatRiskNumber: "readonly",
     formatTimestamp: "readonly",

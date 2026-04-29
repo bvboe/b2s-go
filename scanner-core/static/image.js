@@ -284,21 +284,11 @@ async function loadSBOMTable(imageid) {
 }
 
 // Tab switching
-function showVulnerabilityTable() {
-    document.getElementById('cvesSection').style.display = 'block';
-    document.getElementById('sbomSection').style.display = 'none';
-    document.getElementById('cvesHeader').classList.add('active');
-    document.getElementById('sbomHeader').classList.remove('active');
-    onVulnFilterChange();
-}
+const CVES_TAB = { section: 'cvesSection', header: 'cvesHeader' };
+const SBOM_TAB = { section: 'sbomSection', header: 'sbomHeader' };
 
-function showSBOMTable() {
-    document.getElementById('cvesSection').style.display = 'none';
-    document.getElementById('sbomSection').style.display = 'block';
-    document.getElementById('cvesHeader').classList.remove('active');
-    document.getElementById('sbomHeader').classList.add('active');
-    onSBOMFilterChange();
-}
+function showVulnerabilityTable() { showTab(CVES_TAB, SBOM_TAB, onVulnFilterChange); }
+function showSBOMTable()          { showTab(SBOM_TAB, CVES_TAB, onSBOMFilterChange); }
 
 // Populate summary stat fields from a data object
 function populateStats(data) {

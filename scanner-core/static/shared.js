@@ -235,10 +235,12 @@ function buildQueryParams(includeFormat = false) {
     return params;
 }
 
-// Load filter options
+// Load filter options. pageConfig.filterOptionsEndpoint lets pages like
+// nodes.html point at /api/node-filter-options instead.
 async function loadFilterOptions() {
     try {
-        const response = await fetch('/api/filter-options');
+        const endpoint = pageConfig.filterOptionsEndpoint || '/api/filter-options';
+        const response = await fetch(endpoint);
         if (!response.ok) throw new Error('Failed to load filter options');
 
         const data = await response.json();
@@ -406,6 +408,17 @@ function addOtherCell(row, medium, low, negligible, unknown) {
     return cell;
 }
 
+// Switch between the Vulnerabilities / SBOM tabs on image.html and
+// node.html. Toggles the .active class on the headers and display:none on
+// the section bodies, then calls the per-tab filter handler.
+function showTab(activeId, hiddenId, onActive) {
+    document.getElementById(activeId.section).style.display = 'block';
+    document.getElementById(hiddenId.section).style.display = 'none';
+    document.getElementById(activeId.header).classList.add('active');
+    document.getElementById(hiddenId.header).classList.remove('active');
+    if (typeof onActive === 'function') onActive();
+}
+
 // Append a two-line left-aligned cell — bold-ish primary on top,
 // muted secondary below. Used for image (name + tag), pod (namespace/pod
 // + container), and node (name + OS distribution).
@@ -471,7 +484,10 @@ function isScanComplete(statusDescription) {
     return statusDescription === 'Scan complete';
 }
 
-// Load data table
+// Load data table. Handles two response shapes:
+//   - paginated object: { [dataKey]: [...], totalPages, totalCount, page }
+//   - bare array: [...]  (used by /api/summary/by-node which lacks server-side
+//     pagination/sort) — we sort and paginate client-side.
 async function loadDataTable() {
     const tableBody = document.querySelector('#vulnerabilityTable tbody');
 
@@ -486,17 +502,34 @@ async function loadDataTable() {
         const data = await response.json();
         tableBody.innerHTML = '';
 
-        totalPages = data.totalPages || 1;
-        totalItems = data.totalCount || 0;
-        currentPage = data.page || currentPage;
+        let items;
+        if (Array.isArray(data)) {
+            items = data.slice();
+            items.sort((a, b) => {
+                let av = a[sortBy], bv = b[sortBy];
+                if (typeof av === 'string') {
+                    av = av.toLowerCase();
+                    bv = (bv || '').toLowerCase();
+                }
+                if (av < bv) return sortOrder === 'ASC' ? -1 : 1;
+                if (av > bv) return sortOrder === 'ASC' ? 1 : -1;
+                return 0;
+            });
+            totalItems = items.length;
+            totalPages = Math.ceil(totalItems / pageSize) || 1;
+            const start = (currentPage - 1) * pageSize;
+            items = items.slice(start, start + pageSize);
+        } else {
+            items = data[pageConfig.dataKey] || [];
+            totalPages = data.totalPages || 1;
+            totalItems = data.totalCount || 0;
+            currentPage = data.page || currentPage;
+        }
 
-        (data[pageConfig.dataKey] || []).forEach(item => {
+        items.forEach(item => {
             const row = document.createElement('tr');
             row.classList.add('clickable-row');
-
-            // Call page-specific row rendering
             pageConfig.renderRow(row, item);
-
             tableBody.appendChild(row);
         });
 
@@ -514,31 +547,42 @@ async function loadDataTable() {
     }
 }
 
-// Load the filtered image summary bar (if present on this page)
+// Default deployment-metrics → stats array. Pages can override by setting
+// pageConfig.summaryStatsBuilder to a fn(metrics) => [[label, formattedValue], ...].
+function defaultSummaryStats(m) {
+    const stats = [
+        ['Images', formatNumber(m.images_scanned || 0)],
+        ['Containers', formatNumber(m.container_instances || 0)],
+        ['CVEs', formatNumber(m.total_cves || 0)],
+        ['Unique CVEs', formatNumber(m.unique_cves || 0)],
+        ['Exploits', formatNumber(m.total_exploits || 0)],
+    ];
+    if (m.images_pending) stats.push(['Pending', formatNumber(m.images_pending)]);
+    if (m.images_failed)  stats.push(['Failed',  formatNumber(m.images_failed)]);
+    return stats;
+}
+
+// Load the filtered summary bar (if present on this page).
+// pageConfig.summaryEndpoint and pageConfig.summaryStatsBuilder allow pages
+// like nodes.html to point at a different endpoint with a different shape.
 async function loadImageSummary() {
     const div = document.getElementById('imageSummary');
     if (!div) return;
 
     try {
-        const response = await fetch('/api/summary/deployment-metrics' + getCurrentFilterQueryString());
+        const endpoint = pageConfig.summaryEndpoint || '/api/summary/deployment-metrics';
+        const response = await fetch(endpoint + getCurrentFilterQueryString());
         if (!response.ok) return;
         const m = await response.json();
 
-        const stats = [
-            ['Images', formatNumber(m.images_scanned || 0)],
-            ['Containers', formatNumber(m.container_instances || 0)],
-            ['CVEs', formatNumber(m.total_cves || 0)],
-            ['Unique CVEs', formatNumber(m.unique_cves || 0)],
-            ['Exploits', formatNumber(m.total_exploits || 0)],
-        ];
-        if (m.images_pending) stats.push(['Pending', formatNumber(m.images_pending)]);
-        if (m.images_failed)  stats.push(['Failed',  formatNumber(m.images_failed)]);
+        const builder = pageConfig.summaryStatsBuilder || defaultSummaryStats;
+        const stats = builder(m);
 
         div.innerHTML = stats
             .map(([label, value]) => `<div class="stat"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value">${value}</div></div>`)
             .join('');
     } catch (e) {
-        console.error('Error loading image summary:', e);
+        console.error('Error loading summary:', e);
     }
 }
 

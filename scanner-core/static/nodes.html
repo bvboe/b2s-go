@@ -24,8 +24,8 @@
                         <select id="osNameFilter" name="osName" multiple onchange="onFilterChange()">
                         </select>
 
-                        <label for="vulnStatusFilter"><b>Vulnerability Status:</b></label>
-                        <select id="vulnStatusFilter" name="vulnStatus" multiple onchange="onFilterChange()">
+                        <label for="vulnerabilityStatusFilter"><b>Vulnerability Status:</b></label>
+                        <select id="vulnerabilityStatusFilter" name="vulnStatus" multiple onchange="onFilterChange()">
                         </select>
 
                         <label for="packageTypeFilter"><b>Vulnerable Package Type:</b></label>
@@ -62,10 +62,19 @@
 
     <script src="shared.js"></script>
     <script>
-        // Node-specific multiselect instances
-        let nodeMultiselectInstances = {};
+        // Builds the node-specific stats strip (Nodes / CVEs / Unique CVEs / Exploits).
+        function nodeSummaryStats(m) {
+            const stats = [
+                ['Nodes', formatNumber(m.total_nodes || 0)],
+                ['CVEs', formatNumber(m.total_cves || 0)],
+                ['Unique CVEs', formatNumber(m.unique_cves || 0)],
+                ['Exploits', formatNumber(m.total_exploits || 0)],
+            ];
+            if (m.nodes_pending) stats.push(['Pending', formatNumber(m.nodes_pending)]);
+            if (m.nodes_failed)  stats.push(['Failed',  formatNumber(m.nodes_failed)]);
+            return stats;
+        }
 
-        // Page-specific configuration for nodes.html
         initSharedPage({
             apiEndpoint: '/api/summary/by-node',
             dataKey: 'nodes',
@@ -74,6 +83,11 @@
             defaultSortBy: 'total_risk',
             defaultSortOrder: 'DESC',
             columnCount: 8,
+            // /api/summary/by-node returns a bare array — loadDataTable handles
+            // that shape natively (sorts and paginates client-side).
+            filterOptionsEndpoint: '/api/node-filter-options',
+            summaryEndpoint: '/api/summary/node-metrics',
+            summaryStatsBuilder: nodeSummaryStats,
             renderRow: function(row, item) {
                 row.onclick = function() {
                     window.location.href = 'node.html?name=' + encodeURIComponent(item.node_name);
@@ -96,191 +110,6 @@
                 }
             }
         });
-
-        // Override loadFilterOptions for node-specific filters
-        async function loadFilterOptions() {
-            try {
-                const response = await fetch('/api/node-filter-options');
-                if (!response.ok) throw new Error('Failed to load node filter options');
-
-                const filterData = await response.json();
-
-                const osSelect = document.getElementById('osNameFilter');
-                const osReleases = filterData.osNames || [];
-                osSelect.innerHTML = osReleases.map(os =>
-                    `<option value="${escapeHtml(os)}">${escapeHtml(os)}</option>`
-                ).join('');
-
-                const vulnStatusSelect = document.getElementById('vulnStatusFilter');
-                const vulnStatuses = filterData.vulnStatuses || ['fixed', 'not-fixed', 'wont-fix', 'unknown'];
-                vulnStatusSelect.innerHTML = vulnStatuses.map(status =>
-                    `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`
-                ).join('');
-
-                const packageTypeSelect = document.getElementById('packageTypeFilter');
-                const packageTypes = filterData.packageTypes || [];
-                packageTypeSelect.innerHTML = packageTypes.map(type =>
-                    `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
-                ).join('');
-
-                nodeMultiselectInstances['osNameFilter'] = new CustomMultiSelect(osSelect, 'All distributions');
-                nodeMultiselectInstances['vulnStatusFilter'] = new CustomMultiSelect(vulnStatusSelect, 'All statuses');
-                nodeMultiselectInstances['packageTypeFilter'] = new CustomMultiSelect(packageTypeSelect, 'All types');
-
-                applyNodeUrlFilters();
-
-            } catch (error) {
-                console.error('Error loading filter options:', error);
-            }
-        }
-
-        function applyNodeUrlFilters() {
-            const urlParams = new URLSearchParams(window.location.search);
-
-            const filterMappings = [
-                { params: ['osName', 'osNames'], filterId: 'osNameFilter' },
-                { params: ['vulnStatus', 'vulnStatuses'], filterId: 'vulnStatusFilter' },
-                { params: ['packageType', 'packageTypes'], filterId: 'packageTypeFilter' }
-            ];
-
-            filterMappings.forEach(mapping => {
-                let values = null;
-                for (const paramName of mapping.params) {
-                    const paramValue = urlParams.get(paramName);
-                    if (paramValue) {
-                        values = paramValue;
-                        break;
-                    }
-                }
-
-                if (values) {
-                    const valueArray = values.split(',').map(v => v.trim()).filter(v => v);
-                    const instance = nodeMultiselectInstances[mapping.filterId];
-                    if (instance) {
-                        valueArray.forEach(value => {
-                            const checkbox = instance.checkboxContainer.querySelector(`input[value="${CSS.escape(value)}"]`);
-                            if (checkbox) {
-                                checkbox.checked = true;
-                            }
-                        });
-                        instance.updateDisplay();
-                    }
-                }
-            });
-        }
-
-        function getSelectedValues(selectId) {
-            const instance = nodeMultiselectInstances[selectId];
-            return instance ? instance.getSelected() : [];
-        }
-
-        function buildQueryParams(includeFormat = false) {
-            const params = new URLSearchParams();
-            params.append('page', currentPage);
-            params.append('pageSize', includeFormat ? 10000 : pageSize);
-            params.append('sortBy', sortBy);
-            params.append('sortOrder', sortOrder);
-
-            const osNames = getSelectedValues('osNameFilter');
-            if (osNames.length) params.append('osNames', osNames.join(','));
-
-            const vulnStatuses = getSelectedValues('vulnStatusFilter');
-            if (vulnStatuses.length) params.append('vulnStatuses', vulnStatuses.join(','));
-
-            const packageTypes = getSelectedValues('packageTypeFilter');
-            if (packageTypes.length) params.append('packageTypes', packageTypes.join(','));
-
-            if (includeFormat) {
-                params.append('format', 'csv');
-            }
-
-            return params;
-        }
-
-        async function loadDataTable() {
-            const tableBody = document.querySelector('#vulnerabilityTable tbody');
-
-            try {
-                const params = buildQueryParams(false);
-                const response = await fetch(`${pageConfig.apiEndpoint}?${params}`);
-
-                if (!response.ok) {
-                    throw new Error(`Failed to load data: ${response.status} ${response.statusText}`);
-                }
-
-                const data = await response.json();
-                tableBody.innerHTML = '';
-
-                const items = Array.isArray(data) ? data : (data[pageConfig.dataKey] || []);
-
-                items.sort((a, b) => {
-                    let aVal = a[sortBy];
-                    let bVal = b[sortBy];
-                    if (typeof aVal === 'string') {
-                        aVal = aVal.toLowerCase();
-                        bVal = (bVal || '').toLowerCase();
-                    }
-                    if (aVal < bVal) return sortOrder === 'ASC' ? -1 : 1;
-                    if (aVal > bVal) return sortOrder === 'ASC' ? 1 : -1;
-                    return 0;
-                });
-
-                totalItems = items.length;
-                totalPages = Math.ceil(totalItems / pageSize) || 1;
-                const startIndex = (currentPage - 1) * pageSize;
-                const pageItems = items.slice(startIndex, startIndex + pageSize);
-
-                pageItems.forEach(item => {
-                    const row = document.createElement('tr');
-                    row.classList.add('clickable-row');
-                    pageConfig.renderRow(row, item);
-                    tableBody.appendChild(row);
-                });
-
-                renderPagination();
-
-            } catch (error) {
-                console.error('Error loading data:', error);
-                tableBody.innerHTML = '';
-                const row = document.createElement('tr');
-                const cell = addCellToRow(row, 'left', 'Error loading data: ' + error.message);
-                cell.colSpan = pageConfig.columnCount;
-                cell.style.color = 'red';
-                tableBody.appendChild(row);
-                renderPagination();
-            }
-        }
-
-        async function loadImageSummary() {
-            const div = document.getElementById('imageSummary');
-            if (!div) return;
-            try {
-                const params = new URLSearchParams();
-                const osNames = getSelectedValues('osNameFilter');
-                if (osNames.length) params.append('osNames', osNames.join(','));
-                const vulnStatuses = getSelectedValues('vulnStatusFilter');
-                if (vulnStatuses.length) params.append('vulnStatuses', vulnStatuses.join(','));
-                const packageTypes = getSelectedValues('packageTypeFilter');
-                if (packageTypes.length) params.append('packageTypes', packageTypes.join(','));
-                const qs = params.toString();
-                const response = await fetch('/api/summary/node-metrics' + (qs ? '?' + qs : ''));
-                if (!response.ok) return;
-                const m = await response.json();
-                const stats = [
-                    ['Nodes', formatNumber(m.total_nodes || 0)],
-                    ['CVEs', formatNumber(m.total_cves || 0)],
-                    ['Unique CVEs', formatNumber(m.unique_cves || 0)],
-                    ['Exploits', formatNumber(m.total_exploits || 0)],
-                ];
-                if (m.nodes_pending) stats.push(['Pending', formatNumber(m.nodes_pending)]);
-                if (m.nodes_failed)  stats.push(['Failed',  formatNumber(m.nodes_failed)]);
-                div.innerHTML = stats
-                    .map(([label, value]) => `<div class="stat"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value">${value}</div></div>`)
-                    .join('');
-            } catch (e) {
-                console.error('Error loading node summary:', e);
-            }
-        }
 
         document.addEventListener('DOMContentLoaded', initPage);
     </script>

@@ -96,23 +96,83 @@
     <script>
         const pageTitle = 'Summary';
 
-        let namespaceTableState = {
-            page: 1,
-            sortBy: 'avg_risk',
-            sortOrder: 'DESC',
-            totalPages: 1,
-            totalItems: 0,
-            pageSize: 100
-        };
+        // Each paginated avg-table on this page (Namespace, Distribution) has the same
+        // shape: identical state, identical column layout, an endpoint, a data key, and
+        // a per-row click handler. setupAvgTable wires up load / sort / goToPage as
+        // closures over a shared state object.
+        function setupAvgTable(cfg) {
+            const state = {
+                page: 1, sortBy: cfg.defaultSortBy || 'avg_risk', sortOrder: 'DESC',
+                totalPages: 1, totalItems: 0, pageSize: 100
+            };
 
-        let distributionTableState = {
-            page: 1,
-            sortBy: 'avg_risk',
-            sortOrder: 'DESC',
-            totalPages: 1,
-            totalItems: 0,
-            pageSize: 100
-        };
+            async function load() {
+                try {
+                    const params = buildIndexQueryParams({
+                        page: state.page, sortBy: state.sortBy, sortOrder: state.sortOrder, pageSize: 100
+                    });
+                    const response = await fetch(cfg.endpoint + params);
+                    if (!response.ok) throw new Error('Failed to load ' + cfg.endpoint);
+
+                    const data = await response.json();
+                    state.totalPages = data.totalPages || 1;
+                    state.totalItems = data.totalCount || 0;
+
+                    const items = data[cfg.dataKey] || [];
+                    const tbody = document.getElementById(cfg.tbodyId);
+                    tbody.innerHTML = '';
+                    if (items.length === 0) { showEmpty(tbody, 9); return; }
+
+                    items.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.classList.add('clickable-row');
+                        tr.onclick = () => { window.location.href = cfg.rowHref(item); };
+                        renderAvgRow(tr, cfg.mapItem(item));
+                        tbody.appendChild(tr);
+                    });
+
+                    renderPaginationFor(cfg.paginationId, state, cfg.goToPageFn);
+                    document.getElementById(cfg.csvLinkId).href = cfg.endpoint + params + '&format=csv';
+                } catch (error) {
+                    console.error('Error loading:', error);
+                    showError(cfg.tbodyId, error.message, 9);
+                }
+            }
+
+            function sort(column) {
+                if (state.sortBy === column) {
+                    state.sortOrder = state.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+                } else {
+                    state.sortBy = column;
+                    state.sortOrder = 'DESC';
+                }
+                state.page = 1;
+                updateSortIndicatorsFor(cfg.tableId, state);
+                load();
+            }
+
+            function goToPage(page) {
+                if (page < 1 || page > state.totalPages) return;
+                state.page = page;
+                load();
+            }
+
+            return { load, sort, goToPage };
+        }
+
+        // Field-mapper shared between Namespace and Distribution tables (same 11 avg
+        // fields, only the primary label and the count column name differ per call site).
+        function mapAvgFields(item, primaryField, countField) {
+            return {
+                primary: item[primaryField] || '',
+                count: item[countField],
+                risk: item.avg_risk,
+                critical: item.avg_critical, high: item.avg_high,
+                medium: item.avg_medium, low: item.avg_low,
+                negligible: item.avg_negligible, unknown: item.avg_unknown,
+                exploits: item.avg_exploits, packages: item.avg_packages
+            };
+        }
 
         async function initPage() {
             try {
@@ -179,164 +239,37 @@
         }
 
         // ===== Namespace Summary =====
-        async function loadNamespaceTable() {
-            try {
-                const params = buildIndexQueryParams({
-                    page: namespaceTableState.page,
-                    sortBy: namespaceTableState.sortBy,
-                    sortOrder: namespaceTableState.sortOrder,
-                    pageSize: 100
-                });
-
-                const response = await fetch(`/api/summary/by-namespace${params}`);
-                if (!response.ok) throw new Error('Failed to load namespace summary');
-
-                const data = await response.json();
-                namespaceTableState.totalPages = data.totalPages || 1;
-                namespaceTableState.totalItems = data.totalCount || 0;
-
-                renderNamespaceTable(data.namespaces || []);
-                renderNamespacePagination();
-                document.getElementById('namespaceCSVLink').href = `/api/summary/by-namespace${params}&format=csv`;
-            } catch (error) {
-                console.error('Error loading namespace summary:', error);
-                showError('namespaceTableBody', error.message, 9);
-            }
-        }
-
-        function renderNamespaceTable(namespaces) {
-            const tbody = document.getElementById('namespaceTableBody');
-            tbody.innerHTML = '';
-
-            if (namespaces.length === 0) {
-                showEmpty(tbody, 9);
-                return;
-            }
-
-            namespaces.forEach(ns => {
-                const row = document.createElement('tr');
-                row.classList.add('clickable-row');
-                row.onclick = function() {
-                    window.location.href = 'pods.html?namespaces=' + encodeURIComponent(ns.namespace);
-                };
-                renderAvgRow(row, {
-                    primary: ns.namespace || '',
-                    count: ns.container_count,
-                    risk: ns.avg_risk,
-                    critical: ns.avg_critical,
-                    high: ns.avg_high,
-                    medium: ns.avg_medium,
-                    low: ns.avg_low,
-                    negligible: ns.avg_negligible,
-                    unknown: ns.avg_unknown,
-                    exploits: ns.avg_exploits,
-                    packages: ns.avg_packages
-                });
-                tbody.appendChild(row);
-            });
-        }
-
-        function sortNamespaceTable(column) {
-            if (namespaceTableState.sortBy === column) {
-                namespaceTableState.sortOrder = namespaceTableState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
-            } else {
-                namespaceTableState.sortBy = column;
-                namespaceTableState.sortOrder = 'DESC';
-            }
-            namespaceTableState.page = 1;
-            updateSortIndicatorsFor('namespaceTable', namespaceTableState);
-            loadNamespaceTable();
-        }
-
-        function renderNamespacePagination() {
-            renderPaginationFor('namespacePagination', namespaceTableState, goToNamespacePage);
-        }
-
-        function goToNamespacePage(page) {
-            if (page < 1 || page > namespaceTableState.totalPages) return;
-            namespaceTableState.page = page;
-            loadNamespaceTable();
-        }
+        // function declarations are hoisted, so cfg can reference them.
+        function loadNamespaceTable()    { namespaceTable.load(); }
+        function sortNamespaceTable(c)   { namespaceTable.sort(c); }
+        function goToNamespacePage(p)    { namespaceTable.goToPage(p); }
+        const namespaceTable = setupAvgTable({
+            endpoint: '/api/summary/by-namespace',
+            dataKey: 'namespaces',
+            tbodyId: 'namespaceTableBody',
+            tableId: 'namespaceTable',
+            paginationId: 'namespacePagination',
+            csvLinkId: 'namespaceCSVLink',
+            goToPageFn: goToNamespacePage,
+            rowHref: ns => 'pods.html?namespaces=' + encodeURIComponent(ns.namespace),
+            mapItem: ns => mapAvgFields(ns, 'namespace', 'container_count'),
+        });
 
         // ===== Container Distribution Summary =====
-        async function loadDistributionTable() {
-            try {
-                const params = buildIndexQueryParams({
-                    page: distributionTableState.page,
-                    sortBy: distributionTableState.sortBy,
-                    sortOrder: distributionTableState.sortOrder,
-                    pageSize: 100
-                });
-
-                const response = await fetch(`/api/summary/by-distribution${params}`);
-                if (!response.ok) throw new Error('Failed to load distribution summary');
-
-                const data = await response.json();
-                distributionTableState.totalPages = data.totalPages || 1;
-                distributionTableState.totalItems = data.totalCount || 0;
-
-                renderDistributionTable(data.distributions || []);
-                renderDistributionPagination();
-                document.getElementById('distributionCSVLink').href = `/api/summary/by-distribution${params}&format=csv`;
-            } catch (error) {
-                console.error('Error loading distribution summary:', error);
-                showError('distributionTableBody', error.message, 9);
-            }
-        }
-
-        function renderDistributionTable(distributions) {
-            const tbody = document.getElementById('distributionTableBody');
-            tbody.innerHTML = '';
-
-            if (distributions.length === 0) {
-                showEmpty(tbody, 9);
-                return;
-            }
-
-            distributions.forEach(dist => {
-                const row = document.createElement('tr');
-                row.classList.add('clickable-row');
-                row.onclick = function() {
-                    window.location.href = 'pods.html?osNames=' + encodeURIComponent(dist.os_name);
-                };
-                renderAvgRow(row, {
-                    primary: dist.os_name || '',
-                    count: dist.container_count,
-                    risk: dist.avg_risk,
-                    critical: dist.avg_critical,
-                    high: dist.avg_high,
-                    medium: dist.avg_medium,
-                    low: dist.avg_low,
-                    negligible: dist.avg_negligible,
-                    unknown: dist.avg_unknown,
-                    exploits: dist.avg_exploits,
-                    packages: dist.avg_packages
-                });
-                tbody.appendChild(row);
-            });
-        }
-
-        function sortDistributionTable(column) {
-            if (distributionTableState.sortBy === column) {
-                distributionTableState.sortOrder = distributionTableState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
-            } else {
-                distributionTableState.sortBy = column;
-                distributionTableState.sortOrder = 'DESC';
-            }
-            distributionTableState.page = 1;
-            updateSortIndicatorsFor('distributionTable', distributionTableState);
-            loadDistributionTable();
-        }
-
-        function renderDistributionPagination() {
-            renderPaginationFor('distributionPagination', distributionTableState, goToDistributionPage);
-        }
-
-        function goToDistributionPage(page) {
-            if (page < 1 || page > distributionTableState.totalPages) return;
-            distributionTableState.page = page;
-            loadDistributionTable();
-        }
+        function loadDistributionTable()    { distributionTable.load(); }
+        function sortDistributionTable(c)   { distributionTable.sort(c); }
+        function goToDistributionPage(p)    { distributionTable.goToPage(p); }
+        const distributionTable = setupAvgTable({
+            endpoint: '/api/summary/by-distribution',
+            dataKey: 'distributions',
+            tbodyId: 'distributionTableBody',
+            tableId: 'distributionTable',
+            paginationId: 'distributionPagination',
+            csvLinkId: 'distributionCSVLink',
+            goToPageFn: goToDistributionPage,
+            rowHref: dist => 'pods.html?osNames=' + encodeURIComponent(dist.os_name),
+            mapItem: dist => mapAvgFields(dist, 'os_name', 'container_count'),
+        });
 
         // ===== Node Distribution Summary =====
         async function loadNodeDistributionTable() {

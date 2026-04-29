@@ -32,7 +32,8 @@ a {
     text-align: right;
 }
 
-.listingTable thead th:first-child {
+.listingTable thead th:first-child,
+.listingTable thead th.text-col {
     text-align: left;
 }
 
