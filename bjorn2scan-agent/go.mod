@@ -3,8 +3,8 @@ module github.com/bvboe/b2s-go/bjorn2scan-agent
 go 1.25.8
 
 require (
-	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/anchore/syft v1.43.0
+	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/anchore/syft v1.44.0
 	github.com/bvboe/b2s-go/sbom-generator-shared v0.0.0-20260318203456-d47caeb6547a
 	github.com/bvboe/b2s-go/scanner-core v0.0.0-20251229133410-246b755cc828
 	github.com/sigstore/sigstore-go v1.1.4
