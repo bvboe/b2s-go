@@ -860,6 +860,71 @@ func TestGetImagesNeedingRescan(t *testing.T) {
 	}
 }
 
+// TestGetImagesNeedingRescan_IncludesVulnScanFailed verifies that images stuck
+// in vuln_scan_failed with a stale grype_db are picked up for rescan. Without
+// this, an image whose last scan failed (e.g. because grype's validateAge bug
+// returned "1 week ago") stays stranded forever.
+func TestGetImagesNeedingRescan_IncludesVulnScanFailed(t *testing.T) {
+	dbPath := "/tmp/test_rescan_failed_" + time.Now().Format("20060102150405") + ".db"
+	defer func() { _ = os.Remove(dbPath) }()
+
+	db, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer func() { _ = Close(db) }()
+
+	currentGrypeDBBuilt := time.Date(2026, 5, 6, 7, 0, 0, 0, time.UTC)
+	oldGrypeDBBuilt := time.Date(2026, 5, 3, 7, 0, 0, 0, time.UTC)
+
+	// Image: vuln_scan_failed with old grype DB and an SBOM present — SHOULD be returned.
+	failed := containers.Container{
+		ID:    containers.ContainerID{Namespace: "default", Pod: "stuck-pod", Name: "stuck"},
+		Image: containers.ImageID{Reference: "stuck:1.0", Digest: "sha256:stuck-failed"},
+		NodeName: "worker-1", ContainerRuntime: "containerd",
+	}
+	if _, err := db.AddContainer(failed); err != nil {
+		t.Fatalf("AddContainer failed: %v", err)
+	}
+	if err := db.StoreSBOM("sha256:stuck-failed", []byte(`{"test":"sbom"}`)); err != nil {
+		t.Fatalf("StoreSBOM failed: %v", err)
+	}
+	if err := db.UpdateStatus("sha256:stuck-failed", StatusVulnScanFailed, "1 week ago"); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+	if _, err := db.conn.Exec(`UPDATE images SET grype_db_built = ? WHERE digest = ?`,
+		oldGrypeDBBuilt.UTC().Format(time.RFC3339), "sha256:stuck-failed"); err != nil {
+		t.Fatalf("set grype_db_built failed: %v", err)
+	}
+
+	// Pending image (no SBOM yet) — should NOT be returned. Pending != failed-with-SBOM.
+	pending := containers.Container{
+		ID:    containers.ContainerID{Namespace: "default", Pod: "pending-pod", Name: "pending"},
+		Image: containers.ImageID{Reference: "pending:1.0", Digest: "sha256:pending"},
+		NodeName: "worker-1", ContainerRuntime: "containerd",
+	}
+	if _, err := db.AddContainer(pending); err != nil {
+		t.Fatalf("AddContainer pending failed: %v", err)
+	}
+
+	images, err := db.GetImagesNeedingRescan(currentGrypeDBBuilt)
+	if err != nil {
+		t.Fatalf("GetImagesNeedingRescan failed: %v", err)
+	}
+
+	digests := make(map[string]bool)
+	for _, img := range images {
+		digests[img.Digest] = true
+	}
+
+	if !digests["sha256:stuck-failed"] {
+		t.Errorf("Expected vuln_scan_failed image with stale grype_db and SBOM to be returned; got: %v", digests)
+	}
+	if digests["sha256:pending"] {
+		t.Error("pending image (no SBOM) must not be returned")
+	}
+}
+
 // TestGetImagesNeedingRescan_ZeroTimestamp tests that a zero timestamp returns nil
 func TestGetImagesNeedingRescan_ZeroTimestamp(t *testing.T) {
 	dbPath := "/tmp/test_rescan_zero_" + time.Now().Format("20060102150405") + ".db"

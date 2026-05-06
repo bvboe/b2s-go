@@ -899,15 +899,19 @@ func (db *DB) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]Container
 
 	currentTimestamp := currentGrypeDBBuilt.UTC().Format(time.RFC3339)
 
+	// Include both 'completed' and 'vuln_scan_failed' images. A failed image
+	// might have failed precisely because of a stale or broken grype DB;
+	// retrying with a fresh DB is exactly what we want. SBOM presence is the
+	// gate — without an SBOM we have nothing to scan.
 	rows, err := db.conn.Query(`
 		SELECT DISTINCT i.id, i.digest, i.created_at, i.updated_at
 		FROM images i
 		INNER JOIN containers c ON c.image_id = i.id
-		WHERE i.status = ?
+		WHERE i.status IN (?, ?)
 		  AND (i.sbom_compressed IS NOT NULL OR (i.sbom IS NOT NULL AND i.sbom != ''))
 		  AND (i.grype_db_built IS NULL OR i.grype_db_built < ?)
 		ORDER BY i.created_at DESC
-	`, StatusCompleted.String(), currentTimestamp)
+	`, StatusCompleted.String(), StatusVulnScanFailed.String(), currentTimestamp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query images needing rescan: %w", err)
 	}

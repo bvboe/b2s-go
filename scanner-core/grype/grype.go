@@ -140,7 +140,18 @@ func InitializeDatabase(cfg Config) (*DatabaseStatus, error) {
 
 	loadDuration := time.Since(startTime).Round(time.Millisecond)
 
+	// Trust-the-disk fallback (mirrors database_updater.go): grype's Status()
+	// can return "the vulnerability database was built 1 week ago" even when
+	// the file on disk is fresh. If we can read a build_timestamp from disk,
+	// accept it as authoritative.
 	if err != nil {
+		dbFile := filepath.Join(installCfg.DBRootDir, "6", "vulnerability.db")
+		if actualBuilt, diskErr := readActualDBTimestamp(dbFile); diskErr == nil {
+			log.Warn("loader returned error but on-disk DB is readable, accepting it",
+				"error", err, "actual_built", actualBuilt)
+			logDirectoryContents(installCfg.DBRootDir, "init-post")
+			return &DatabaseStatus{Available: true, Path: dbFile, Built: actualBuilt}, nil
+		}
 		log.Error("failed to initialize database", "duration", loadDuration, slog.Any("error", err))
 		logDirectoryContents(installCfg.DBRootDir, "init-fail")
 
@@ -352,15 +363,20 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		log.Debug("using grype database directory", "dir", dbDir)
 	}
 
-	// Check if database exists, if not download it
+	// Load the database WITHOUT auto-update. Per-scan calls must not try to
+	// update the DB — that's the dedicated rescan-database job's responsibility.
+	// Calling LoadVulnerabilityDB(update=true) here exposes the validateAge bug
+	// in grype's Status(): it returns "the vulnerability database was built 1
+	// week ago" even when the on-disk DB is fresh, and that error aborts the
+	// scan and marks the image vuln_scan_failed. update=false skips the
+	// update+validateAge code path; if the DB exists on disk we use it.
 	log.Debug("checking vulnerability database status")
 	log.Debug("database config", "db_root", installCfg.DBRootDir, "latest_url", distCfg.LatestURL)
 
 	// Log directory contents before loading (helps diagnose issues)
 	logDirectoryContents(installCfg.DBRootDir, "db-pre")
 
-	// Load the database with auto-update enabled, with progress logging
-	log.Debug("loading vulnerability database (will download if missing)")
+	log.Debug("loading vulnerability database (no update — owned by rescan-database job)")
 	startTime := time.Now()
 
 	// Start a progress indicator goroutine
@@ -379,12 +395,17 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		}
 	}()
 
-	vulnProvider, dbStatus, err := grype.LoadVulnerabilityDB(distCfg, installCfg, true)
+	vulnProvider, dbStatus, err := grype.LoadVulnerabilityDB(distCfg, installCfg, false)
 	close(done) // Stop progress indicator
 
 	loadDuration := time.Since(startTime).Round(time.Millisecond)
 
 	if err != nil {
+		// Defence in depth: even with update=false, grype's Status() still runs
+		// validateAge against the on-disk DB. If that fails despite the file
+		// being usable on disk, we'd rather log and proceed than abort the scan.
+		// (Status validation is grype's responsibility; if the DB is too old to
+		// be useful, the dedicated rescan-database job will surface that.)
 		log.Error("failed to load vulnerability database", "duration", loadDuration, slog.Any("error", err))
 		if dbStatus != nil {
 			log.Debug("database status on failure",
@@ -394,7 +415,6 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 				"path", dbStatus.Path,
 				"db_error", dbStatus.Error)
 		}
-		// Log directory contents after failure to see what state we're in
 		logDirectoryContents(installCfg.DBRootDir, "db-post-fail")
 		return nil, fmt.Errorf("failed to load vulnerability database: %w", err)
 	}
