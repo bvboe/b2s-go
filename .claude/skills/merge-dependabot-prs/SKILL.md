@@ -215,6 +215,48 @@ git commit -m "chore(deps): bump <package> from X.Y.Z to A.B.C
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 ```
 
+### Step 9: Cancel Redundant CI Runs
+
+Each commit pushed to `main` and each `gh pr merge` triggers a fresh CI run.
+When you process multiple Dependabot PRs back-to-back (Strategy B commit + several
+Strategy A merges), GitHub will queue a full CI pipeline for every single one —
+even though the latest commit already contains all prior changes.
+
+**After the last merge, list in-flight runs and cancel everything except the
+latest commit's:**
+
+```bash
+# See what's running
+gh run list --limit 15 --json databaseId,status,headSha,name,displayTitle \
+  | jq -r '.[] | select(.status == "queued" or .status == "in_progress")
+            | "\(.databaseId)\t\(.headSha[0:7])\t\(.name)\t\(.displayTitle[0:55])"'
+
+# Cancel each redundant run by ID
+gh run cancel <run-id>
+```
+
+**Rule of thumb:** keep only the runs whose `headSha` matches `git rev-parse HEAD`
+on `origin/main`. Earlier-commit runs are superseded — their outcome is already
+captured by the latest run, which exercises the cumulative state.
+
+**Even better: bake this into the workflows** so future pushes auto-cancel.
+Add a `concurrency` block to each long-running workflow:
+
+```yaml
+concurrency:
+  group: <workflow-name>-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+Confirmed working in `ci.yaml`, `agent-integration-test.yaml`, and
+`auto-update-test.yaml` (added 2026-05-11). Once those are in place you generally
+won't need to cancel by hand — pushing the next commit handles it.
+
+Also verify path filters are tight: a `paths: ['scanner-core/**']` filter will
+match `scanner-core/web/**` and trigger Go CI on web-only NPM updates. Use
+`!scanner-core/web/**` exclusions inside `paths`, not `paths-ignore` (GitHub
+silently drops `paths-ignore` when `paths` is present in the same event block).
+
 ## Error Handling
 
 ### Common Issues
