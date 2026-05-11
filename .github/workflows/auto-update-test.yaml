@@ -25,6 +25,10 @@ on:
       - 'scripts/test-agent-updater'
       - 'helm/bjorn2scan/templates/update-controller-*'
 
+concurrency:
+  group: auto-update-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-k8s-update-controller:
     name: Test K8s Update Controller

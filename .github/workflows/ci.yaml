@@ -3,8 +3,30 @@ name: CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'scanner-core/web/**'
+      - 'helm/**'
+      - 'dev-local/**'
+      - '**.md'
+      - '.github/workflows/agent-integration-test.yaml'
+      - '.github/workflows/auto-update-test.yaml'
+      - '.github/workflows/release.yaml'
+      - '.github/workflows/update-grype-db-history.yaml'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'scanner-core/web/**'
+      - 'helm/**'
+      - 'dev-local/**'
+      - '**.md'
+      - '.github/workflows/agent-integration-test.yaml'
+      - '.github/workflows/auto-update-test.yaml'
+      - '.github/workflows/release.yaml'
+      - '.github/workflows/update-grype-db-history.yaml'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

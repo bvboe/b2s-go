@@ -8,6 +8,7 @@ on:
     paths:
       - 'bjorn2scan-agent/**'
       - 'scanner-core/**'
+      - '!scanner-core/web/**'
       - 'scripts/agent-integration-test'
       - 'scripts/test-cases.txt'
       - '.github/workflows/agent-integration-test.yaml'
@@ -15,9 +16,14 @@ on:
     paths:
       - 'bjorn2scan-agent/**'
       - 'scanner-core/**'
+      - '!scanner-core/web/**'
       - 'scripts/agent-integration-test'
       - 'scripts/test-cases.txt'
       - '.github/workflows/agent-integration-test.yaml'
+
+concurrency:
+  group: agent-integration-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
