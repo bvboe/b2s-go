@@ -1380,8 +1380,12 @@ func (db *DB) GetNodeDistributionSummary() ([]nodes.NodeDistributionSummary, err
 	return summaries, nil
 }
 
-// GetNodesNeedingRescan returns nodes that need to be rescanned due to grype DB update
+// GetNodesNeedingRescan returns nodes that need to be rescanned due to grype DB update.
+// Includes both 'completed' and 'vuln_scan_failed' nodes — a failed node may have
+// failed precisely because of a stale or broken grype DB, and retrying with the
+// fresh DB is exactly what we want. Mirrors the same fix in GetImagesNeedingRescan.
 func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.NodeWithStatus, error) {
+	ts := currentGrypeDBBuilt.Format(time.RFC3339)
 	rows, err := db.conn.Query(`
 		SELECT id, name, hostname, os_release, kernel_version, architecture,
 			container_runtime, kubelet_version, status, status_error,
@@ -1390,10 +1394,10 @@ func (db *DB) GetNodesNeedingRescan(currentGrypeDBBuilt time.Time) ([]nodes.Node
 			(SELECT COUNT(*) FROM node_vulnerabilities WHERE node_id = nodes.id)
 		FROM nodes
 		WHERE (
-			(status = ? AND (grype_db_built IS NULL OR grype_db_built < ?))
+			(status IN (?, ?) AND (grype_db_built IS NULL OR grype_db_built < ?))
 			OR (status = 'pending' AND grype_db_built IS NOT NULL AND grype_db_built < ?)
 		)
-	`, StatusCompleted.String(), currentGrypeDBBuilt.Format(time.RFC3339), currentGrypeDBBuilt.Format(time.RFC3339))
+	`, StatusCompleted.String(), StatusVulnScanFailed.String(), ts, ts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query nodes needing rescan: %w", err)
 	}

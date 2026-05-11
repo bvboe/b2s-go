@@ -14,6 +14,7 @@ import (
 
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype"
+	v6 "github.com/anchore/grype/grype/db/v6"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/matcher"
@@ -363,83 +364,70 @@ func ScanVulnerabilitiesWithConfig(ctx context.Context, sbomJSON []byte, cfg Con
 		log.Debug("using grype database directory", "dir", dbDir)
 	}
 
-	// Load the database WITHOUT auto-update. Per-scan calls must not try to
-	// update the DB — that's the dedicated rescan-database job's responsibility.
-	// Calling LoadVulnerabilityDB(update=true) here exposes the validateAge bug
-	// in grype's Status(): it returns "the vulnerability database was built 1
-	// week ago" even when the on-disk DB is fresh, and that error aborts the
-	// scan and marks the image vuln_scan_failed. update=false skips the
-	// update+validateAge code path; if the DB exists on disk we use it.
+	// Build the vulnerability provider directly from the on-disk DB, bypassing
+	// grype.LoadVulnerabilityDB. That high-level helper unconditionally calls
+	// c.Status() which runs validateAge against the on-disk metadata and aborts
+	// with "the vulnerability database was built N ago" — a known issue that
+	// also bit us in database_updater.go (commit 3a64d3d).
+	//
+	// We don't care about validateAge on the per-scan path:
+	//   - DB freshness is the rescan-database job's responsibility, and that
+	//     job has its own trust-the-disk fallback. If the DB is too stale to
+	//     be useful operationally, that job (not per-scan errors) is the
+	//     surface that should escalate.
+	//   - Failing scans because grype thinks the on-disk DB is "5 days old"
+	//     when we just verified it's fresh creates a vuln_scan_failed cascade.
+	//
+	// Curator.Reader() only requires the DB to exist on disk (it checks for
+	// ErrDBDoesNotExist); it does NOT run validateAge. v6.NewVulnerabilityProvider
+	// wraps the Reader. This is exactly what LoadVulnerabilityDB does internally
+	// after Status() passes — we just skip Status().
 	log.Debug("checking vulnerability database status")
 	log.Debug("database config", "db_root", installCfg.DBRootDir, "latest_url", distCfg.LatestURL)
 
-	// Log directory contents before loading (helps diagnose issues)
 	logDirectoryContents(installCfg.DBRootDir, "db-pre")
 
-	log.Debug("loading vulnerability database (no update — owned by rescan-database job)")
+	log.Debug("loading vulnerability database (bypassing validateAge)")
 	startTime := time.Now()
 
-	// Start a progress indicator goroutine
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				elapsed := time.Since(startTime).Round(time.Second)
-				log.Info("still loading database", "elapsed", elapsed)
-			}
-		}
-	}()
-
-	vulnProvider, dbStatus, err := grype.LoadVulnerabilityDB(distCfg, installCfg, false)
-	close(done) // Stop progress indicator
-
-	loadDuration := time.Since(startTime).Round(time.Millisecond)
-
+	distClient, err := distribution.NewClient(distCfg)
 	if err != nil {
-		// Defence in depth: even with update=false, grype's Status() still runs
-		// validateAge against the on-disk DB. If that fails despite the file
-		// being usable on disk, we'd rather log and proceed than abort the scan.
-		// (Status validation is grype's responsibility; if the DB is too old to
-		// be useful, the dedicated rescan-database job will surface that.)
-		log.Error("failed to load vulnerability database", "duration", loadDuration, slog.Any("error", err))
-		if dbStatus != nil {
-			log.Debug("database status on failure",
-				"built", dbStatus.Built,
-				"schema", dbStatus.SchemaVersion,
-				"from", dbStatus.From,
-				"path", dbStatus.Path,
-				"db_error", dbStatus.Error)
-		}
+		return nil, fmt.Errorf("failed to create distribution client: %w", err)
+	}
+	curator, err := installation.NewCurator(installCfg, distClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create curator: %w", err)
+	}
+	rdr, err := curator.Reader()
+	if err != nil {
+		log.Error("failed to open vulnerability database reader", "duration", time.Since(startTime).Round(time.Millisecond), slog.Any("error", err))
 		logDirectoryContents(installCfg.DBRootDir, "db-post-fail")
 		return nil, fmt.Errorf("failed to load vulnerability database: %w", err)
 	}
+	vulnProvider := v6.NewVulnerabilityProvider(rdr)
+
+	// Synthesise dbStatus from the on-disk metadata so we still report what
+	// version was used for the scan (matches the shape LoadVulnerabilityDB
+	// would have returned, minus the Status validation).
+	dbFile := filepath.Join(installCfg.DBRootDir, "6", "vulnerability.db")
+	actualBuilt, _ := readActualDBTimestamp(dbFile)
+	dbStatus := &vulnerability.ProviderStatus{
+		Built: actualBuilt,
+		Path:  dbFile,
+	}
+
+	loadDuration := time.Since(startTime).Round(time.Millisecond)
 
 	log.Info("loaded vulnerability database successfully", "duration", loadDuration)
-	if dbStatus != nil {
-		log.Debug("database status",
-			"built", dbStatus.Built,
-			"schema", dbStatus.SchemaVersion,
-			"from", dbStatus.From)
-	}
+	log.Debug("database status",
+		"built", dbStatus.Built,
+		"schema", dbStatus.SchemaVersion,
+		"from", dbStatus.From)
 
 	// Log directory contents after successful load
 	logDirectoryContents(installCfg.DBRootDir, "db-post")
 
-	// Read the actual timestamp from the SQLite database file.
-	// The grype loader may return a cached/stale timestamp that doesn't reflect
-	// the actual database on disk, so we read it directly to get the true value.
-	actualBuilt, err := readActualDBTimestamp(dbStatus.Path)
-	if err != nil {
-		log.Warn("failed to read actual DB timestamp, using loader value", slog.Any("error", err))
-	} else if !actualBuilt.Equal(dbStatus.Built) {
-		log.Info("corrected stale timestamp", "loader", dbStatus.Built, "actual", actualBuilt)
-		dbStatus.Built = actualBuilt
-	}
+	// dbStatus.Built was populated above from readActualDBTimestamp; no need to re-read.
 
 	// Use Grype's Provide function to get packages and context with proper processing
 	// This handles distro extraction, relationship processing, and package filtering

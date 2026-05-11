@@ -699,6 +699,43 @@ func TestGetNodesNeedingRescan(t *testing.T) {
 	}
 }
 
+// TestGetNodesNeedingRescan_IncludesVulnScanFailed verifies that nodes stuck
+// in vuln_scan_failed with a stale grype_db are picked up for rescan. Without
+// this, a node whose last scan failed (e.g. because grype's validateAge bug
+// returned "5 days ago") stays stranded forever — mirrors the image-side fix.
+func TestGetNodesNeedingRescan_IncludesVulnScanFailed(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// Seed a node with SBOM + vuln data scanned against an old grype DB, then
+	// mark it vuln_scan_failed (simulates the production cascade we're fixing).
+	node := nodes.Node{Name: "test-node-failed"}
+	_, _ = db.AddNode(node)
+	sbom := `{"artifacts": [{"name": "openssl", "version": "1.1.1", "type": "deb"}]}`
+	_ = db.StoreNodeSBOM("test-node-failed", []byte(sbom))
+	oldGrypeDB := time.Now().Add(-72 * time.Hour)
+	_ = db.StoreNodeVulnerabilities("test-node-failed", []byte(`{"matches": []}`), oldGrypeDB)
+	_ = db.UpdateNodeStatus("test-node-failed", StatusVulnScanFailed, "1 week ago")
+
+	currentGrypeDB := time.Now()
+	nodesToRescan, err := db.GetNodesNeedingRescan(currentGrypeDB)
+	if err != nil {
+		t.Fatalf("GetNodesNeedingRescan failed: %v", err)
+	}
+
+	found := false
+	for _, n := range nodesToRescan {
+		if n.Name == "test-node-failed" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected vuln_scan_failed node with stale grype_db to be returned for rescan; got %d nodes: %+v",
+			len(nodesToRescan), nodesToRescan)
+	}
+}
+
 // TestGetNodesNeedingRescan_ExcludesUpToDate tests that up-to-date nodes are excluded
 func TestGetNodesNeedingRescan_ExcludesUpToDate(t *testing.T) {
 	db, cleanup := createTestDB(t)
