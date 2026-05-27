@@ -33,7 +33,5 @@ jobs:
           git add scripts/grype-db-history.json
           git commit -m "Update Grype DB history
 
-          $(jq -r '.[length-1] | "Database: \(.schemaVersion) built \(.built)"' scripts/grype-db-history.json)
-
-          [skip ci]"
+          $(jq -r '.[length-1] | "Database: \(.schemaVersion) built \(.built)"' scripts/grype-db-history.json)"
           git push
