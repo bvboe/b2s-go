@@ -1307,3 +1307,49 @@ func TestGetNodeVulnerabilitiesForMetrics_DeduplicatedCount(t *testing.T) {
 		t.Errorf("Expected Count=3, got %d", vulns[0].Count)
 	}
 }
+
+// TestGetNodeScanStatusCounts verifies node counts are grouped by status and
+// zero-filled across all statuses in the scan_status table.
+func TestGetNodeScanStatusCounts(t *testing.T) {
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// 2 completed, 1 vuln_scan_failed (default status on AddNode is "pending").
+	for _, n := range []string{"n1", "n2", "n3", "n4"} {
+		if _, err := db.AddNode(nodes.Node{Name: n, Hostname: n, Architecture: "amd64"}); err != nil {
+			t.Fatalf("AddNode %s: %v", n, err)
+		}
+	}
+	for _, n := range []string{"n1", "n2"} {
+		if err := db.UpdateNodeStatus(n, StatusCompleted, ""); err != nil {
+			t.Fatalf("UpdateNodeStatus %s: %v", n, err)
+		}
+	}
+	if err := db.UpdateNodeStatus("n3", StatusVulnScanFailed, "boom"); err != nil {
+		t.Fatalf("UpdateNodeStatus n3: %v", err)
+	}
+	// n4 stays pending
+
+	counts, err := db.GetNodeScanStatusCounts()
+	if err != nil {
+		t.Fatalf("GetNodeScanStatusCounts: %v", err)
+	}
+
+	got := map[string]int{}
+	for _, c := range counts {
+		got[c.Status] = c.Count
+	}
+	if got["completed"] != 2 {
+		t.Errorf("completed: want 2, got %d", got["completed"])
+	}
+	if got["vuln_scan_failed"] != 1 {
+		t.Errorf("vuln_scan_failed: want 1, got %d", got["vuln_scan_failed"])
+	}
+	if got["pending"] != 1 {
+		t.Errorf("pending: want 1, got %d", got["pending"])
+	}
+	// zero-fill: a known status with no nodes should still be present with 0.
+	if _, ok := got["completed"]; !ok {
+		t.Error("expected statuses to be zero-filled from scan_status table")
+	}
+}

@@ -36,6 +36,7 @@ type UnifiedConfig struct {
 	ImageScanStatusEnabled        bool
 	// Node metrics
 	NodeScannedEnabled                bool
+	NodeScanStatusEnabled             bool
 	NodeVulnerabilitiesEnabled        bool
 	NodeVulnerabilityRiskEnabled      bool
 	NodeVulnerabilityExploitedEnabled bool
@@ -53,6 +54,7 @@ type StreamingProvider interface {
 	GetImageScanStatusCounts() ([]database.ImageScanStatusCount, error)
 	// Node data
 	GetScannedNodes() ([]nodes.NodeWithStatus, error)
+	GetNodeScanStatusCounts() ([]database.NodeScanStatusCount, error)
 	StreamNodeVulnerabilitiesForMetrics(func(database.NodeVulnerabilityForMetrics) error) error
 	// Staleness persistence (backed by the metric_staleness table; key_hash schema added in v48).
 	// HydrateStalenessState is called once at StalenessStore construction; ApplyStalenessChanges

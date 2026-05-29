@@ -30,13 +30,14 @@ func (m *MockInfoProvider) GetGrypeDBBuilt() string   { return m.grypeDBBuilt }
 // MockStreamingProvider implements both StreamingProvider and StalenessDB for testing.
 // The staleness methods delegate to the embedded mockStalenessDB so tests can verify upserts.
 type MockStreamingProvider struct {
-	containers   []database.ScannedContainer
-	vulns        []database.ContainerVulnerability
-	scanStatuses []database.ImageScanStatusCount
-	scannedNodes []nodes.NodeWithStatus
-	nodeVulns    []database.NodeVulnerabilityForMetrics
-	stalenessDB  *mockStalenessDB
-	err          error
+	containers       []database.ScannedContainer
+	vulns            []database.ContainerVulnerability
+	scanStatuses     []database.ImageScanStatusCount
+	nodeScanStatuses []database.NodeScanStatusCount
+	scannedNodes     []nodes.NodeWithStatus
+	nodeVulns        []database.NodeVulnerabilityForMetrics
+	stalenessDB      *mockStalenessDB
+	err              error
 }
 
 func newMockStreamingProvider() *MockStreamingProvider {
@@ -72,6 +73,13 @@ func (m *MockStreamingProvider) GetImageScanStatusCounts() ([]database.ImageScan
 		return nil, m.err
 	}
 	return m.scanStatuses, nil
+}
+
+func (m *MockStreamingProvider) GetNodeScanStatusCounts() ([]database.NodeScanStatusCount, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.nodeScanStatuses, nil
 }
 
 func (m *MockStreamingProvider) GetScannedNodes() ([]nodes.NodeWithStatus, error) {
@@ -250,6 +258,30 @@ func TestStreamMetrics_NodeMetrics(t *testing.T) {
 	}
 }
 
+func TestStreamMetrics_NodeScanStatus(t *testing.T) {
+	info := &MockInfoProvider{deploymentName: "cluster", deploymentType: "kubernetes", version: "1.0.0"}
+	provider := newMockStreamingProvider()
+	provider.nodeScanStatuses = []database.NodeScanStatusCount{
+		{Status: "completed", Count: 5},
+		{Status: "vuln_scan_failed", Count: 1},
+		{Status: "pending", Count: 0},
+	}
+	config := UnifiedConfig{NodeScanStatusEnabled: true}
+
+	output := streamMetricsToString(t, info, "uuid", provider, config, nil)
+
+	if !strings.Contains(output, "bjorn2scan_node_scan_status{") {
+		t.Fatal("Expected bjorn2scan_node_scan_status metric")
+	}
+	if !strings.Contains(output, `scan_status="completed"`) || !strings.Contains(output, `scan_status="vuln_scan_failed"`) {
+		t.Error("Expected scan_status labels for completed and vuln_scan_failed")
+	}
+	// 3 statuses emitted (including the zero-count one)
+	if c := strings.Count(output, "bjorn2scan_node_scan_status{"); c != 3 {
+		t.Errorf("Expected 3 node_scan_status series, got %d", c)
+	}
+}
+
 func TestStreamMetrics_NaNForStaleRows(t *testing.T) {
 	info := &MockInfoProvider{deploymentName: "cluster", deploymentType: "kubernetes", version: "1.0.0"}
 	provider := newMockStreamingProvider()
@@ -277,10 +309,10 @@ func TestStreamMetrics_EmptyProvider(t *testing.T) {
 	info := &MockInfoProvider{deploymentName: "cluster", deploymentType: "kubernetes", version: "1.0.0"}
 	provider := newMockStreamingProvider()
 	config := UnifiedConfig{
-		DeploymentEnabled:        true,
-		ScannedContainersEnabled: true,
-		VulnerabilitiesEnabled:   true,
-		NodeScannedEnabled:       true,
+		DeploymentEnabled:          true,
+		ScannedContainersEnabled:   true,
+		VulnerabilitiesEnabled:     true,
+		NodeScannedEnabled:         true,
 		NodeVulnerabilitiesEnabled: true,
 	}
 

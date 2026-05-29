@@ -639,6 +639,7 @@ func main() {
 		VulnerabilityRiskEnabled:          cfg.MetricsVulnerabilityRiskEnabled,
 		ImageScanStatusEnabled:            cfg.MetricsImageScanStatusEnabled,
 		NodeScannedEnabled:                cfg.MetricsNodeScannedEnabled && cfg.HostScanningEnabled,
+		NodeScanStatusEnabled:             cfg.MetricsNodeScanStatusEnabled && cfg.HostScanningEnabled,
 		NodeVulnerabilitiesEnabled:        cfg.MetricsNodeVulnerabilitiesEnabled && cfg.HostScanningEnabled,
 		NodeVulnerabilityRiskEnabled:      cfg.MetricsNodeVulnerabilityRiskEnabled && cfg.HostScanningEnabled,
 		NodeVulnerabilityExploitedEnabled: cfg.MetricsNodeVulnerabilityExploitedEnabled && cfg.HostScanningEnabled,

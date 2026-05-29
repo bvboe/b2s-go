@@ -1585,6 +1585,60 @@ func (db *DB) readNodeVulnsFromDB(callback func(v NodeVulnerabilityForMetrics) e
 	return rows.Err()
 }
 
+// NodeScanStatusCount represents the count of nodes by scan status.
+type NodeScanStatusCount struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+// GetNodeScanStatusCounts returns the number of nodes grouped by scan status,
+// zero-filled across every status in the scan_status table (so a status with no
+// nodes still reports 0). Mirrors GetImageScanStatusCounts, but nodes are
+// standalone — there is no running-container gate.
+func (db *DB) GetNodeScanStatusCounts() ([]NodeScanStatusCount, error) {
+	statusRows, err := db.conn.Query(`SELECT status FROM scan_status ORDER BY sort_order`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query scan statuses: %w", err)
+	}
+	var allStatuses []string
+	for statusRows.Next() {
+		var status string
+		if err := statusRows.Scan(&status); err != nil {
+			_ = statusRows.Close()
+			return nil, fmt.Errorf("failed to scan status row: %w", err)
+		}
+		allStatuses = append(allStatuses, status)
+	}
+	if err := statusRows.Close(); err != nil {
+		log.Warn("failed to close status rows", "error", err)
+	}
+
+	rows, err := db.conn.Query(`SELECT status, COUNT(*) FROM nodes GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query node scan status counts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	statusCounts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan status count row: %w", err)
+		}
+		statusCounts[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating node status counts: %w", err)
+	}
+
+	result := make([]NodeScanStatusCount, 0, len(allStatuses))
+	for _, status := range allStatuses {
+		result = append(result, NodeScanStatusCount{Status: status, Count: statusCounts[status]})
+	}
+	return result, nil
+}
+
 // GetScannedNodes retrieves all completed nodes for the bjorn2scan_node_scanned metric
 // Only selects columns needed for metrics labels to minimize overhead
 func (db *DB) GetScannedNodes() ([]nodes.NodeWithStatus, error) {

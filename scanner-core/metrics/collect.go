@@ -18,6 +18,7 @@ var familyMeta = map[string][2]string{
 	"bjorn2scan_image_vulnerability_exploited": {"Bjorn2scan known exploited vulnerabilities (CISA KEV) in container images", "gauge"},
 	"bjorn2scan_image_scan_status":             {"Count of running container images by scan status", "gauge"},
 	"bjorn2scan_node_scanned":                  {"Bjorn2scan scanned node information", "gauge"},
+	"bjorn2scan_node_scan_status":              {"Count of nodes by scan status", "gauge"},
 	"bjorn2scan_node_vulnerability":            {"Bjorn2scan vulnerability information for nodes", "gauge"},
 	"bjorn2scan_node_vulnerability_risk":       {"Bjorn2scan vulnerability risk scores for nodes", "gauge"},
 	"bjorn2scan_node_vulnerability_exploited":  {"Bjorn2scan known exploited vulnerabilities (CISA KEV) on nodes", "gauge"},
@@ -161,6 +162,23 @@ func collectMetrics(
 		}
 		for _, node := range nodeList {
 			if err := record("bjorn2scan_node_scanned", buildNodeBaseLabels(deploymentUUID, deploymentName, node), 1); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// ─── 5b. Node scan status (small, load all at once) ──────────────────────
+	if config.NodeScanStatusEnabled {
+		statusCounts, err := provider.GetNodeScanStatusCounts()
+		if err != nil {
+			return nil, fmt.Errorf("getting node scan status counts: %w", err)
+		}
+		for _, sc := range statusCounts {
+			labels := map[string]string{
+				"deployment_uuid": deploymentUUID,
+				"scan_status":     sc.Status,
+			}
+			if err := record("bjorn2scan_node_scan_status", labels, float64(sc.Count)); err != nil {
 				return nil, err
 			}
 		}

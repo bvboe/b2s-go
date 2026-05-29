@@ -84,6 +84,7 @@ type Config struct {
 
 	// Node metrics toggles (only applicable when host scanning is enabled)
 	MetricsNodeScannedEnabled              bool // Enable bjorn2scan_node_scanned metric
+	MetricsNodeScanStatusEnabled           bool // Enable bjorn2scan_node_scan_status metric
 	MetricsNodeVulnerabilitiesEnabled      bool // Enable bjorn2scan_node_vulnerability metric
 	MetricsNodeVulnerabilityRiskEnabled    bool // Enable bjorn2scan_node_vulnerability_risk metric
 	MetricsNodeVulnerabilityExploitedEnabled bool // Enable bjorn2scan_node_vulnerability_exploited metric
@@ -163,6 +164,7 @@ func defaultConfig() *Config {
 
 		// Node metrics - enabled by default when host scanning is enabled
 		MetricsNodeScannedEnabled:              true,
+		MetricsNodeScanStatusEnabled:           true,
 		MetricsNodeVulnerabilitiesEnabled:      true,
 		MetricsNodeVulnerabilityRiskEnabled:    true,
 		MetricsNodeVulnerabilityExploitedEnabled: true,
@@ -582,6 +584,10 @@ func LoadConfig(path string) (*Config, error) {
 	if nodeScannedEnabledEnv := os.Getenv("METRICS_NODE_SCANNED_ENABLED"); nodeScannedEnabledEnv != "" {
 		val := strings.ToLower(nodeScannedEnabledEnv)
 		cfg.MetricsNodeScannedEnabled = val == "true" || val == "1" || val == "yes"
+	}
+	if nodeScanStatusEnabledEnv := os.Getenv("METRICS_NODE_SCAN_STATUS_ENABLED"); nodeScanStatusEnabledEnv != "" {
+		val := strings.ToLower(nodeScanStatusEnabledEnv)
+		cfg.MetricsNodeScanStatusEnabled = val == "true" || val == "1" || val == "yes"
 	}
 	if nodeVulnerabilitiesEnabledEnv := os.Getenv("METRICS_NODE_VULNERABILITIES_ENABLED"); nodeVulnerabilitiesEnabledEnv != "" {
 		val := strings.ToLower(nodeVulnerabilitiesEnabledEnv)
