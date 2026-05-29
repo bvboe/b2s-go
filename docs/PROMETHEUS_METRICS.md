@@ -404,9 +404,16 @@ sum by (node) (bjorn2scan_node_vulnerability_risk)
 count by (node) (bjorn2scan_node_vulnerability_risk > 7.0)
 ```
 
-## Grafana Dashboard
+## Grafana Dashboards
 
-A comprehensive Grafana dashboard is available at `docs/grafana-dashboard.json`.
+Two dashboards are available:
+
+- `docs/grafana-container-dashboard.json` — container/image vulnerabilities, grouped by namespace, image, and running container.
+- `docs/grafana-node-dashboard.json` — host/node vulnerabilities, grouped by OS and node (uses the `bjorn2scan_node_*` metrics).
+
+Both share a `staleness_window` interval variable: panel queries wrap metrics in `last_over_time(...[$staleness_window])` so deployments that push infrequently (agents push every 15m vs. 5m for Kubernetes) stay visible between pushes.
+
+The container dashboard's features:
 
 ### Dashboard Features
 
@@ -420,7 +427,7 @@ A comprehensive Grafana dashboard is available at `docs/grafana-dashboard.json`.
 ### Import Instructions
 
 1. In Grafana, go to **Dashboards** > **Import**
-2. Upload `grafana-dashboard.json` or paste its contents
+2. Upload `grafana-container-dashboard.json` or paste its contents
 3. Select your Prometheus data source
 4. Click **Import**
 
