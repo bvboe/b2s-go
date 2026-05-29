@@ -34,10 +34,15 @@ func (m *MockDatabaseUpdater) GetCurrentVersion() *vulndb.DatabaseStatus {
 }
 
 type MockDatabase struct {
-	images             []database.ContainerImage
+	images              []database.ContainerImage
 	imagesNeedingRescan []database.ContainerImage
-	instances          map[string]*database.ContainerRow
-	err                error
+	instances           map[string]*database.ContainerRow
+	err                 error
+
+	reapCalled    bool
+	reapMaxAge    time.Duration
+	reapNodeRows  int64
+	reapImageRows int64
 }
 
 func (m *MockDatabase) GetImagesByStatus(status database.Status) ([]database.ContainerImage, error) {
@@ -66,6 +71,15 @@ func (m *MockDatabase) GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]
 		return m.imagesNeedingRescan, nil
 	}
 	return m.images, nil
+}
+
+func (m *MockDatabase) ReapStuckScans(maxAge time.Duration) (int64, int64, error) {
+	m.reapCalled = true
+	m.reapMaxAge = maxAge
+	if m.err != nil {
+		return 0, 0, m.err
+	}
+	return m.reapNodeRows, m.reapImageRows, nil
 }
 
 type MockScanQueue struct {
@@ -118,7 +132,7 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 			"sha256:abc123": {
 				Namespace:        "default",
 				Pod:              "pod1",
-				Name:        "container1",
+				Name:             "container1",
 				Reference:        "nginx:latest",
 				NodeName:         "node1",
 				ContainerRuntime: "docker",
@@ -126,7 +140,7 @@ func TestRescanDatabaseJob_Integration(t *testing.T) {
 			"sha256:def456": {
 				Namespace:        "default",
 				Pod:              "pod2",
-				Name:        "container2",
+				Name:             "container2",
 				Reference:        "redis:7.0",
 				NodeName:         "node2",
 				ContainerRuntime: "containerd",
@@ -611,5 +625,30 @@ func TestRescanDatabaseJob_NodeDatabaseError(t *testing.T) {
 	// Verify: no nodes were enqueued (due to error)
 	if len(mockNodeQueue.enqueuedNodes) != 0 {
 		t.Errorf("Expected 0 nodes enqueued on error, got %d", len(mockNodeQueue.enqueuedNodes))
+	}
+}
+
+// Test: the job reaps stuck scans every cycle with the configured max age
+func TestRescanDatabaseJob_ReapsStuckScans(t *testing.T) {
+	mockDBUpdater := &MockDatabaseUpdater{
+		hasChanged: true,
+		currentVersion: &vulndb.DatabaseStatus{
+			Built:         time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC),
+			SchemaVersion: "v6.1.3",
+			Path:          "/test/path",
+		},
+	}
+	mockDB := &MockDatabase{}
+	job := NewRescanDatabaseJob(mockDBUpdater, mockDB, &MockScanQueue{})
+
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatalf("Job failed: %v", err)
+	}
+
+	if !mockDB.reapCalled {
+		t.Error("expected ReapStuckScans to be called during the job cycle")
+	}
+	if mockDB.reapMaxAge != stuckScanMaxAge {
+		t.Errorf("expected reaper maxAge %v, got %v", stuckScanMaxAge, mockDB.reapMaxAge)
 	}
 }

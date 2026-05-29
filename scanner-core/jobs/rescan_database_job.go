@@ -12,18 +12,25 @@ import (
 	"github.com/bvboe/b2s-go/scanner-core/vulndb"
 )
 
-
 // DatabaseUpdateChecker defines the interface for checking vulnerability database updates
 type DatabaseUpdateChecker interface {
 	CheckForUpdates(ctx context.Context) (bool, error)
 	GetCurrentVersion() *vulndb.DatabaseStatus
 }
 
+// stuckScanMaxAge is how long a node or image may sit in a transient scan state
+// ('generating_sbom', 'scanning_vulnerabilities') before the reaper treats it as
+// orphaned and resets it. It must be safely larger than the real scan timeouts
+// (host SBOM 15m + vuln scan 10m = 25m worst case) so in-flight scans are never
+// reaped prematurely.
+const stuckScanMaxAge = 30 * time.Minute
+
 // DatabaseInterface defines the interface for database operations needed by RescanDatabaseJob
 type DatabaseInterface interface {
 	GetImagesByStatus(status database.Status) ([]database.ContainerImage, error)
 	GetFirstContainerForImage(digest string) (*database.ContainerRow, error)
 	GetImagesNeedingRescan(currentGrypeDBBuilt time.Time) ([]database.ContainerImage, error)
+	ReapStuckScans(maxAge time.Duration) (nodeRows, imageRows int64, err error)
 }
 
 // ReadinessSetter defines the interface for updating database readiness state
@@ -82,6 +89,16 @@ func (j *RescanDatabaseJob) Name() string {
 
 func (j *RescanDatabaseJob) Run(ctx context.Context) error {
 	log.Info("checking for vulnerability database updates")
+
+	// Recover any scans orphaned in a transient state since the last cycle.
+	// ResetInterruptedScans only runs at startup, so a scan wedged while the
+	// server keeps running would otherwise stay stuck until the next restart.
+	// Marking them vuln_scan_failed lets the rescan logic below re-enqueue them.
+	if nodeRows, imageRows, err := j.db.ReapStuckScans(stuckScanMaxAge); err != nil {
+		log.Warn("failed to reap stuck scans", "error", err)
+	} else if nodeRows > 0 || imageRows > 0 {
+		log.Info("reaped stuck scans", "nodes", nodeRows, "images", imageRows)
+	}
 
 	// Check for and download any available updates
 	// This also updates the persistent timestamp tracking

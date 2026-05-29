@@ -373,6 +373,58 @@ func (db *DB) ResetInterruptedScans() error {
 	return nil
 }
 
+// ReapStuckScans recovers nodes and images that have been wedged in a transient
+// scan state ('generating_sbom', 'scanning_vulnerabilities') for longer than
+// maxAge, marking them 'vuln_scan_failed' so the periodic rescan path
+// re-enqueues them.
+//
+// Unlike ResetInterruptedScans — which only runs once at startup and so cannot
+// help a scan orphaned while the server keeps running — this is meant to be
+// called periodically (from the rescan-database job). A scan can be orphaned
+// without ever hitting a terminal status (e.g. a worker that stops making
+// progress, or an unbounded readiness wait), leaving the row stuck until the
+// next restart. The maxAge guard must be safely larger than the real scan
+// timeouts (host SBOM 15m + vuln scan 10m) so legitimately in-flight scans are
+// never reaped; status writes bump updated_at, so a fresh transition resets the
+// clock. 'vuln_scan_failed' is chosen over 'pending' because the rescan filters
+// re-enqueue that state for both images and nodes within the same periodic job.
+func (db *DB) ReapStuckScans(maxAge time.Duration) (nodeRows, imageRows int64, err error) {
+	done := db.beginWrite("reap_stuck_scans")
+	defer done()
+
+	cutoff := time.Now().UTC().Add(-maxAge).Format("2006-01-02 15:04:05")
+	const reapErr = "scan exceeded maximum duration and was reset by the stuck-scan reaper"
+
+	res, err := db.conn.Exec(`
+		UPDATE nodes SET status = 'vuln_scan_failed', status_error = ?
+		WHERE status IN ('generating_sbom', 'scanning_vulnerabilities')
+		  AND updated_at < ?
+	`, reapErr, cutoff)
+	if err != nil {
+		exitOnCorruption(err)
+		return 0, 0, fmt.Errorf("failed to reap stuck node scans: %w", err)
+	}
+	nodeRows, _ = res.RowsAffected()
+
+	res, err = db.conn.Exec(`
+		UPDATE images SET status = 'vuln_scan_failed', status_error = ?
+		WHERE status IN ('generating_sbom', 'scanning_vulnerabilities')
+		  AND updated_at < ?
+	`, reapErr, cutoff)
+	if err != nil {
+		exitOnCorruption(err)
+		return 0, 0, fmt.Errorf("failed to reap stuck image scans: %w", err)
+	}
+	imageRows, _ = res.RowsAffected()
+
+	if nodeRows > 0 || imageRows > 0 {
+		log.Warn("reaped stuck scans to vuln_scan_failed",
+			"nodes", nodeRows, "images", imageRows, "max_age", maxAge)
+		db.notifyWrite()
+	}
+	return nodeRows, imageRows, nil
+}
+
 // Close closes the database connection gracefully
 func Close(db *DB) error {
 	if db == nil || db.conn == nil {
