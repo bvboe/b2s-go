@@ -514,6 +514,21 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "sum by(deployment_uuid) (last_over_time(bjorn2scan_node_scan_status{deployment_uuid=~\"$deployment_uuid\", scan_status!=\"completed\"}[$staleness_window]))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "Failed Scans"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "editorMode": "code",
           "exemplar": false,
           "expr": "sum by(deployment_uuid) (last_over_time(bjorn2scan_node_vulnerability{deployment_uuid=~\"$deployment_uuid\"}[$staleness_window]) > 0)",
