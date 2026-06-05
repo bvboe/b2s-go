@@ -978,5 +978,40 @@
     "built": "2026-05-31T07:39:13Z",
     "path": "vulnerability-db_v6.1.4_2026-05-31T00:53:21Z_1780213153.tar.zst",
     "checksum": "sha256:145176d8cb7a6eacfd1da1f4ca2183f7d28f39cfbd7ecb80b4a4f67acd8159a5"
+  },
+  {
+    "status": "active",
+    "schemaVersion": "v6.1.4",
+    "built": "2026-06-01T08:11:23Z",
+    "path": "vulnerability-db_v6.1.4_2026-06-01T00:56:09Z_1780301483.tar.zst",
+    "checksum": "sha256:864f2bce8f97ac0993cf7013e9740147faa50b7f48ffffc80f43a62cf858b0c6"
+  },
+  {
+    "status": "active",
+    "schemaVersion": "v6.1.4",
+    "built": "2026-06-02T16:27:46Z",
+    "path": "vulnerability-db_v6.1.4_2026-06-02T00:56:23Z_1780417666.tar.zst",
+    "checksum": "sha256:770c1d4a103efd6e7a61f0c5005b29a36beae447797f7142e5e397a76083c705"
+  },
+  {
+    "status": "active",
+    "schemaVersion": "v6.1.4",
+    "built": "2026-06-03T08:04:55Z",
+    "path": "vulnerability-db_v6.1.4_2026-06-02T18:25:27Z_1780473895.tar.zst",
+    "checksum": "sha256:e7ecdc1901dd4e87cb0af5741e19c00214b1c53185f8857c131ae086113329e5"
+  },
+  {
+    "status": "active",
+    "schemaVersion": "v6.1.7",
+    "built": "2026-06-04T07:57:06Z",
+    "path": "vulnerability-db_v6.1.7_2026-06-04T01:04:14Z_1780559826.tar.zst",
+    "checksum": "sha256:ab42230da760bea009bdcd13efb6a61de8aed119938ac7e75cd9c7c14164d223"
+  },
+  {
+    "status": "active",
+    "schemaVersion": "v6.1.7",
+    "built": "2026-06-05T07:49:04Z",
+    "path": "vulnerability-db_v6.1.7_2026-06-05T00:56:38Z_1780645744.tar.zst",
+    "checksum": "sha256:eb6227b4ff42b4bcf58562bf64522c1565506f1478cdd4ed9f0ce48656b7817a"
   }
 ]
