@@ -331,6 +331,9 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 	if queryProvider, ok := provider.(ImageQueryProvider); ok {
 		mux.HandleFunc("/api/images", ImagesHandler(queryProvider))
 		mux.HandleFunc("/api/containers", ContainersHandler(queryProvider))
+		mux.HandleFunc("/api/container-cves", ContainerCVEsHandler(queryProvider))
+		mux.HandleFunc("/api/container-cves/affected", ContainerCVEAffectedHandler(queryProvider))
+		mux.HandleFunc("/api/container-cves/details", ContainerCVEDetailVariantsHandler(queryProvider))
 		if filterProvider, ok := provider.(FilterOptionsProvider); ok {
 			mux.HandleFunc("/api/filter-options", FilterOptionsHandler(filterProvider))
 		}

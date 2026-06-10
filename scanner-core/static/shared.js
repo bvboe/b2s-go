@@ -799,6 +799,7 @@ function renderSidebarNav() {
     if (showContainerScans) {
         addNavItem('Images', 'images.html', true);
         addNavItem('Containers', 'containers.html', true);
+        addNavItem('CVEs', 'container_cves.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');
@@ -831,6 +832,7 @@ function renderTopBarNav() {
     if (showContainerScans) {
         addNavItem('Images', 'images.html', true);
         addNavItem('Containers', 'containers.html', true);
+        addNavItem('CVEs', 'container_cves.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');
