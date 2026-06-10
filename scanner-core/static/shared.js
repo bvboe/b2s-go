@@ -1,12 +1,12 @@
 // Shared JavaScript functionality for bjorn2scan UI
-// This file contains common code used by images.html, pods.html, etc.
+// This file contains common code used by images.html, containers.html, etc.
 
 // Global page configuration - must be set by each page before calling init
 let pageConfig = {
-    apiEndpoint: null,      // e.g., '/api/images' or '/api/pods'
-    dataKey: null,          // e.g., 'images' or 'pods'
-    pageTitle: null,        // e.g., 'Image Summary' or 'Pods'
-    currentPageUrl: null,   // e.g., 'images.html' or 'pods.html'
+    apiEndpoint: null,      // e.g., '/api/images' or '/api/containers'
+    dataKey: null,          // e.g., 'images' or 'containers'
+    pageTitle: null,        // e.g., 'Image Summary' or 'Containers'
+    currentPageUrl: null,   // e.g., 'images.html' or 'containers.html'
     defaultSortBy: null,    // e.g., 'image' or 'namespace'
     columnCount: null,      // Total number of columns in the table
     renderRow: null         // Function to render a table row
@@ -319,7 +319,7 @@ function addCellToRow(row, align, text) {
     return cell;
 }
 
-// ===== Listing-table cell helpers used by images / pods / nodes =====
+// ===== Listing-table cell helpers used by images / containers / nodes =====
 
 // Append a right-aligned numeric cell. Renders 0 as a muted "—".
 // Returns the <td> so callers can attach a className or title.
@@ -784,7 +784,7 @@ function renderSidebarNav() {
         const decoration = isCurrentPage ? '<u>' : '';
         const decorationEnd = isCurrentPage ? '</u>' : '';
 
-        // Add filters to Images and Pods links
+        // Add filters to Images and Containers links
         let fullUrl = url;
         if (includeFilters) {
             fullUrl = basePage + getCurrentFilterQueryString();
@@ -798,7 +798,8 @@ function renderSidebarNav() {
     addNavItem('Summary', 'index.html');
     if (showContainerScans) {
         addNavItem('Images', 'images.html', true);
-        addNavItem('Pods', 'pods.html', true);
+        addNavItem('Containers', 'containers.html', true);
+        addNavItem('CVEs', 'container_cves.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');
@@ -830,7 +831,8 @@ function renderTopBarNav() {
     addNavItem('Summary', 'index.html');
     if (showContainerScans) {
         addNavItem('Images', 'images.html', true);
-        addNavItem('Pods', 'pods.html', true);
+        addNavItem('Containers', 'containers.html', true);
+        addNavItem('CVEs', 'container_cves.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');

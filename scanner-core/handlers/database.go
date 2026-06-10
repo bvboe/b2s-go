@@ -33,29 +33,6 @@ type NodeInfo struct {
 	ContainerRuntime string
 }
 
-// DatabaseContainersHandler creates an HTTP handler for /containers endpoint
-func DatabaseContainersHandler(provider DatabaseProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		containers, err := provider.GetAllContainers()
-		if err != nil {
-			log.Error("error querying containers", "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		// Wrap response in an object with "containers" key
-		response := map[string]interface{}{
-			"containers": containers,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Error("error encoding containers response", "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-		}
-	}
-}
-
 // DatabaseImagesHandler creates an HTTP handler for /containers/images endpoint
 func DatabaseImagesHandler(provider DatabaseProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +293,6 @@ type HandlerOverrides struct {
 // Pass nil for overrides to use all default handlers
 func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, overrides *HandlerOverrides) {
 	// Register legacy endpoints under /api/
-	mux.HandleFunc("/api/containers", DatabaseContainersHandler(provider))
 	mux.HandleFunc("/api/containers/images", ImageDetailsHandler(provider))
 
 	// Register download endpoints under /api/ with optional overrides
@@ -354,7 +330,10 @@ func RegisterDatabaseHandlers(mux *http.ServeMux, provider DatabaseProvider, ove
 	// It requires the provider to implement ImageQueryProvider interface
 	if queryProvider, ok := provider.(ImageQueryProvider); ok {
 		mux.HandleFunc("/api/images", ImagesHandler(queryProvider))
-		mux.HandleFunc("/api/pods", PodsHandler(queryProvider))
+		mux.HandleFunc("/api/containers", ContainersHandler(queryProvider))
+		mux.HandleFunc("/api/container-cves", ContainerCVEsHandler(queryProvider))
+		mux.HandleFunc("/api/container-cves/affected", ContainerCVEAffectedHandler(queryProvider))
+		mux.HandleFunc("/api/container-cves/details", ContainerCVEDetailVariantsHandler(queryProvider))
 		if filterProvider, ok := provider.(FilterOptionsProvider); ok {
 			mux.HandleFunc("/api/filter-options", FilterOptionsHandler(filterProvider))
 		}

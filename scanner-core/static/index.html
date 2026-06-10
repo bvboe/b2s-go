@@ -310,7 +310,7 @@
             paginationId: 'namespacePagination',
             csvLinkId: 'namespaceCSVLink',
             goToPageFn: goToNamespacePage,
-            rowHref: ns => 'pods.html?namespaces=' + encodeURIComponent(ns.namespace),
+            rowHref: ns => 'containers.html?namespaces=' + encodeURIComponent(ns.namespace),
             mapItem: ns => mapAvgFields(ns, 'namespace', 'container_count'),
         });
 
@@ -326,7 +326,7 @@
             paginationId: 'distributionPagination',
             csvLinkId: 'distributionCSVLink',
             goToPageFn: goToDistributionPage,
-            rowHref: dist => 'pods.html?osNames=' + encodeURIComponent(dist.os_name),
+            rowHref: dist => 'containers.html?osNames=' + encodeURIComponent(dist.os_name),
             mapItem: dist => mapAvgFields(dist, 'os_name', 'container_count'),
         });
 

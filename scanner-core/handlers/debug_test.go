@@ -109,7 +109,7 @@ func TestDebugMetricsHandler(t *testing.T) {
 				// Record some requests
 				debugConfig.RecordRequest("/api/images", 50*time.Millisecond)
 				debugConfig.RecordRequest("/api/images", 100*time.Millisecond)
-				debugConfig.RecordRequest("/api/pods", 75*time.Millisecond)
+				debugConfig.RecordRequest("/api/containers", 75*time.Millisecond)
 			},
 			expectedStatus: http.StatusOK,
 			checkResponse: func(t *testing.T, body string) {

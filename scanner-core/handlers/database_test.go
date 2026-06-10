@@ -102,92 +102,6 @@ func (p *combinedTestProvider) GetVulnerabilities(digest string) ([]byte, error)
 	return p.mockDatabaseProvider.GetVulnerabilities(digest)
 }
 
-func TestDatabaseContainersHandler(t *testing.T) {
-	tests := []struct {
-		name           string
-		mockFunc       func() (interface{}, error)
-		expectedStatus int
-		checkResponse  func(t *testing.T, body string)
-	}{
-		{
-			name: "returns instances successfully",
-			mockFunc: func() (interface{}, error) {
-				return []map[string]interface{}{
-					{
-						"namespace": "default",
-						"pod":       "nginx-pod",
-						"container": "nginx",
-						"image_id":  int64(1),
-					},
-					{
-						"namespace": "kube-system",
-						"pod":       "coredns-pod",
-						"container": "coredns",
-						"image_id":  int64(2),
-					},
-				}, nil
-			},
-			expectedStatus: http.StatusOK,
-			checkResponse: func(t *testing.T, body string) {
-				var response map[string]interface{}
-				if err := json.Unmarshal([]byte(body), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-				instances := response["containers"].([]interface{})
-				if len(instances) != 2 {
-					t.Errorf("Expected 2 instances, got %d", len(instances))
-				}
-			},
-		},
-		{
-			name: "handles empty results",
-			mockFunc: func() (interface{}, error) {
-				return []map[string]interface{}{}, nil
-			},
-			expectedStatus: http.StatusOK,
-			checkResponse: func(t *testing.T, body string) {
-				var response map[string]interface{}
-				if err := json.Unmarshal([]byte(body), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-				instances := response["containers"].([]interface{})
-				if len(instances) != 0 {
-					t.Errorf("Expected 0 instances, got %d", len(instances))
-				}
-			},
-		},
-		{
-			name: "handles database error",
-			mockFunc: func() (interface{}, error) {
-				return nil, errors.New("database connection failed")
-			},
-			expectedStatus: http.StatusInternalServerError,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider := &mockDatabaseProvider{
-				getAllInstancesFunc: tt.mockFunc,
-			}
-
-			handler := DatabaseContainersHandler(provider)
-			req := httptest.NewRequest(http.MethodGet, "/api/containers", nil)
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rec.Code)
-			}
-
-			if tt.checkResponse != nil {
-				tt.checkResponse(t, rec.Body.String())
-			}
-		})
-	}
-}
-
 func TestDatabaseImagesHandler(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -688,7 +602,6 @@ func TestRegisterDatabaseHandlers(t *testing.T) {
 			path           string
 			expectedStatus int
 		}{
-			{"/api/containers", http.StatusOK},
 			{"/api/containers/images", http.StatusOK},
 			{"/api/sbom/sha256:test", http.StatusNotFound}, // Will fail to find but handler exists
 		}

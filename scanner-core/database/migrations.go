@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentSchemaVersion = 46
+const currentSchemaVersion = 49
 
 type migration struct {
 	version int
@@ -254,6 +254,11 @@ var migrations = []migration{
 		version: 48,
 		name:    "metric_staleness_key_hash",
 		up:      migrateToV48,
+	},
+	{
+		version: 49,
+		name:    "container_cve_listing_indexes",
+		up:      migrateToV49,
 	},
 }
 
@@ -2854,5 +2859,35 @@ func migrateToV48(conn *sql.DB) error {
 		return fmt.Errorf("failed to recreate metric_staleness with key_hash: %w", err)
 	}
 	log.Info("migration v48: metric_staleness recreated; rows will be repopulated on next collection cycle")
+	return nil
+}
+
+// migrateToV49 adds indexes that support the deployment-wide container CVE
+// listing (handlers.buildContainerCVEsQuery). That query joins
+// image_vulnerabilities -> images -> containers, groups by cve_id + package, and
+// counts distinct affected containers.
+//
+// Both indexes below were chosen by inspecting EXPLAIN QUERY PLAN on a
+// realistically-sized dataset:
+//
+//   - idx_image_vulnerabilities_cve_pkg lets the default (unfiltered) view scan
+//     image_vulnerabilities already ordered by (cve_id, package_name,
+//     package_version), aligning with the GROUP BY.
+//   - idx_containers_ns_image is a covering index for the namespace-filtered
+//     view: the planner drives from containers on namespace and reads image_id
+//     straight out of the index. (The image_id-driven join in the other paths is
+//     already covered by the existing idx_containers_image.)
+func migrateToV49(conn *sql.DB) error {
+	log.Info("migration v49: adding container CVE listing indexes")
+	_, err := conn.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_image_vulnerabilities_cve_pkg
+			ON image_vulnerabilities(cve_id, package_name, package_version);
+		CREATE INDEX IF NOT EXISTS idx_containers_ns_image
+			ON containers(namespace, image_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create container CVE listing indexes: %w", err)
+	}
+	log.Info("migration v49: container CVE listing indexes created")
 	return nil
 }
