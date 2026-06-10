@@ -272,8 +272,8 @@ func buildImagesQuery(search string, namespaces, vulnStatuses, packageTypes, osN
 	return mainQuery, countQuery
 }
 
-// PodsHandler creates an HTTP handler for /api/pods endpoint
-func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
+// ContainersHandler creates an HTTP handler for /api/containers endpoint
+func ContainersHandler(provider ImageQueryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse query parameters
 		params := r.URL.Query()
@@ -315,7 +315,7 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		}
 
 		// Build query
-		query, countQuery := buildPodsQuery(search, namespaces, vulnStatuses, packageTypes, osNames, sortBy, sortOrder, pageSize, offset)
+		query, countQuery := buildContainersQuery(search, namespaces, vulnStatuses, packageTypes, osNames, sortBy, sortOrder, pageSize, offset)
 
 		// Execute count query for pagination
 		countResult, err := provider.ExecuteReadOnlyQuery(countQuery)
@@ -335,20 +335,20 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		// Execute main query
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
-			log.Error("error executing pods query", "error", err)
+			log.Error("error executing containers query", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
 		// Handle CSV export
 		if format == "csv" {
-			exportQueryResultAsCSV(w, result, "pods.csv")
+			exportQueryResultAsCSV(w, result, "containers.csv")
 			return
 		}
 
 		// Rows are already maps, just use them directly
 		response := map[string]interface{}{
-			"pods":       result.Rows,
+			"containers": result.Rows,
 			"page":       page,
 			"pageSize":   pageSize,
 			"totalCount": totalCount,
@@ -362,8 +362,8 @@ func PodsHandler(provider ImageQueryProvider) http.HandlerFunc {
 	}
 }
 
-// buildPodsQuery constructs the SQL query for containers with filters
-func buildPodsQuery(search string, namespaces, vulnStatuses, packageTypes, osNames []string, sortBy, sortOrder string, limit, offset int) (string, string) {
+// buildContainersQuery constructs the SQL query for containers with filters
+func buildContainersQuery(search string, namespaces, vulnStatuses, packageTypes, osNames []string, sortBy, sortOrder string, limit, offset int) (string, string) {
 	// Base query - individual containers
 	baseQuery := `
   FROM containers instances

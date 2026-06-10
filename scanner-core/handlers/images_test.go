@@ -285,7 +285,7 @@ func TestImagesHandler(t *testing.T) {
 	}
 }
 
-func TestPodsHandler(t *testing.T) {
+func TestContainersHandler(t *testing.T) {
 	tests := []struct {
 		name           string
 		queryParams    string
@@ -350,8 +350,8 @@ func TestPodsHandler(t *testing.T) {
 				},
 			}
 
-			handler := PodsHandler(provider)
-			req := httptest.NewRequest(http.MethodGet, "/api/pods?"+tt.queryParams, nil)
+			handler := ContainersHandler(provider)
+			req := httptest.NewRequest(http.MethodGet, "/api/containers?"+tt.queryParams, nil)
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -1081,7 +1081,7 @@ func TestBuildImagesQuery(t *testing.T) {
 	}
 }
 
-func TestBuildPodsQuery(t *testing.T) {
+func TestBuildContainersQuery(t *testing.T) {
 	tests := []struct {
 		name            string
 		search          string
@@ -1101,7 +1101,7 @@ func TestBuildPodsQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mainQuery, _ := buildPodsQuery(
+			mainQuery, _ := buildContainersQuery(
 				tt.search,
 				tt.namespaces,
 				nil,
@@ -1141,19 +1141,19 @@ func TestRiskAndExploitCalculation(t *testing.T) {
 		}
 	})
 
-	t.Run("pods query multiplies risk by count", func(t *testing.T) {
-		mainQuery, _ := buildPodsQuery(
+	t.Run("containers query multiplies risk by count", func(t *testing.T) {
+		mainQuery, _ := buildContainersQuery(
 			"", nil, nil, nil, nil, "", "ASC", 50, 0,
 		)
 
 		// Verify risk calculation uses count multiplier
 		if !strings.Contains(mainQuery, "SUM(risk * count) as total_risk") {
-			t.Error("Expected pods query to calculate total_risk as SUM(risk * count)")
+			t.Error("Expected containers query to calculate total_risk as SUM(risk * count)")
 		}
 
 		// Verify exploit calculation uses count multiplier
 		if !strings.Contains(mainQuery, "SUM(known_exploited * count) as exploit_count") {
-			t.Error("Expected pods query to calculate exploit_count as SUM(known_exploited * count)")
+			t.Error("Expected containers query to calculate exploit_count as SUM(known_exploited * count)")
 		}
 	})
 }

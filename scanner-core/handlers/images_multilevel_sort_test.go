@@ -76,8 +76,8 @@ func TestImagesMultiLevelSorting(t *testing.T) {
 	}
 }
 
-// TestPodsMultiLevelSorting verifies that pods table uses multi-level sorting without duplicates
-func TestPodsMultiLevelSorting(t *testing.T) {
+// TestContainersMultiLevelSorting verifies that containers table uses multi-level sorting without duplicates
+func TestContainersMultiLevelSorting(t *testing.T) {
 	tests := []struct {
 		name             string
 		sortBy           string
@@ -123,7 +123,7 @@ func TestPodsMultiLevelSorting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Build query
-			query, _ := buildPodsQuery("", nil, nil, nil, nil, tt.sortBy, tt.sortOrder, 50, 0)
+			query, _ := buildContainersQuery("", nil, nil, nil, nil, tt.sortBy, tt.sortOrder, 50, 0)
 
 			// Check expected ORDER BY clause
 			if !strings.Contains(query, tt.expectedOrderBy) {
