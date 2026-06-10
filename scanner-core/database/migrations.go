@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentSchemaVersion = 49
+const currentSchemaVersion = 50
 
 type migration struct {
 	version int
@@ -259,6 +259,11 @@ var migrations = []migration{
 		version: 49,
 		name:    "container_cve_listing_indexes",
 		up:      migrateToV49,
+	},
+	{
+		version: 50,
+		name:    "node_cve_listing_indexes",
+		up:      migrateToV50,
 	},
 }
 
@@ -2889,5 +2894,33 @@ func migrateToV49(conn *sql.DB) error {
 		return fmt.Errorf("failed to create container CVE listing indexes: %w", err)
 	}
 	log.Info("migration v49: container CVE listing indexes created")
+	return nil
+}
+
+// migrateToV50 adds the index backing the node CVE detail lookups.
+//
+// idx_node_vulnerabilities_cve_pkg (cve_id, package_name, package_version) gives
+// the /api/node-cves/affected and /details endpoints a tight three-column
+// equality lookup (verified via EXPLAIN QUERY PLAN: "SEARCH v USING INDEX
+// idx_node_vulnerabilities_cve_pkg (cve_id=? AND package_name=? AND
+// package_version=?)"), which runs on every detail-modal open.
+//
+// Notes on what is intentionally NOT added:
+//   - The main listing query (handlers.buildNodeCVEsQuery) drives from the small
+//     nodes table and reaches vulns via the existing idx_node_vulnerabilities_node,
+//     then uses a temp B-tree for the GROUP BY — it does not benefit from a new
+//     index, so none is added for it.
+//   - No index for the os_release filter: nodes has one row per cluster node, so
+//     the planner joins/filters it without one.
+func migrateToV50(conn *sql.DB) error {
+	log.Info("migration v50: adding node CVE listing indexes")
+	_, err := conn.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_node_vulnerabilities_cve_pkg
+			ON node_vulnerabilities(cve_id, package_name, package_version);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create node CVE listing indexes: %w", err)
+	}
+	log.Info("migration v50: node CVE listing indexes created")
 	return nil
 }

@@ -799,10 +799,11 @@ function renderSidebarNav() {
     if (showContainerScans) {
         addNavItem('Images', 'images.html', true);
         addNavItem('Containers', 'containers.html', true);
-        addNavItem('CVEs', 'container_cves.html', true);
+        addNavItem('Container CVEs', 'container_cves.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');
+        addNavItem('Node CVEs', 'node_cves.html', true);
     }
 }
 
@@ -832,10 +833,11 @@ function renderTopBarNav() {
     if (showContainerScans) {
         addNavItem('Images', 'images.html', true);
         addNavItem('Containers', 'containers.html', true);
-        addNavItem('CVEs', 'container_cves.html', true);
+        addNavItem('Container CVEs', 'container_cves.html', true);
     }
     if (showNodeScans) {
         addNavItem('Nodes', 'nodes.html');
+        addNavItem('Node CVEs', 'node_cves.html', true);
     }
 }
 

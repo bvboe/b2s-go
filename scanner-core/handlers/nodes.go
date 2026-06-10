@@ -21,6 +21,9 @@ func RegisterNodeHandlers(mux *http.ServeMux, db *database.DB) {
 	mux.HandleFunc("/api/node-filter-options", NodeFilterOptionsHandler(db))
 	mux.HandleFunc("/api/node-vulnerabilities/", NodeVulnerabilityDetailsHandler(db))
 	mux.HandleFunc("/api/node-packages/", NodePackageDetailsHandler(db))
+	mux.HandleFunc("/api/node-cves", NodeCVEsHandler(db))
+	mux.HandleFunc("/api/node-cves/affected", NodeCVEAffectedHandler(db))
+	mux.HandleFunc("/api/node-cves/details", NodeCVEDetailVariantsHandler(db))
 }
 
 // ListNodesHandler returns a handler that lists all nodes with their scan status
