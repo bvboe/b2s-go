@@ -760,6 +760,11 @@ function getCurrentFilterQueryString() {
     const osNames = getSelectedValues('osNameFilter');
     if (osNames.length) params.append('osNames', osNames.join(','));
 
+    // Severity exists only on the CVE pages (no severityFilter elsewhere → []).
+    // The deployment-metrics / node-metrics summaries now honor it.
+    const severities = getSelectedValues('severityFilter');
+    if (severities.length) params.append('severity', severities.join(','));
+
     const queryString = params.toString();
     return queryString ? '?' + queryString : '';
 }

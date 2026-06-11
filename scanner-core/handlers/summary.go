@@ -29,8 +29,23 @@ import (
 //
 // When all filter slices are empty the generated SQL is equivalent to the
 // original unfiltered query.
-func buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames []string) string {
-	vulnFilter := buildVulnerabilityFilter(vulnStatuses, packageTypes)
+func buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames, severities []string) string {
+	// vuln_agg WHERE: fix_status, package_type, and severity. Severity is the
+	// CVE pages' filter; the summary must reflect it like the other vuln filters.
+	var vulnConds []string
+	if c := buildINClause("fix_status", vulnStatuses); c != "" {
+		vulnConds = append(vulnConds, c)
+	}
+	if c := buildINClause("package_type", packageTypes); c != "" {
+		vulnConds = append(vulnConds, c)
+	}
+	if c := buildINClause("severity", severities); c != "" {
+		vulnConds = append(vulnConds, c)
+	}
+	vulnFilter := ""
+	if len(vulnConds) > 0 {
+		vulnFilter = "WHERE " + strings.Join(vulnConds, " AND ")
+	}
 
 	nsFilter := ""
 	if c := buildINClause("namespace", namespaces); c != "" {
@@ -53,6 +68,9 @@ func buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames
 		uniqueCVEsConds = append(uniqueCVEsConds, c)
 	}
 	if c := buildINClause("package_type", packageTypes); c != "" {
+		uniqueCVEsConds = append(uniqueCVEsConds, c)
+	}
+	if c := buildINClause("severity", severities); c != "" {
 		uniqueCVEsConds = append(uniqueCVEsConds, c)
 	}
 	uniqueCVEsConds = append(uniqueCVEsConds,
@@ -110,8 +128,9 @@ func DeploymentMetricsHandler(provider ImageQueryProvider) http.HandlerFunc {
 		vulnStatuses := parseMultiSelect(params.Get("vulnStatuses"))
 		packageTypes := parseMultiSelect(params.Get("packageTypes"))
 		osNames := parseMultiSelect(params.Get("osNames"))
+		severities := parseMultiSelect(params.Get("severity"))
 
-		query := buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames)
+		query := buildDeploymentMetricsQuery(namespaces, vulnStatuses, packageTypes, osNames, severities)
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
 			log.Error("error executing deployment metrics query", "error", err)
@@ -160,7 +179,7 @@ func DeploymentMetricsHandler(provider ImageQueryProvider) http.HandlerFunc {
 //
 // When all filter slices are empty the generated SQL is equivalent to the
 // original unfiltered query.
-func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string {
+func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes, severities []string) string {
 	// completed CTE: filter by os_release
 	osFilter := ""
 	if c := buildINClause("os_release", osNames); c != "" {
@@ -176,6 +195,9 @@ func buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes []string) string 
 	pkgJoin := ""
 	if c := buildINClause("np.type", packageTypes); c != "" {
 		pkgJoin = "\n    JOIN node_packages np ON nv.package_id = np.id"
+		nvConds = append(nvConds, c)
+	}
+	if c := buildINClause("nv.severity", severities); c != "" {
 		nvConds = append(nvConds, c)
 	}
 	nvExtraWhere := ""
@@ -217,8 +239,9 @@ func NodeMetricsSummaryHandler(provider ImageQueryProvider) http.HandlerFunc {
 		osNames := parseMultiSelect(params.Get("osNames"))
 		vulnStatuses := parseMultiSelect(params.Get("vulnStatuses"))
 		packageTypes := parseMultiSelect(params.Get("packageTypes"))
+		severities := parseMultiSelect(params.Get("severity"))
 
-		query := buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes)
+		query := buildNodeMetricsQuery(osNames, vulnStatuses, packageTypes, severities)
 		result, err := provider.ExecuteReadOnlyQuery(query)
 		if err != nil {
 			log.Error("error executing node metrics query", "error", err)
