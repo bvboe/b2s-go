@@ -53,7 +53,7 @@ Project Context and Scope:
 * This is Bjørn2Scan v2 - a continuation and evolution of the original project.
 * Development will start in a separate GitHub repository, with the goal of eventually moving it over to the main
   Bjørn2Scan repository and retiring the old code in a separate branch.
-* The project will use the same open source license as v1.
+* The project is released under the Apache License 2.0 (same as v1) — see [LICENSE](LICENSE).
 * Target audience is broad (developers, DevOps engineers, security teams), but the primary users are expected to
   be security professionals.
 * Success criteria:

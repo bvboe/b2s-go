@@ -107,4 +107,4 @@ Architecture, module layout, and contributor setup are in [DEVELOPMENT.md](DEVEL
 
 ## License
 
-Same open-source license as Bjørn2Scan v1.
+Bjørn2Scan is released under the [Apache License 2.0](LICENSE).
