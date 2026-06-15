@@ -9,7 +9,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
-	gopkg.in/ini.v1 v1.67.2
+	gopkg.in/ini.v1 v1.67.3
 	modernc.org/sqlite v1.51.0
 )
 
