@@ -1,6 +1,6 @@
 # Scheduled Jobs Configuration
 
-Bjorn2Scan includes scheduled jobs that run periodically to maintain the system. This document explains how to configure these jobs for both Kubernetes (Helm) and agent deployments.
+Bjørn2Scan includes scheduled jobs that run periodically to maintain the system. This document explains how to configure these jobs for both Kubernetes (Helm) and agent deployments.
 
 ## Available Jobs
 

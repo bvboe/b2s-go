@@ -1,6 +1,6 @@
 # Debug Mode Documentation
 
-Bjorn2Scan includes a debug mode that provides SQL query capabilities, performance metrics, and verbose logging for development and troubleshooting.
+Bjørn2Scan includes a debug mode that provides SQL query capabilities, performance metrics, and verbose logging for development and troubleshooting.
 
 **⚠️ WARNING: Debug mode should ONLY be enabled in development/testing environments. Do NOT enable in production.**
 
@@ -43,7 +43,7 @@ kubectl set env deployment/bjorn2scan-scan-server DEBUG_ENABLED=true
 Create `/etc/bjorn2scan/agent.conf`:
 
 ```ini
-# Bjorn2Scan Agent Configuration
+# Bjørn2Scan Agent Configuration
 port=9999
 db_path=/var/lib/bjorn2scan/containers.db
 debug_enabled=true

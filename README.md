@@ -1,4 +1,4 @@
-# bjorn2scan v2
+# Bjørn2Scan v2
 
 Kubernetes-native vulnerability scanner. It continuously scans the images and hosts running in your cluster with [Grype](https://github.com/anchore/grype) and [Syft](https://github.com/anchore/syft), then surfaces the results in a built-in web dashboard and as Prometheus / OpenTelemetry metrics.
 
@@ -39,7 +39,7 @@ This installs a systemd service that scans the host and reports results (`curl h
 
 ## Metrics & dashboards
 
-bjorn2scan exposes vulnerability metrics for Prometheus and can export them over OpenTelemetry — point Grafana at them for trends and multi-cluster views. Ready-made Grafana dashboards live in [`docs/`](docs/); details in [docs/PROMETHEUS_METRICS.md](docs/PROMETHEUS_METRICS.md).
+Bjørn2Scan exposes vulnerability metrics for Prometheus and can export them over OpenTelemetry — point Grafana at them for trends and multi-cluster views. Ready-made Grafana dashboards live in [`docs/`](docs/); details in [docs/PROMETHEUS_METRICS.md](docs/PROMETHEUS_METRICS.md).
 
 ## Auto-update
 
@@ -104,4 +104,4 @@ Architecture, module layout, and contributor setup are in [DEVELOPMENT.md](DEVEL
 
 ## License
 
-Same open-source license as bjorn2scan v1.
+Same open-source license as Bjørn2Scan v1.

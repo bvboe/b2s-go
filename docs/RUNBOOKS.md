@@ -1,6 +1,6 @@
-# Bjorn2Scan Auto-Update Operational Runbooks
+# Bjørn2Scan Auto-Update Operational Runbooks
 
-This document provides step-by-step operational procedures for managing the Bjorn2Scan auto-update feature in production environments.
+This document provides step-by-step operational procedures for managing the Bjørn2Scan auto-update feature in production environments.
 
 ## Table of Contents
 
@@ -580,7 +580,7 @@ echo "Maintenance window completed at $(date)" | tee -a maintenance.log
 #!/bin/bash
 # check-k8s-update-status.sh
 
-echo "=== Bjorn2Scan Update Status ==="
+echo "=== Bjørn2Scan Update Status ==="
 echo "Date: $(date)"
 echo ""
 
@@ -632,7 +632,7 @@ chmod +x check-k8s-update-status.sh
 #!/bin/bash
 # check-agent-update-status.sh
 
-echo "=== Bjorn2Scan Agent Update Status ==="
+echo "=== Bjørn2Scan Agent Update Status ==="
 echo "Date: $(date)"
 echo ""
 

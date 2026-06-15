@@ -1,5 +1,5 @@
 Goals of the project:
-We're making a reimplementation of https://github.com/bvboe/bjorn2scan/. Bjorn2Scan served as a great proof of concept
+We're making a reimplementation of https://github.com/bvboe/bjorn2scan/. Bjørn2Scan served as a great proof of concept
 that proved out the following concepts:
 * It's possible to scan containers on the host they're running wihout downloading them from the source repository
 * It's possible to track what workloads are running on the Kubernetes cluster and keep the scan data up to date
@@ -50,9 +50,9 @@ to make sure it's working according to our requirements. This among others means
   if it introduces new vulnerabilities.
 
 Project Context and Scope:
-* This is bjorn2scan v2 - a continuation and evolution of the original project.
+* This is Bjørn2Scan v2 - a continuation and evolution of the original project.
 * Development will start in a separate GitHub repository, with the goal of eventually moving it over to the main
-  bjorn2scan repository and retiring the old code in a separate branch.
+  Bjørn2Scan repository and retiring the old code in a separate branch.
 * The project will use the same open source license as v1.
 * Target audience is broad (developers, DevOps engineers, security teams), but the primary users are expected to
   be security professionals.
@@ -117,7 +117,7 @@ The project consists of six Go modules — four deployable components and two sh
 - Package: `github.com/bvboe/b2s-go/sbom-generator-shared`
 
 ### 6. k8s-update-controller (Kubernetes deployment)
-- In-cluster controller that auto-updates bjorn2scan components
+- In-cluster controller that auto-updates Bjørn2Scan components
 - Watches for new releases and applies updated Helm charts
 - Verifies cosign signatures before applying (see `docs/AUTO_UPDATE.md`)
 - No internal dependencies

@@ -27,7 +27,7 @@ This guide explains how to configure and use the automatic update feature for bo
 
 ## Overview
 
-Bjorn2Scan supports automatic updates for both Kubernetes deployments and standalone agents:
+Bjørn2Scan supports automatic updates for both Kubernetes deployments and standalone agents:
 
 - **Kubernetes**: In-cluster CronJob that checks GHCR for new Helm chart versions and performs automatic upgrades
 - **Agent**: Background service integrated into the agent binary that checks GitHub Releases and performs self-updates
@@ -925,7 +925,7 @@ Example Prometheus alert:
   expr: kube_job_status_failed{job_name=~"bjorn2scan-update-controller.*"} > 0
   for: 5m
   annotations:
-    summary: "Bjorn2Scan auto-update failed"
+    summary: "Bjørn2Scan auto-update failed"
     description: "Update job {{ $labels.job_name }} failed"
 ```
 
