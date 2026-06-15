@@ -1,5 +1,9 @@
 # Scanner-Core Design
 
+> **⚠️ Work in progress.** This is a living redesign document, not a definitive
+> spec. Parts may be aspirational or lag behind the current code — verify against
+> the source before relying on details here.
+
 This document describes how scanner-core works, the decisions behind its design,
 and the constraints that must be respected when making changes.
 

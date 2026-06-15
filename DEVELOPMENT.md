@@ -78,7 +78,7 @@ A few important notes wrt the relationship between human and AI.
 
 ## Architecture Overview
 
-The project consists of four main components:
+The project consists of six Go modules — four deployable components and two shared libraries:
 
 ### 1. scanner-core (Go library)
 - Core scanning logic shared between all deployments
@@ -99,7 +99,7 @@ The project consists of four main components:
 ### 3. pod-scanner (Kubernetes DaemonSet)
 - Deployed as a DaemonSet (runs on every node)
 - Retrieves SBOMs from pods running on each node
-- Future: Will also scan nodes themselves
+- Scans the node host filesystem (mounted at `/host`) when node scanning is enabled
 - Works in conjunction with k8s-scan-server
 - Package: `github.com/bvboe/b2s-go/pod-scanner`
 
@@ -109,6 +109,19 @@ The project consists of four main components:
 - Uses scanner-core for scanning logic
 - Can be deployed on non-Kubernetes environments
 - Package: `github.com/bvboe/b2s-go/bjorn2scan-agent`
+
+### 5. sbom-generator-shared (Go library)
+- Shared SBOM-generation library (Syft wrapper)
+- Used by pod-scanner and bjorn2scan-agent
+- No internal dependencies
+- Package: `github.com/bvboe/b2s-go/sbom-generator-shared`
+
+### 6. k8s-update-controller (Kubernetes deployment)
+- In-cluster controller that auto-updates bjorn2scan components
+- Watches for new releases and applies updated Helm charts
+- Verifies cosign signatures before applying (see `docs/AUTO_UPDATE.md`)
+- No internal dependencies
+- Package: `github.com/bvboe/b2s-go/k8s-update-controller`
 
 ## Repository Structure
 
@@ -130,6 +143,10 @@ b2s-go/
 ├── bjorn2scan-agent/     # Standalone agent
 │   ├── go.mod           # Go module definition
 │   └── ...
+├── sbom-generator-shared/ # Shared SBOM generation library
+│   └── go.mod           # Go module definition
+├── k8s-update-controller/ # In-cluster auto-update controller
+│   └── go.mod           # Go module definition
 ├── helm/                 # Helm charts for deployment
 │   └── bjorn2scan/
 ├── .github/workflows/    # GitHub Actions CI/CD
