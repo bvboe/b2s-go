@@ -278,7 +278,7 @@ podScanner:
 # Update Controller (CronJob)
 # Automatically checks for and applies Helm chart updates
 updateController:
-  enabled: true  # Set to true to enable automatic updates
+  enabled: true  # Auto-update is enabled by default; set to false to disable
 
   image:
     repository: ghcr.io/bvboe/b2s-go/k8s-update-controller

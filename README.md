@@ -43,15 +43,17 @@ Bjørn2Scan exposes vulnerability metrics for Prometheus and can export them ove
 
 ## Auto-update
 
-Keep deployments current automatically (cosign-verified, with health-checked rollback):
+Auto-update is **enabled by default** — the in-cluster update controller and the host agent both keep themselves current, cosign-verified and with health-checked rollback.
+
+To disable it in Kubernetes:
 
 ```bash
 helm upgrade --install bjorn2scan oci://ghcr.io/bvboe/b2s-go/bjorn2scan \
   --namespace bjorn2scan --create-namespace \
-  --set updateController.enabled=true
+  --set updateController.enabled=false
 ```
 
-The agent self-updates too (`auto_update_enabled=true` in `agent.conf`). Full configuration, version policies, and operational runbooks: [docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md) and [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
+For the host agent, set `auto_update_enabled=false` in `agent.conf`. Configuration, version policies, and operational runbooks: [docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md) and [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
 
 ## Configuration
 

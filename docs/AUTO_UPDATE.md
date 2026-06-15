@@ -46,13 +46,13 @@ Both support:
 
 The Kubernetes update controller runs as a **CronJob** that periodically checks for new Helm chart versions and performs upgrades automatically.
 
-### Enabling Auto-Update
+### Configuring Auto-Update
 
-Enable auto-update in your Helm values:
+Auto-update is **enabled by default** (`updateController.enabled: true`). Tune the schedule and version policies — or turn it off — via your Helm values:
 
 ```yaml
 updateController:
-  enabled: true
+  enabled: true          # default; set to false to disable
   schedule: "0 2 * * *"  # Daily at 2am UTC
 
   config:
@@ -61,14 +61,22 @@ updateController:
     pinnedVersion: ""  # Empty = auto-update
 ```
 
-Install or upgrade with auto-update enabled:
+Apply with `helm upgrade --install` (auto-update is already on; this sets the schedule):
 
 ```bash
 helm upgrade --install bjorn2scan oci://ghcr.io/bvboe/b2s-go/bjorn2scan \
   --namespace bjorn2scan \
   --create-namespace \
-  --set updateController.enabled=true \
   --set updateController.schedule="0 2 * * *"
+```
+
+To disable auto-update entirely:
+
+```bash
+helm upgrade --install bjorn2scan oci://ghcr.io/bvboe/b2s-go/bjorn2scan \
+  --namespace bjorn2scan \
+  --create-namespace \
+  --set updateController.enabled=false
 ```
 
 ### Configuration Options
@@ -237,13 +245,13 @@ Create or edit `/etc/bjorn2scan/agent.conf` or `./agent.conf`:
 # AUTO-UPDATE CONFIGURATION
 # ============================================================================
 
-# Enable automatic updates (default: false)
+# Enable automatic updates (default: true)
 # When enabled, agent will periodically check for new versions and auto-update
 auto_update_enabled=true
 
-# Update check interval (default: 6h)
-# Format: Go duration string (e.g., "6h", "24h", "30m")
-auto_update_check_interval=6h
+# Update check interval (default: 1h)
+# Format: Go duration string (e.g., "1h", "6h", "24h")
+auto_update_check_interval=1h
 
 # Allow automatic minor version updates (default: true)
 # Example: 0.1.x → 0.2.x
@@ -270,9 +278,9 @@ auto_update_max_version=
 # Format: owner/repo
 update_github_repo=bvboe/b2s-go
 
-# Verify signatures before installing (default: false)
-# TODO: Enable when cosign verification is implemented
-update_verify_signatures=false
+# Verify signatures before installing (default: true)
+# Verifies the cosign/Sigstore bundle for each downloaded release before installing
+update_verify_signatures=true
 
 # Enable automatic rollback on failure (default: true)
 # If health check fails after update, automatically rollback to previous version
