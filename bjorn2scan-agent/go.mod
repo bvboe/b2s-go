@@ -7,7 +7,7 @@ require (
 	github.com/anchore/syft v1.45.1
 	github.com/bvboe/b2s-go/sbom-generator-shared v0.0.0-20260318203456-d47caeb6547a
 	github.com/bvboe/b2s-go/scanner-core v0.0.0-20251229133410-246b755cc828
-	github.com/sigstore/sigstore-go v1.2.0
+	github.com/sigstore/sigstore-go v1.2.1
 )
 
 replace github.com/bvboe/b2s-go/sbom-generator-shared => ../sbom-generator-shared
