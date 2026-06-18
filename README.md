@@ -1,3 +1,10 @@
+> [!IMPORTANT]
+> **This repository is archived.** Bjørn2Scan v2 now lives at
+> **[github.com/bvboe/bjorn2scan](https://github.com/bvboe/bjorn2scan)**.
+> `b2s-go` was the original development home of the Go rewrite and is kept
+> read-only for history. All releases, container images, and the Helm chart are
+> published from the `bjorn2scan` repository.
+
 # Bjørn2Scan v2
 <img src="https://github.com/user-attachments/assets/3ec4d350-1cf6-4f2c-a4c6-f19251d70267" width="400" alt="bjorn2scan">
 
